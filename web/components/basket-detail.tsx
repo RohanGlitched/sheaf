@@ -24,6 +24,7 @@ import {
 import { symbolForWriteMint } from "@/lib/mirror";
 import { PRESTOCK_SYMBOLS, BY_SYMBOL_PRESTOCKS } from "@/lib/prestocks";
 import { BasketLaunch } from "./launch-market";
+import { BasketPredict } from "./basket-predict";
 import { ConnectButton } from "./connect-button";
 import { explorerAddress, explorerTx, WRITE_RPC } from "@/lib/config";
 import { slotColor } from "@/lib/palette";
@@ -283,6 +284,10 @@ function Loaded({
       )}
 
       <BasketLaunch basket={basket} navUsd={valuation.nav} />
+
+      <section className="mt-20 border-t border-line pt-16">
+        <BasketPredict basket={basket.address} name={basket.name} symbol={basket.symbol} creator={basket.creator} />
+      </section>
 
       {/* What it should hold, beside what it does hold. `min-w-0` on the tracks,
           because a grid item defaults to min-content and the tables inside carry a
