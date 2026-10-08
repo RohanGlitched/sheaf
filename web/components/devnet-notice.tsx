@@ -83,7 +83,7 @@ export function DevnetNotice() {
             type="button"
             onClick={fund}
             disabled={busy}
-            className="border border-bind bg-bind px-4 py-2 text-xs text-page transition-colors hover:bg-bind-deep disabled:opacity-60"
+            className="bg-bind px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-60 rounded-[var(--radius-control)]"
           >
             {busy ? "Sending…" : "Get free test SOL"}
           </button>

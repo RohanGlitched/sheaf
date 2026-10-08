@@ -10,7 +10,7 @@ export function MosaicSkeleton({ height, label }: { height: number; label: strin
       role="status"
       aria-label={label}
       style={{ height }}
-      className="grid grid-cols-[2fr_1.3fr_1fr] grid-rows-[1.4fr_1fr] gap-1 border border-line bg-surface p-1"
+      className="grid grid-cols-[2fr_1.3fr_1fr] grid-rows-[1.4fr_1fr] gap-1 border border-line bg-surface p-1 rounded-[var(--radius-panel)]"
     >
       <Bar className="row-span-2 h-full" />
       <Bar className="h-full" />

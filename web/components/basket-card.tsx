@@ -79,7 +79,7 @@ export function BasketCard({ basket, launched = false }: { basket: Basket; launc
         <BasketMosaic tiles={tiles} height={132} />
       </div>
 
-      <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4 text-xs">
+      <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4 text-xs rounded-[var(--radius-control)]">
         <div>
           <dt className="text-ink-3">Past year</dt>
           <dd className="tnum mt-0.5 text-ink-2">

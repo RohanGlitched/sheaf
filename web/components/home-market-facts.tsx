@@ -8,7 +8,7 @@ import { money, signedPercent } from "@/lib/format";
  * Two prices for one company. Every xStock has the price its token trades at on
  * Solana and the price of the listed share behind it. The gap is the premium, and
  * it is the thing a basket of tokens cannot pretend away, so it is laid out here
- * as stones: one per ticker, coloured by how far the token sits from the share.
+ * as stones: one per ticker, colored by how far the token sits from the share.
  */
 export function Premiums() {
   const { snapshot } = useMarket();
@@ -40,14 +40,14 @@ export function Premiums() {
       <p className="mt-4 text-sm leading-relaxed text-ink-2">
         <span className="text-ink">{widest.base}</span> is the widest gap right now, {signedPercent(widest.premiumBps! / 100)} against a share at{" "}
         {money(widest.sharePrice)}; <span className="text-ink">{tightest.base}</span> the tightest, at {signedPercent(tightest.premiumBps! / 100)}.
-        Read from Solana mainnet and the listing&rsquo;s last print; the colour runs from a discount in rust to a premium in teal.
+        Read from Solana mainnet and the listing&rsquo;s last print; the color runs from a discount in rust to a premium in teal.
       </p>
     </div>
   );
 }
 
 /**
- * A dividend here is a number going up. A tokenised equity pays by raising the
+ * A dividend here is a number going up. A tokenized equity pays by raising the
  * mint's scaled-amount multiplier, not by sending anything, so a holder's balance
  * reads higher while the raw units never move. Sheaf stores recipes in raw units
  * for exactly this reason.

@@ -13,7 +13,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ add
     {
       name: launchName(basket.name),
       symbol: launchSymbol(basket.symbol),
-      description: `Launch token for ${basket.name} (${basket.symbol}), a Sheaf basket of ${basket.components.length} tokenised equities. A separate token on a Meteora bonding curve, not a redemption right into the basket.`,
+      description: `Launch token for ${basket.name} (${basket.symbol}), a Sheaf basket of ${basket.components.length} tokenized equities. A separate token on a Meteora bonding curve, not a redemption right into the basket.`,
       image: `${page}/opengraph-image`,
       external_url: page,
     },

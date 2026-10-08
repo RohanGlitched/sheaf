@@ -74,7 +74,7 @@ export function BasketDetail({ address, initial }: { address: string; initial: B
         </p>
         <Link
           href="/explore"
-          className="mt-8 inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+          className="mt-8 inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
         >
           See the baskets that do exist
         </Link>
@@ -455,14 +455,14 @@ function Backing({
       {!onChain ? (
         <p className="mt-7 text-sm text-ink-3">Reading the vault…</p>
       ) : onChain.supply === 0n ? (
-        <p className="mt-7 border border-dashed border-line-strong/60 px-6 py-8 text-sm leading-relaxed text-ink-2">
+        <p className="mt-7 border border-dashed border-line-strong/60 px-6 py-8 text-sm leading-relaxed text-ink-2 rounded-[var(--radius-control)]">
           No shares exist yet, so the vault is empty and there is nothing to back.
           Create the first share and this table fills in.
         </p>
       ) : (
         <>
           <div
-            className="mt-7 flex items-center gap-3 border px-4 py-3 text-sm"
+            className="mt-7 flex items-center gap-3 border px-4 py-3 text-sm rounded-[var(--radius-control)]"
             style={{
               borderColor: onChain.fullyBacked
                 ? "color-mix(in oklab, var(--color-gain) 45%, transparent)"
@@ -577,7 +577,7 @@ function Proof({ basket }: { basket: Basket }) {
       <summary className="cursor-pointer px-4 py-3 text-sm text-ink-2 marker:text-bind hover:text-ink">
         Check it without this page
       </summary>
-      <div className="space-y-4 border-t border-line px-4 py-4 text-sm leading-relaxed text-ink-2">
+      <div className="space-y-4 border-t border-line px-4 py-4 text-sm leading-relaxed text-ink-2 rounded-[var(--radius-control)]">
         <p>
           Two kinds of read, both against the public RPC, no key. First, how many
           shares exist:
@@ -617,13 +617,13 @@ function Command({
 }) {
   return (
     <div className="relative">
-      <pre className="overflow-x-auto border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
+      <pre className="overflow-x-auto border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed text-ink-2 rounded-[var(--radius-panel)]">
         <code>{text}</code>
       </pre>
       <button
         type="button"
         onClick={() => onCopy(id, text)}
-        className="absolute right-2 top-2 border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-3 transition-colors hover:border-bind hover:text-ink"
+        className="absolute right-2 top-2 border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-3 transition-colors hover:border-bind hover:text-ink rounded-[var(--radius-panel)]"
       >
         {copied === id ? "Copied" : "Copy"}
       </button>
@@ -746,7 +746,7 @@ function TradePanel({
               setError(null);
             }}
             aria-pressed={mode === tab}
-            className="border-b px-4 py-4 text-sm transition-colors"
+            className="border-b px-4 py-4 text-sm transition-colors rounded-[var(--radius-control)]"
             style={{
               borderColor: mode === tab ? "var(--color-bind)" : "var(--color-line)",
               color:
@@ -772,7 +772,7 @@ function TradePanel({
               step="0.000001"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
-              className="tnum display w-full border border-line bg-surface px-3 py-3 text-xl text-ink outline-none focus-visible:border-bind"
+              className="tnum display w-full border border-line bg-surface px-3 py-3 text-xl text-ink outline-none focus-visible:border-bind rounded-[var(--radius-panel)]"
             />
             {mode === "redeem" && shareBalance > 0n && (
               <button
@@ -780,7 +780,7 @@ function TradePanel({
                 onClick={() =>
                   setAmount((Number(shareBalance) / ONE_SHARE).toString())
                 }
-                className="shrink-0 border border-line px-3 py-3 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+                className="shrink-0 border border-line px-3 py-3 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
               >
                 All
               </button>
@@ -856,7 +856,7 @@ function TradePanel({
         )}
 
         {mode === "create" && shortSymbols.length > 0 && (
-          <div className="mt-5 border border-line bg-surface p-4">
+          <div className="mt-5 border border-line bg-surface p-4 rounded-[var(--radius-panel)]">
             <p className="text-sm leading-relaxed text-ink-2">
               Short on {shortSymbols.map((s) => s.replace(/x$/, "")).join(", ")}.
             </p>
@@ -889,7 +889,7 @@ function TradePanel({
           type="button"
           disabled={blocked || busy}
           onClick={submit}
-          className="mt-6 w-full border border-bind bg-bind px-5 py-3.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3"
+          className="mt-6 w-full bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3 rounded-[var(--radius-control)]"
         >
           {busy
             ? /* A basket with many components needs a second signature, so say
@@ -930,8 +930,8 @@ function TradePanel({
 
         <p className="mt-5 text-xs leading-relaxed text-ink-3">
           {mode === "create"
-            ? "In kind, so no price is quoted and no oracle is trusted. Amounts round up in the vault's favour."
-            : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favour."}
+            ? "In kind, so no price is quoted and no oracle is trusted. Amounts round up in the vault's favor."
+            : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favor."}
         </p>
       </div>
     </div>

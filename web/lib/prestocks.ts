@@ -1,5 +1,5 @@
 /**
- * PreStocks: tokenised SPV exposure to pre-IPO companies, on Solana mainnet.
+ * PreStocks: tokenized SPV exposure to pre-IPO companies, on Solana mainnet.
  *
  * Same shape of problem xStocks solve for public equities, one step earlier:
  * these trade today, at real mint addresses, with real Jupiter liquidity, and
@@ -119,7 +119,7 @@ export function asXStock(p: PreStock): XStock {
     decimals: p.decimals,
     equityFeedId: null,
     redemptionFeedId: null,
-    tokenisedFeedId: null,
+    tokenizedFeedId: null,
     schedule: null,
     hue: p.hue,
   };

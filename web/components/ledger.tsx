@@ -229,7 +229,7 @@ export function LedgerPage() {
             {ledger.entries.length === 0 && decoding ? (
               <p className="text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>
             ) : ledger.entries.length === 0 ? (
-              <p className="border border-dashed border-line-strong/60 px-6 py-10 text-sm text-ink-2">
+              <p className="border border-dashed border-line-strong/60 px-6 py-10 text-sm text-ink-2 rounded-[var(--radius-control)]">
                 The program has not settled anything yet.
               </p>
             ) : (
@@ -272,7 +272,7 @@ export function BasketHistory({ basket }: { basket: Basket }) {
         {loading && <p className="text-sm text-ink-3">Reading the transactions…</p>}
         {error && <p className="text-sm text-loss">Could not read the history. {error}</p>}
         {ledger && ledger.entries.length === 0 && !decoding && (
-          <p className="border border-dashed border-line-strong/60 px-6 py-8 text-sm text-ink-2">
+          <p className="border border-dashed border-line-strong/60 px-6 py-8 text-sm text-ink-2 rounded-[var(--radius-control)]">
             Nothing yet beyond the basket being created.
           </p>
         )}

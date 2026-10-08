@@ -134,7 +134,7 @@ export function Explorer() {
               value={query}
               placeholder="Search by name, ticker, or creator"
               onChange={(event) => setQuery(event.target.value)}
-              className="w-full border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-3 outline-none focus-visible:border-bind"
+              className="w-full border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-3 outline-none focus-visible:border-bind rounded-[var(--radius-control)]"
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -144,7 +144,7 @@ export function Explorer() {
                 type="button"
                 onClick={() => setSort(option.key)}
                 aria-pressed={sort === option.key}
-                className="border px-3 py-2.5 text-xs transition-colors"
+                className="border px-3 py-2.5 text-xs transition-colors rounded-[var(--radius-control)]"
                 style={{
                   borderColor:
                     sort === option.key
@@ -180,7 +180,7 @@ export function Explorer() {
           </p>
           <Link
             href="/compose"
-            className="mt-7 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep"
+            className="mt-7 inline-block bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep rounded-[var(--radius-control)]"
           >
             Create the first one
           </Link>

@@ -15,7 +15,7 @@ export type XStock = {
   /** Pyth feed for the token's premium over the real share. Priced 24/7. */
   redemptionFeedId: string | null;
   /** Pyth feed for the token itself in USD. Priced 24/7. */
-  tokenisedFeedId: string | null;
+  tokenizedFeedId: string | null;
   /** Pyth trading-hours schedule string for the underlying listing. */
   schedule: string | null;
   /** Stable mosaic tile colour for this ticker. */
@@ -31,7 +31,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "49f6b65cb1de6b10eaf75e7c03ca029c306d0357e91b5311b175084a5ad55688",
     "redemptionFeedId": "25babb83691a056fd65f879bfd7197eabd840aae741f69c87ccb31e204a979b2",
-    "tokenisedFeedId": "978e6cc68a119ce066aa830017318563a9ed04ec3a0a6439010fc11296a58675",
+    "tokenizedFeedId": "978e6cc68a119ce066aa830017318563a9ed04ec3a0a6439010fc11296a58675",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#C9A227"
   },
@@ -43,7 +43,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a",
     "redemptionFeedId": "0ed9040c3fcdadf6ab2f1815f6b252e4c1ca5fd55108390f4acd52a7efac13dd",
-    "tokenisedFeedId": "7148fbe6e493ff2580305c92a8d7f8628c9943b11b9b253aebc24863fec290e8",
+    "tokenizedFeedId": "7148fbe6e493ff2580305c92a8d7f8628c9943b11b9b253aebc24863fec290e8",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#2E7D6B"
   },
@@ -55,7 +55,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "fee33f2a978bf32dd6b662b65ba8083c6773b494f8401194ec1870c640860245",
     "redemptionFeedId": "b663e208031820ed2ea373346501ceb897f230623439482f0e2a13150af08549",
-    "tokenisedFeedId": "641435d5dffb5311140b480517c79986d8488d5cf08a11eec53b83ad02cab33f",
+    "tokenizedFeedId": "641435d5dffb5311140b480517c79986d8488d5cf08a11eec53b83ad02cab33f",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#9E3B32"
   },
@@ -67,7 +67,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "92b8527aabe59ea2b12230f7b532769b133ffb118dfbd48ff676f14b273f1365",
     "redemptionFeedId": "381f301f3aabddfa8605be298e704bf7c40738a5f7aeb07dd0b023f993ce7638",
-    "tokenisedFeedId": "c13184461c0c80d98ffcd89be627c2220b94a96c7c67f0c4b16bc12fd3b17758",
+    "tokenizedFeedId": "c13184461c0c80d98ffcd89be627c2220b94a96c7c67f0c4b16bc12fd3b17758",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#3E6BE0"
   },
@@ -79,7 +79,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": null,
     "redemptionFeedId": null,
-    "tokenisedFeedId": null,
+    "tokenizedFeedId": null,
     "schedule": null,
     "hue": "#7A5CA8"
   },
@@ -91,7 +91,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "e190f467043db04548200354889dfe0d9d314c08b8d4e62fabf4d5a3140fecca",
     "redemptionFeedId": null,
-    "tokenisedFeedId": "e7d1138d0083368634087268c64b7bea0b4101a6365f83915cba9e76a8364b96",
+    "tokenizedFeedId": "e7d1138d0083368634087268c64b7bea0b4101a6365f83915cba9e76a8364b96",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#B4703A"
   },
@@ -103,7 +103,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "6f9cd89ef1b7fd39f667101a91ad578b6c6ace4579d5f7f285a4b06aa4504be6",
     "redemptionFeedId": null,
-    "tokenisedFeedId": null,
+    "tokenizedFeedId": null,
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#4A8FA8"
   },
@@ -115,7 +115,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "5a48c03e9b9cb337801073ed9d166817473697efff0d138874e0f6a33d6d5aa6",
     "redemptionFeedId": "d54f066daee8cfbee2ecbefc8faa351c7c38b2c2a7cd8b704af20875974e3c68",
-    "tokenisedFeedId": "b911b0329028cd0283e4259c33809d62942bd2716a58084e5f31d64c00b5424e",
+    "tokenizedFeedId": "b911b0329028cd0283e4259c33809d62942bd2716a58084e5f31d64c00b5424e",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#8A9A3F"
   },
@@ -127,7 +127,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "306736a4035846ba15a3496eed57225b64cc19230a50d14f3ed20fd7219b7849",
     "redemptionFeedId": "d88c382daa11f3a377796bc3f9318e7fbffd69c5bbceb5e58548670a7ad23e7f",
-    "tokenisedFeedId": "dd49a9ac6df5cbfa9d8fc6371f7ae927a74d5c6763c1c01b4220d70314c647f9",
+    "tokenizedFeedId": "dd49a9ac6df5cbfa9d8fc6371f7ae927a74d5c6763c1c01b4220d70314c647f9",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#A8456B"
   },
@@ -139,7 +139,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "d3178156b7c0f6ce10d6da7d347952a672467b51708baaf1a57ffe1fb005824a",
     "redemptionFeedId": "9da35621c6b18f310a83e9ac6cefa12d72208612b444acf68ba706416dcb47a8",
-    "tokenisedFeedId": "27cac3c00ed32285b8686611bbc4a654279c1ea11ab4dc90822c2edd20734bca",
+    "tokenizedFeedId": "27cac3c00ed32285b8686611bbc4a654279c1ea11ab4dc90822c2edd20734bca",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#5C6B8A"
   },
@@ -151,7 +151,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe",
     "redemptionFeedId": "dfeda47e0d3ed1db00062c9ae8b82f5d0d9699f772e7fee1bfd4e9b1dd168574",
-    "tokenisedFeedId": "bf3e5871be3f80ab7a4d1f1fd039145179fb58569e159aee1ccd472868ea5900",
+    "tokenizedFeedId": "bf3e5871be3f80ab7a4d1f1fd039145179fb58569e159aee1ccd472868ea5900",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#C9A227"
   },
@@ -163,7 +163,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "d0ca23c1cc005e004ccf1db5bf76aeb6a49218f43dac3d4b275e92de12ded4d1",
     "redemptionFeedId": "fbc60d2549711c0fc72da0c9f6971170d4592c2fbd1e9780dc52464316225acc",
-    "tokenisedFeedId": "bb723a70af731ab56b9a650eb7e8ac22b7bc07ea77f8670bd1fa9a37bf6df3f5",
+    "tokenizedFeedId": "bb723a70af731ab56b9a650eb7e8ac22b7bc07ea77f8670bd1fa9a37bf6df3f5",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#2E7D6B"
   },
@@ -175,7 +175,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "e1e80251e5f5184f2195008382538e847fafc36f751896889dd3d1b1f6111f09",
     "redemptionFeedId": "342df7ea9b8db28630933d55d0c9c1119525eb5be58d499ecc4e88faf061083a",
-    "tokenisedFeedId": "53f95ba4e23ed15ea56083e2ee9a5eec48055d6f59033d4bb95f1ca2a2349c28",
+    "tokenizedFeedId": "53f95ba4e23ed15ea56083e2ee9a5eec48055d6f59033d4bb95f1ca2a2349c28",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#9E3B32"
   },
@@ -187,7 +187,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "b1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
     "redemptionFeedId": "b675c4e9f46d94afa9174a7df09966b77a2950970bb50a77ec8ad4fcfd8266f4",
-    "tokenisedFeedId": "4244d07890e4610f46bbde67de8f43a4bf8b569eebe904f136b469f148503b7f",
+    "tokenizedFeedId": "4244d07890e4610f46bbde67de8f43a4bf8b569eebe904f136b469f148503b7f",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#3E6BE0"
   },
@@ -199,7 +199,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "11a70634863ddffb71f2b11f2cff29f73f3db8f6d0b78c49f2b5f4ad36e885f0",
     "redemptionFeedId": null,
-    "tokenisedFeedId": null,
+    "tokenizedFeedId": null,
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#7A5CA8"
   },
@@ -211,7 +211,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "9695e2b96ea7b3859da9ed25b7a46a920a776e2fdae19a7bcfdf2b219230452d",
     "redemptionFeedId": "5fe0ad9fd9bd888bbdfb609dbe8a6233248fa3dee25755f986f473c43938c7ca",
-    "tokenisedFeedId": "178a6f73a5aede9d0d682e86b0047c9f333ed0efe5c6537ca937565219c4054d",
+    "tokenizedFeedId": "178a6f73a5aede9d0d682e86b0047c9f333ed0efe5c6537ca937565219c4054d",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#B4703A"
   },
@@ -223,7 +223,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "8a593d6edde7a3095213c88116d8840d01e93c2ddeb800bc891772eb8b93bb94",
     "redemptionFeedId": "3bd917356e64e4eb1355adefd2caf09cf0716bbdb58012907bdcad63ab21064e",
-    "tokenisedFeedId": "e8e2234a06b288fedde43ae9450cb288886ecb3259ad2f41d0067f02244a0101",
+    "tokenizedFeedId": "e8e2234a06b288fedde43ae9450cb288886ecb3259ad2f41d0067f02244a0101",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#4A8FA8"
   },
@@ -235,7 +235,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
     "redemptionFeedId": "9e916cc00d292da2367646ffd6537d6b8d0c3f15e2d5891ac44aed31291811a9",
-    "tokenisedFeedId": "2817b78438c769357182c04346fddaad1178c82f4048828fe0997c3c64624e14",
+    "tokenizedFeedId": "2817b78438c769357182c04346fddaad1178c82f4048828fe0997c3c64624e14",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#8A9A3F"
   },
@@ -247,7 +247,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "27c7bbc9755d847f7fc63620c2edcc6a91d2c0c67a28c7999907b59c505b3c17",
     "redemptionFeedId": "a8b410b2a5f5f49a9da69a1e3a99d9c71ca6807d08cc4a6711f8fc6dd7d06202",
-    "tokenisedFeedId": "5f5193ed44dd1f4b0732dbffa2e27caf953e16a2d911854c8c3766d8bc609a47",
+    "tokenizedFeedId": "5f5193ed44dd1f4b0732dbffa2e27caf953e16a2d911854c8c3766d8bc609a47",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#A8456B"
   },
@@ -259,7 +259,7 @@ export const XSTOCKS: XStock[] = [
     "decimals": 8,
     "equityFeedId": "16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1",
     "redemptionFeedId": "997362625415627e9e3177f6c0d32f200d4a221ccadb3dddab80d6079d03ea24",
-    "tokenisedFeedId": "47a156470288850a440df3a6ce85a55917b813a19bb5b31128a33a986566a362",
+    "tokenizedFeedId": "47a156470288850a440df3a6ce85a55917b813a19bb5b31128a33a986566a362",
     "schedule": "America/New_York;0930-1600,0930-1600,0930-1600,0930-1600,0930-1600,C,C;0907/C,1126/C,1127/0930-1300,1224/0930-1300,1225/C,0101/C,0118/C,0215/C,0326/C,0531/C,0618/C,0705/C",
     "hue": "#5C6B8A"
   }

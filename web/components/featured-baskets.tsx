@@ -37,7 +37,7 @@ export function FeaturedBaskets() {
         </div>
         <Link
           href="/explore"
-          className="border border-line px-4 py-2.5 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+          className="border border-line px-4 py-2.5 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
         >
           {baskets ? `See all ${baskets.length}` : "See all"}
         </Link>
@@ -60,7 +60,7 @@ export function FeaturedBaskets() {
           </p>
           <Link
             href="/compose"
-            className="mt-7 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep"
+            className="mt-7 inline-block bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep rounded-[var(--radius-control)]"
           >
             Create the first one
           </Link>

@@ -359,7 +359,7 @@ export function Portfolio() {
           <div className="mt-7 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/compose"
-              className="border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep"
+              className="bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep rounded-[var(--radius-control)]"
             >
               Create a basket
             </Link>

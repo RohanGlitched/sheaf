@@ -11,7 +11,7 @@ export function SiteFooter() {
           <div className="max-w-sm">
             <Mark className="size-5 text-ink-2" />
             <p className="mt-4 text-sm leading-relaxed text-ink-2">
-              Sheaf composes tokenised equities into one token, backed share for
+              Sheaf composes tokenized equities into one token, backed share for
               share in a vault anyone can read. Prices and dividend multipliers come
               from Solana mainnet. Minting and redeeming settle on {WRITE_CLUSTER}.
             </p>

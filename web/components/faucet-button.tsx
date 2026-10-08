@@ -8,7 +8,7 @@ import { explorerTx } from "@/lib/config";
 /**
  * Test tokens, on request.
  *
- * Nobody should have to go hunting for a tokenised equity before they can see what
+ * Nobody should have to go hunting for a tokenized equity before they can see what
  * this does. The button asks the server to mint the exact tickers the person is
  * short of, and says what happened in a sentence either way.
  */
@@ -68,7 +68,7 @@ export function FaucetButton({
         type="button"
         disabled={busy || symbols.length === 0}
         onClick={claim}
-        className="border border-line-strong px-4 py-2.5 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3"
+        className="border border-line-strong px-4 py-2.5 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3 rounded-[var(--radius-control)]"
       >
         {busy
           ? "Minting…"

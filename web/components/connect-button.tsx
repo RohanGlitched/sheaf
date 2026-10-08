@@ -72,7 +72,7 @@ export function ConnectButton({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="group flex items-center gap-2.5 border border-line bg-raised px-3.5 py-2 text-sm text-ink transition-colors hover:border-line-strong"
+          className="group flex items-center gap-2.5 rounded-[var(--radius-control)] border border-line-strong bg-surface px-3.5 py-2 text-sm text-ink transition-colors hover:border-ink-3"
         >
           <span
             aria-hidden
@@ -82,7 +82,7 @@ export function ConnectButton({
           <span className="tnum">{shortAddress(publicKey.toBase58())}</span>
         </button>
         {open && (
-          <div className="absolute right-0 top-full z-50 mt-1.5 w-60 border border-line bg-raised p-1 shadow-2xl shadow-black/50">
+          <div className="absolute right-0 top-full z-50 mt-1.5 w-60 border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] rounded-[var(--radius-panel)]">
             <div className="px-3 py-2.5 text-xs text-ink-3">
               {wallet?.adapter.name} on {WRITE_CLUSTER}
             </div>
@@ -120,15 +120,15 @@ export function ConnectButton({
         disabled={connecting}
         className={
           block
-            ? "w-full border border-bind bg-bind px-5 py-3.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-60"
-            : "border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20 disabled:opacity-60"
+            ? "w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-60"
+            : "rounded-[var(--radius-control)] bg-ink px-4 py-2 text-sm font-medium text-page transition-colors hover:bg-[#23382c] disabled:opacity-60"
         }
       >
         {connecting ? "Connecting…" : label}
       </button>
       {open && (
         <div
-          className={`absolute top-full z-50 mt-1.5 border border-line bg-raised p-1 shadow-2xl shadow-black/50 ${
+          className={`absolute top-full z-50 mt-1.5 border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] ${
             block ? "left-0 right-0" : "right-0 w-64"
           }`}
         >
@@ -140,7 +140,7 @@ export function ConnectButton({
                   <a
                     key={w.name}
                     href={w.href}
-                    className="border border-line-strong px-3 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind"
+                    className="border border-line-strong px-3 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind rounded-[var(--radius-control)]"
                   >
                     Open in {w.name}
                   </a>

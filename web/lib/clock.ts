@@ -1,5 +1,5 @@
 /**
- * The two clocks a tokenised stock lives under.
+ * The two clocks a tokenized stock lives under.
  *
  * The exchange keeps banker's hours. The chain does not. That gap is the whole
  * reason these tokens are interesting, so Sheaf shows both clocks side by side

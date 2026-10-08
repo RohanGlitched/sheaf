@@ -249,7 +249,7 @@ function OpenLaunch({
           type="button"
           onClick={open}
           disabled={busy || navSol == null}
-          className="border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
+          className="bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
         >
           {busy ? "Opening the market…" : "Open the launch market"}
         </button>
@@ -518,7 +518,7 @@ export function LaunchCard({
                   role="radio"
                   aria-checked={side === value}
                   onClick={() => setSide(value)}
-                  className="-ml-px border px-3 py-2.5 text-sm capitalize transition-colors first:ml-0"
+                  className="-ml-px border px-3 py-2.5 text-sm capitalize transition-colors first:ml-0 rounded-[var(--radius-control)]"
                   style={{
                     borderColor: side === value ? "var(--color-ink-2)" : "var(--color-line)",
                     color: side === value ? "var(--color-ink)" : "var(--color-ink-3)",
@@ -544,7 +544,7 @@ export function LaunchCard({
                     role="radio"
                     aria-checked={on}
                     onClick={() => (side === "buy" ? setAmount(value) : setSellShare(value))}
-                    className="tnum -ml-px border px-3 py-2.5 text-sm transition-colors first:ml-0"
+                    className="tnum -ml-px border px-3 py-2.5 text-sm transition-colors first:ml-0 rounded-[var(--radius-control)]"
                     style={{
                       borderColor: on ? "var(--color-bind)" : "var(--color-line)",
                       color: on ? "var(--color-ink)" : "var(--color-ink-3)",
@@ -565,7 +565,7 @@ export function LaunchCard({
                 (side === "sell" && !(held && held.raw > 0n)) ||
                 (side === "buy" && !state.migrated && state.raised >= state.threshold)
               }
-              className="border border-bind bg-bind px-5 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
+              className="bg-bind px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
             >
               {busy === "trade"
                 ? side === "buy"
@@ -613,7 +613,7 @@ export function LaunchCard({
                 type="button"
                 onClick={graduate}
                 disabled={busy != null}
-                className="mt-3 border border-bind bg-bind px-4 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
+                className="mt-3 bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
               >
                 {busy === "graduate" ? "Graduating…" : "Graduate to Meteora DAMM v2"}
               </button>
@@ -630,7 +630,7 @@ export function LaunchCard({
               type="button"
               onClick={claim}
               disabled={busy != null || state.creatorFees <= 0}
-              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3"
+              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3 rounded-[var(--radius-control)]"
             >
               {busy === "claim" ? "Claiming…" : "Claim fees"}
             </button>
@@ -647,7 +647,7 @@ export function LaunchCard({
               type="button"
               onClick={claimPool}
               disabled={busy != null || position.feeSol <= 0}
-              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3"
+              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3 rounded-[var(--radius-control)]"
             >
               {busy === "poolClaim" ? "Claiming…" : "Claim pool fees"}
             </button>

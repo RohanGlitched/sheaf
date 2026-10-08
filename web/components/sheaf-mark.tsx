@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
  * The Sheaf mark: a basket drawn as what its name says.
  *
  * Every component is one stalk. A stalk's height above the band is its weight in
- * the recipe, its ear is the component's colour, and all of them cross at one
+ * the recipe, its ear is the component's color, and all of them cross at one
  * band: the single share that binds them. Below the band the stalks flare again,
  * shorter, the way a tied sheaf stands on its own. The same function draws the
  * 20px avatar on a card and the hero on the home page, so a basket looks the same
@@ -266,7 +266,7 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
   );
 }
 
-/** Stalks for a recipe, coloured by slot. */
+/** Stalks for a recipe, colored by slot. */
 export function stalksFromWeights(
   rows: { key: string; weightBps: number; color: string; label?: string; sub?: string; subTone?: Stalk["subTone"] }[],
 ): Stalk[] {

@@ -125,7 +125,7 @@ export function Anatomy() {
         </dl>
         <p className="mt-4 text-xs leading-relaxed text-ink-3">
           Coverage is the vault&rsquo;s balance of each token over what the outstanding shares claim, read from the token accounts on this load. Rounding
-          favours holders, so it can only ever be at or above 100%.
+          favors holders, so it can only ever be at or above 100%.
         </p>
       </div>
     </div>

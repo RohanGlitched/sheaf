@@ -60,7 +60,7 @@ export default async function Image() {
             An index fund is a list of companies and a set of weights.
           </div>
           <div style={{ fontSize: 24, lineHeight: 1.45, marginTop: 32, color: "#b3ab9c" }}>
-            Tokenised stocks and pre-IPO companies as one fully backed token,
+            Tokenized stocks and pre-IPO companies as one fully backed token,
             with a Meteora market from day one.
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: "auto", fontSize: 20, color: "#7c8090" }}>

@@ -136,7 +136,7 @@ export function Keys() {
         </table>
       </div>
       <p className="mt-4 text-xs leading-relaxed text-ink-3">
-        Not yet audited. Sheaf runs on devnet, holds no real assets, and will not hold real tokenised equities before an audit.{" "}
+        Not yet audited. Sheaf runs on devnet, holds no real assets, and will not hold real tokenized equities before an audit.{" "}
         <Link href="/method" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
           How the program is built
         </Link>

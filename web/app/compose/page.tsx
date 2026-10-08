@@ -4,7 +4,7 @@ import { Composer } from "@/components/composer";
 export const metadata: Metadata = {
   title: "Create a basket",
   description:
-    "Choose tokenised equities and weights, and mint the result as one token backed share for share.",
+    "Choose tokenized equities and weights, and mint the result as one token backed share for share.",
 };
 
 export default function ComposePage() {

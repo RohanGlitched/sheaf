@@ -17,13 +17,13 @@ export default function NotFound() {
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         <Link
           href="/"
-          className="inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+          className="inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
         >
           Back to the market
         </Link>
         <Link
           href="/explore"
-          className="inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+          className="inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
         >
           See every basket
         </Link>

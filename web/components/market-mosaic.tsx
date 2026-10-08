@@ -43,8 +43,8 @@ type Props = {
  * The market as a mosaic.
  *
  * Tile area is the depth of the on-chain market, so the tokens you could actually
- * buy in size are the tokens that dominate the picture. Colour is the 24-hour
- * move on a diverging scale whose poles clear a worst-case colour-vision
+ * buy in size are the tokens that dominate the picture. Color is the 24-hour
+ * move on a diverging scale whose poles clear a worst-case color-vision
  * separation of 8.1; the signed figure is printed on every tile that can hold it,
  * and the table underneath carries every number for the tiles that cannot.
  */
@@ -88,10 +88,10 @@ export function MarketMosaic({
         <figcaption className="mb-3 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="display text-xl text-ink">
-              Tokenised equities and pre-IPO SPVs, live on Solana
+              Tokenized equities and pre-IPO SPVs, live on Solana
             </h2>
             <p className="mt-1 text-sm text-ink-2">
-              Tile area is {SIZE_LABEL[size]}. Colour is the 24-hour move. The{" "}
+              Tile area is {SIZE_LABEL[size]}. Color is the 24-hour move. The{" "}
               <span
                 className="inline-block size-2 rounded-full align-[-1px]"
                 style={{ background: COMPONENT_SLOTS[3] }}
@@ -147,7 +147,7 @@ export function MarketMosaic({
               width={width}
               height={box}
               role="group"
-              aria-label={`Market mosaic of ${quotes.length} tokenised equities, sized by ${SIZE_LABEL[size]}`}
+              aria-label={`Market mosaic of ${quotes.length} tokenized equities, sized by ${SIZE_LABEL[size]}`}
               style={{ background: CHART_SURFACE }}
             >
               {tiles.map((tile, index) => {
@@ -322,7 +322,7 @@ function TileTooltip({
 
   return (
     <div
-      className="pointer-events-none absolute z-30 border border-line-strong bg-page/97 p-4 shadow-2xl shadow-black/60"
+      className="pointer-events-none absolute z-30 border border-line-strong bg-page/97 p-4 shadow-2xl shadow-black/60 rounded-[var(--radius-panel)]"
       style={{ width: W, ...style }}
       role="tooltip"
     >
@@ -455,7 +455,7 @@ export function QuoteTable({
     <div className="min-w-0 overflow-x-auto border border-line">
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <caption className="sr-only">
-          Every tokenised equity with its price, 24-hour move, premium to the
+          Every tokenized equity with its price, 24-hour move, premium to the
           listed share, liquidity and accrued dividends.
         </caption>
         <thead>

@@ -4,7 +4,6 @@ import { HomeSheaf } from "@/components/home-sheaf";
 import { MarketClock } from "@/components/market-clock";
 import { FeaturedBaskets } from "@/components/featured-baskets";
 import { LaunchMarket } from "@/components/launch-market";
-import { MosaicBand } from "@/components/mosaic-band";
 import { Anatomy } from "@/components/home-anatomy";
 import { Dividends, Premiums } from "@/components/home-market-facts";
 import { Keys, Revenue } from "@/components/home-ledgers";
@@ -13,27 +12,26 @@ const LIFE = [
   {
     n: "1",
     title: "Write the recipe",
-    on: "Sheaf program",
-    body: "Pick up to eight tokenised equities, xStocks or PreStocks SPVs over OpenAI, Anthropic and SpaceX, and weigh them. The program stores the exact raw units per share and gives up the power to change them.",
+    on: "One transaction",
+    body: "Pick up to eight tokenized stocks, xStocks or PreStocks over OpenAI, Anthropic and SpaceX, and set the weights. The program stores the exact units behind one share and gives up the power to change them.",
   },
   {
     n: "2",
-    title: "Open a market",
-    on: "Meteora DBC",
-    body: "A basket with no holders has no market. Its creator opens a bonding curve priced from the basket's own NAV, so people can buy in before anyone has assembled a share. It graduates into a locked Meteora pool.",
-    href: "#launch",
+    title: "Bind shares in kind",
+    on: "Onchain vault",
+    body: "A share is created by depositing exactly what the recipe names and redeemed by taking exactly that back. Nothing is priced by an oracle, so there is no price to push and no way to mint an unbacked share.",
   },
   {
     n: "3",
-    title: "Create shares in kind",
-    on: "Token-2022 vault",
-    body: "A share is minted by handing the vault exactly what the recipe names and redeemed by taking exactly that back. No oracle is read, so there is no price to push. PreStocks transfer fees are grossed up, so the vault never falls short.",
+    title: "Or pay in dollars",
+    on: "Filler auction",
+    body: "Escrow dollars for a number of shares that falls over a few minutes. The first filler who delivers the stocks gets paid. Competition sets the price, the vault still receives the real stocks.",
   },
   {
     n: "4",
-    title: "Hold one token",
-    on: "Any Solana wallet",
-    body: "The share is an ordinary Token-2022 mint: it transfers, sits in a wallet and can be sold. Dividends on the components accrue to the vault, and so to every holder. The creator earns a fee in shares on every creation.",
+    title: "Then every month",
+    on: "SIP plans",
+    body: "Set a monthly amount and the plan places that order on schedule, anyone can run it, and each fill resets its reference price. The habit behind India's index-fund boom, onchain.",
   },
 ];
 
@@ -88,25 +86,17 @@ export default function Home() {
       {/* ------------------------------------------------------- lifecycle */}
       <section className="reveal py-20">
         <h2 className="display text-title max-w-[26ch] text-ink">
-          From a recipe to a market, and none of it trusts us.
+          From a recipe to a monthly habit, and none of it trusts us.
         </h2>
-        <ol className="mt-12 grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
+        <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {LIFE.map((step) => (
-            <li key={step.title} className="flex flex-col bg-page p-7">
+            <li key={step.title} className="flex flex-col rounded-[var(--radius-panel)] border border-line bg-surface p-7">
               <p className="flex items-baseline justify-between gap-3 text-xs">
                 <span className="tnum text-bind">{step.n}</span>
                 <span className="text-ink-3">{step.on}</span>
               </p>
               <h3 className="display mt-3 text-xl text-ink">{step.title}</h3>
               <p className="mt-3 text-sm leading-relaxed text-ink-2">{step.body}</p>
-              {step.href && (
-                <Link
-                  href={step.href}
-                  className="mt-auto pt-4 text-sm text-bind underline decoration-bind/40 underline-offset-4 hover:decoration-bind"
-                >
-                  See the live one
-                </Link>
-              )}
             </li>
           ))}
         </ol>
@@ -131,8 +121,6 @@ export default function Home() {
         </p>
       </section>
 
-      <MosaicBand />
-
       {/* --------------------------------------------------------- anatomy */}
       <section className="reveal py-20">
         <Anatomy />
@@ -142,8 +130,6 @@ export default function Home() {
       <section id="launch" className="reveal scroll-mt-24 border-t border-line py-20">
         <LaunchMarket />
       </section>
-
-      <MosaicBand />
 
       {/* -------------------------------------------------------- premiums */}
       <section className="reveal py-20">
@@ -165,7 +151,7 @@ export default function Home() {
         <div className="max-w-[46ch]">
           <h2 className="display text-title text-ink">A dividend is a number going up.</h2>
           <p className="mt-5 text-base leading-relaxed text-ink-2">
-            Tokenised equities pay dividends by raising a multiplier on the mint, not by sending
+            Tokenized equities pay dividends by raising a multiplier on the mint, not by sending
             anything. A recipe written in displayed balances would come up short by exactly the
             dividends already paid. Sheaf stores recipes in raw units and applies the live
             multiplier when it prices a share, so a share redeems for the same units before and after
@@ -184,7 +170,7 @@ export default function Home() {
             The exchange keeps hours. Your basket does not.
           </h2>
           <p className="mt-5 text-base leading-relaxed text-ink-2">
-            A tokenised share trades every minute of every day, including the
+            A tokenized share trades every minute of every day, including the
             hours when the listing behind it is dark. That is where the gap between
             token and share opens up, and it is why Sheaf shows you both prices
             rather than one.
@@ -199,8 +185,6 @@ export default function Home() {
         </div>
       </section>
 
-      <MosaicBand />
-
       {/* --------------------------------------------------------- revenue */}
       <section className="reveal py-20">
         <Revenue />
@@ -210,8 +194,6 @@ export default function Home() {
       <section className="reveal border-t border-line py-20">
         <Keys />
       </section>
-
-      <MosaicBand />
 
       {/* -------------------------------------------------------- baskets */}
       <section className="reveal py-20">

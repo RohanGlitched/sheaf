@@ -62,7 +62,7 @@ export function TrackRecord({
               type="button"
               onClick={() => setRange(r.key)}
               aria-pressed={range === r.key}
-              className="border px-3 py-2 text-xs transition-colors"
+              className="border px-3 py-2 text-xs transition-colors rounded-[var(--radius-control)]"
               style={{
                 borderColor: range === r.key ? "var(--color-bind)" : "var(--color-line)",
                 color: range === r.key ? "var(--color-bind)" : "var(--color-ink-2)",
@@ -79,7 +79,7 @@ export function TrackRecord({
           Reading a year of closes…
         </div>
       ) : !track ? (
-        <div className="mt-7 border border-dashed border-line-strong/60 px-6 py-10 text-sm leading-relaxed text-ink-2">
+        <div className="mt-7 border border-dashed border-line-strong/60 px-6 py-10 text-sm leading-relaxed text-ink-2 rounded-[var(--radius-control)]">
           {components.length && components.every((c) => !history?.series[c.base]) ? (
             <>
               Every holding in this basket is a pre-IPO company. There is no listed
@@ -92,7 +92,7 @@ export function TrackRecord({
         </div>
       ) : (
         <>
-          <div className="mt-7 border border-line bg-surface p-4 sm:p-6">
+          <div className="mt-7 border border-line bg-surface p-4 sm:p-6 rounded-[var(--radius-panel)]">
             <Chart track={track} symbol={symbol} benchmark={history?.benchmark ?? "SPY"} createdAt={createdAt} />
           </div>
 

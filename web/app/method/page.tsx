@@ -45,7 +45,7 @@ const GUARANTEES = [
     body: "The recipe is written once. There is no manager, no rebalance authority and no instruction that changes what a share holds.",
   },
   {
-    title: "Rounding favours holders",
+    title: "Rounding favors holders",
     body: "Deposits round up and redemptions round down, so the vault can only ever hold at least what the shares claim.",
   },
   {
@@ -124,7 +124,7 @@ function Stage({
 function RecipeVisual({ basket }: { basket: Basket }) {
   return (
     <div className="border border-line bg-raised">
-      <p className="border-b border-line px-6 py-4 text-sm text-ink-2">
+      <p className="border-b border-line px-6 py-4 text-sm text-ink-2 rounded-[var(--radius-control)]">
         One <span className="text-ink">{basket.symbol}</span> share of{" "}
         {basket.name} is exactly
       </p>
@@ -152,7 +152,7 @@ function RecipeVisual({ basket }: { basket: Basket }) {
           );
         })}
       </ul>
-      <p className="border-t border-line px-6 py-4 text-xs text-ink-3">
+      <p className="border-t border-line px-6 py-4 text-xs text-ink-3 rounded-[var(--radius-control)]">
         Stored as raw units in a program account. No instruction can change it.
       </p>
     </div>
@@ -176,7 +176,7 @@ function CreateVisual({ basket }: { basket: Basket | null }) {
             {symbols.map((symbol, i) => (
               <span
                 key={symbol + i}
-                className="tnum border px-1.5 py-0.5 text-xs text-ink"
+                className="tnum border px-1.5 py-0.5 text-xs text-ink rounded-[var(--radius-control)]"
                 style={{ borderColor: slotColor(i) }}
               >
                 {symbol}
@@ -207,7 +207,7 @@ function CreateVisual({ basket }: { basket: Basket | null }) {
           </p>
         </div>
       </div>
-      <p className="border border-dashed border-line-strong/60 px-4 py-3 text-center text-xs text-ink-2">
+      <p className="border border-dashed border-line-strong/60 px-4 py-3 text-center text-xs text-ink-2 rounded-[var(--radius-control)]">
         Redeeming runs it backwards: burn {share} shares and every component
         comes back, rounded down.
       </p>
@@ -225,7 +225,7 @@ function HoldVisual({ basket }: { basket: Basket | null }) {
   ];
   return (
     <div className="border border-line bg-raised">
-      <p className="border-b border-line px-6 py-4 text-sm text-ink-2">
+      <p className="border-b border-line px-6 py-4 text-sm text-ink-2 rounded-[var(--radius-control)]">
         What a {basket?.symbol ?? "share"} token is
         {basket && (
           <>
@@ -298,14 +298,14 @@ export default async function MethodPage() {
             basket ? (
               <RecipeVisual basket={basket} />
             ) : (
-              <p className="border border-line px-6 py-10 text-center text-sm text-ink-3">
+              <p className="border border-line px-6 py-10 text-center text-sm text-ink-3 rounded-[var(--radius-control)]">
                 The example recipe could not be read right now.
               </p>
             )
           }
         >
           <p>
-            Pick up to {MAX_COMPONENTS} tokenised equities: xStocks such as Apple
+            Pick up to {MAX_COMPONENTS} tokenized equities: xStocks such as Apple
             and NVIDIA, or PreStocks SPVs over OpenAI, Anthropic and SpaceX. Set a
             weight for each.
           </p>
@@ -468,7 +468,7 @@ export default async function MethodPage() {
           </dl>
           <Link
             href="/compose"
-            className="mt-6 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep"
+            className="mt-6 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep rounded-[var(--radius-control)]"
           >
             Create a basket
           </Link>

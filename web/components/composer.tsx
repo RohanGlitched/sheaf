@@ -41,7 +41,7 @@ const PRESETS: Preset[] = [
   {
     id: "mag",
     label: "The big five",
-    hint: "Equal weight across the largest tokenised names",
+    hint: "Equal weight across the largest tokenized names",
     symbols: ["NVDAx", "AAPLx", "MSFTx", "GOOGLx", "METAx"],
   },
   {
@@ -119,7 +119,7 @@ export function Composer() {
     [picks],
   );
 
-  /** Free palette slots stay stable, so a tile keeps its colour when others leave. */
+  /** Free palette slots stay stable, so a tile keeps its color when others leave. */
   const nextSlot = useCallback(
     (current: Pick[]) => {
       const used = new Set(current.map((p) => p.slot));
@@ -419,7 +419,7 @@ export function Composer() {
                 }}
                 className={
                   step.n === "1"
-                    ? "mt-6 border border-bind bg-bind px-4 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep"
+                    ? "mt-6 bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
                     : "mt-6 border border-line-strong px-4 py-2.5 text-sm text-ink transition-colors hover:border-bind hover:text-bind"
                 }
               >
@@ -455,7 +455,7 @@ export function Composer() {
               type="button"
               onClick={() => applyPreset(preset)}
               title={preset.hint}
-              className="border border-line px-3 py-2 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+              className="border border-line px-3 py-2 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
             >
               {preset.label}
             </button>
@@ -467,7 +467,7 @@ export function Composer() {
                 setPicks([]);
                 setWeights([]);
               }}
-              className="border border-line px-3 py-2 text-xs text-ink-3 transition-colors hover:border-loss/60 hover:text-loss"
+              className="border border-line px-3 py-2 text-xs text-ink-3 transition-colors hover:border-loss/60 hover:text-loss rounded-[var(--radius-control)]"
             >
               Clear
             </button>
@@ -509,7 +509,7 @@ export function Composer() {
                 onChange={(e) => setName(e.target.value)}
                 maxLength={32}
                 placeholder="Semiconductors, equal weight"
-                className="mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60"
+                className="mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60 rounded-[var(--radius-control)]"
               />
             </label>
             <label className="block">
@@ -519,7 +519,7 @@ export function Composer() {
                 onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                 maxLength={10}
                 placeholder="CHIPS"
-                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60"
+                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60 rounded-[var(--radius-control)]"
               />
             </label>
             <label className="block sm:col-span-2 lg:col-span-1">
@@ -532,7 +532,7 @@ export function Composer() {
                 onChange={(e) =>
                   setSharePrice(Math.max(1, Number(e.target.value) || 1))
                 }
-                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink"
+                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink rounded-[var(--radius-control)]"
               />
             </label>
           </div>
@@ -739,7 +739,7 @@ export function Composer() {
               type="button"
               onClick={() => void create()}
               disabled={!ready || submitting}
-              className="w-full border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3"
+              className="w-full bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3 rounded-[var(--radius-control)]"
             >
               {submitting
                 ? step && step.total > 1
@@ -779,7 +779,7 @@ export function Composer() {
             <button
               type="button"
               onClick={() => panel.current?.scrollIntoView({ block: "start" })}
-              className="shrink-0 border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20"
+              className="shrink-0 border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20 rounded-[var(--radius-control)]"
             >
               Set weights
             </button>

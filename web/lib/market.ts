@@ -1,5 +1,5 @@
 /**
- * Live market data for the twenty tokenised equities Sheaf composes.
+ * Live market data for the twenty tokenized equities Sheaf composes.
  *
  * Everything here comes from Solana mainnet by way of Jupiter's public price and
  * token endpoints, which need no key. One call covers the whole universe and

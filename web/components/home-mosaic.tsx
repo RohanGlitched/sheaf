@@ -16,7 +16,7 @@ export function HomeMosaic() {
 
   if (!snapshot) {
     return (
-      <div className="flex h-[460px] flex-col items-center justify-center gap-3 border border-line bg-surface px-8 text-center">
+      <div className="flex h-[460px] flex-col items-center justify-center gap-3 border border-line bg-surface px-8 text-center rounded-[var(--radius-panel)]">
         <p className="text-sm text-ink-2">
           Mainnet prices are unavailable right now.
         </p>
