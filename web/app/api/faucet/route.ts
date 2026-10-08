@@ -13,6 +13,10 @@ import {
 import { clientIp, faucetKeypair } from "@/lib/faucet-server";
 import { WRITE_RPC, WRITE_CLUSTER } from "@/lib/config";
 import { COMPOSABLE, FAUCET_TOKENS_PER_CLAIM, writeMint } from "@/lib/mirror";
+import { CASH_MINT, CASH_DECIMALS } from "@/lib/cash.generated";
+
+/** Test dollars per claim: enough for a few cash orders and a plan. */
+const CASH_PER_CLAIM = 1_000;
 
 /**
  * Test shares, on request.
@@ -103,6 +107,8 @@ export async function POST(request: Request) {
       return mint && decimals != null ? { symbol, mint, decimals } : null;
     })
     .filter((e): e is { symbol: string; mint: string; decimals: number } => e != null);
+  // Test dollars for cash orders and monthly plans ride the same claim.
+  if (requested.includes("USDC")) entries.push({ symbol: "USDC", mint: CASH_MINT, decimals: CASH_DECIMALS });
 
   if (!entries.length) {
     return Response.json(
@@ -116,7 +122,8 @@ export async function POST(request: Request) {
   const tx = new Transaction();
   for (const entry of entries) {
     const mint = new PublicKey(entry.mint);
-    const amount = BigInt(FAUCET_TOKENS_PER_CLAIM) * 10n ** BigInt(entry.decimals);
+    const amount =
+      (entry.symbol === "USDC" ? BigInt(CASH_PER_CLAIM) : BigInt(FAUCET_TOKENS_PER_CLAIM)) * 10n ** BigInt(entry.decimals);
     const ata = getAssociatedTokenAddressSync(
       mint,
       owner,

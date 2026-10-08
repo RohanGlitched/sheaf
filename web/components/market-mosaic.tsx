@@ -147,7 +147,7 @@ export function MarketMosaic({
               width={width}
               height={box}
               role="group"
-              aria-label={`Market mosaic of ${quotes.length} tokenized equities, sized by ${SIZE_LABEL[size]}`}
+              aria-label={`Market map of ${quotes.length} tokenized equities, sized by ${SIZE_LABEL[size]}`}
               style={{ background: CHART_SURFACE }}
             >
               {tiles.map((tile, index) => {
