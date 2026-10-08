@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { HomeMosaic, HomeStats, ComposeCta } from "@/components/home-mosaic";
 import { HomeSheaf } from "@/components/home-sheaf";
+import { LiveTape } from "@/components/live-tape";
 import { MarketClock } from "@/components/market-clock";
 import { FeaturedBaskets } from "@/components/featured-baskets";
 import { LaunchMarket } from "@/components/launch-market";
@@ -81,6 +82,11 @@ export default function Home() {
       {/* ------------------------------------------------------------ stats */}
       <section className="reveal border-y border-line py-px">
         <HomeStats />
+      </section>
+
+      {/* ------------------------------------------------------------ tape */}
+      <section className="py-20">
+        <LiveTape />
       </section>
 
       {/* ------------------------------------------------------- lifecycle */}
