@@ -1,0 +1,187 @@
+{
+  "network": "robinhoodTestnet",
+  "label": "Robinhood Chain testnet",
+  "chainId": 46630,
+  "rpc": "https://rpc.testnet.chain.robinhood.com",
+  "explorer": "https://explorer.testnet.chain.robinhood.com",
+  "tokenSource": "real",
+  "deployer": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+  "tokens": [
+    {
+      "symbol": "TSLA",
+      "name": "Tesla",
+      "address": "0xC9f9c86933092BbbfFF3CCb4b105A4A94bf3Bd4E",
+      "decimals": 18,
+      "isMirror": false
+    },
+    {
+      "symbol": "AMZN",
+      "name": "Amazon",
+      "address": "0x5884aD2f920c162CFBbACc88C9C51AA75eC09E02",
+      "decimals": 18,
+      "isMirror": false
+    },
+    {
+      "symbol": "AMD",
+      "name": "AMD",
+      "address": "0x71178BAc73cBeb415514eB542a8995b82669778d",
+      "decimals": 18,
+      "isMirror": false
+    },
+    {
+      "symbol": "PLTR",
+      "name": "Palantir",
+      "address": "0x1FBE1a0e43594b3455993B5dE5Fd0A7A266298d0",
+      "decimals": 18,
+      "isMirror": false
+    },
+    {
+      "symbol": "NFLX",
+      "name": "Netflix",
+      "address": "0x3b8262A63d25f0477c4DDE23F83cfe22Cb768C93",
+      "decimals": 18,
+      "isMirror": false
+    }
+  ],
+  "stable": {
+    "symbol": "USDG",
+    "name": "Global Dollar (testnet)",
+    "address": "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+    "decimals": 6,
+    "isMirror": false
+  },
+  "factory": "0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1",
+  "desk": "0x4184eb1540908CB0DbEd533c45Fba7123991951C",
+  "startBlock": 131233653,
+  "baskets": [
+    {
+      "symbol": "HOOD5",
+      "name": "Robinhood Five",
+      "address": "0x6536F45D0305bb3aE0E7A012534876e3b915A959",
+      "feeBps": 25,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "TSLA",
+          "token": "0xC9f9c86933092BbbfFF3CCb4b105A4A94bf3Bd4E",
+          "unitsPerShare": "5375477074000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "AMZN",
+          "token": "0x5884aD2f920c162CFBbACc88C9C51AA75eC09E02",
+          "unitsPerShare": "7849447595000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "AMD",
+          "token": "0x71178BAc73cBeb415514eB542a8995b82669778d",
+          "unitsPerShare": "3239233597000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "PLTR",
+          "token": "0x1FBE1a0e43594b3455993B5dE5Fd0A7A266298d0",
+          "unitsPerShare": "10133252267000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "NFLX",
+          "token": "0x3b8262A63d25f0477c4DDE23F83cfe22Cb768C93",
+          "unitsPerShare": "28174966542000000",
+          "weightBps": 2000
+        }
+      ],
+      "pricedAt": {
+        "TSLA": 372.06,
+        "AMZN": 254.79500000000002,
+        "AMD": 617.43,
+        "PLTR": 197.37,
+        "NFLX": 70.985
+      },
+      "seeded": "1.0"
+    },
+    {
+      "symbol": "CHIPS",
+      "name": "Compute Rush",
+      "address": "0xBeEC7DfC91BA0Aa397D8e4b7Da714cf66bF09311",
+      "feeBps": 50,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "AMD",
+          "token": "0x71178BAc73cBeb415514eB542a8995b82669778d",
+          "unitsPerShare": "8098083993000000",
+          "weightBps": 5000
+        },
+        {
+          "symbol": "PLTR",
+          "token": "0x1FBE1a0e43594b3455993B5dE5Fd0A7A266298d0",
+          "unitsPerShare": "15199878401000000",
+          "weightBps": 3000
+        },
+        {
+          "symbol": "TSLA",
+          "token": "0xC9f9c86933092BbbfFF3CCb4b105A4A94bf3Bd4E",
+          "unitsPerShare": "5375477074000000",
+          "weightBps": 2000
+        }
+      ],
+      "pricedAt": {
+        "AMD": 617.43,
+        "PLTR": 197.37,
+        "TSLA": 372.06
+      },
+      "seeded": "1.0"
+    },
+    {
+      "symbol": "PRIME",
+      "name": "Prime Time",
+      "address": "0xF27F9802B96DB4a311Dc27E6503B71091E5671D9",
+      "feeBps": 0,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "AMZN",
+          "token": "0x5884aD2f920c162CFBbACc88C9C51AA75eC09E02",
+          "unitsPerShare": "21585980887000000",
+          "weightBps": 5500
+        },
+        {
+          "symbol": "NFLX",
+          "token": "0x3b8262A63d25f0477c4DDE23F83cfe22Cb768C93",
+          "unitsPerShare": "63393674720000000",
+          "weightBps": 4500
+        }
+      ],
+      "pricedAt": {
+        "AMZN": 254.79500000000002,
+        "NFLX": 70.985
+      },
+      "seeded": "1.0"
+    }
+  ],
+  "deployedAt": "2026-10-08T18:41:31.679Z",
+  "smoke": {
+    "passedAt": "2026-10-08T18:42:46.357Z",
+    "basket": "HOOD5",
+    "orderId": 0,
+    "txs": {
+      "approve_basket_0": "0xdc347380a4619292a657d0bb6c0ee4fa1a584d606c5a19bd6eb5a6ac51217659",
+      "approve_basket_1": "0x1de5be486858cf1a697ed93c7781420e4dfa45ab947eb64f599ae8465c5877e9",
+      "approve_basket_2": "0x6350f572c57350eec9c92187b8d16050c766d21c85c696c9d550b6e791f5774f",
+      "approve_basket_3": "0xacaeafdb618c01261a70ba7d07c4d92502cdc269e30af4f8c086a1e1789a434f",
+      "approve_basket_4": "0x6ddfeff356e19d9da740d8e2e74ac26d99629c9fb5700faf865eb9590dc6dc88",
+      "mint": "0xe8f99fa3a19d6c46e6931b6a08cd324ab3987c3cacf5f247998f20104797e189",
+      "redeem": "0x4720dd16a3c5b36ce1d4d884f6b56e5ebfdd71c27f4c9b019986edd372a54094",
+      "approve_desk_cash": "0x5e2aa517c05e53173bd5dc7e0aca4e347d3970c993cafa391a7f078a65478c60",
+      "placeOrder": "0x84f35228821c7f2cb6919b2d942dfdca294b0f8e2f5d413ebbc83410e7e870c8",
+      "approve_desk_0": "0x7361c82076ffaeae71661219a93e51d85bb5b9860b1734351249918a797d9762",
+      "approve_desk_1": "0x2038143547f6ef492d67c9c6c7d1fa809f71e8214ecf50f02a65b73a5ee39211",
+      "approve_desk_2": "0xa3f91e067f9b99ec871f2b7c382b739041b2660abfffe09ffd262690c680296e",
+      "approve_desk_3": "0xe969aa4f2a470b679c4499c26dc6334b560ee99c492b6eb5838eb3f08b6304cc",
+      "approve_desk_4": "0xdeca00d521b6cc409443c392757f7b6abbe9d3c4f485f8d741085cc382aa74f8",
+      "fill": "0x054f65ab295cc52f8e655aed2f7e2f0bf1b73828a70af13b516f6a22f20926ca"
+    }
+  }
+}
