@@ -8,7 +8,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title Sheaf basket
-/// @notice A permissionless, in-kind index basket of Robinhood Stock Tokens.
+/// @notice A permissionless, in-kind index basket of tokenized stocks.
 ///
 /// A basket is a fixed recipe: for one whole share, hand the vault
 /// `unitsPerShare` raw units of each component and receive one share token.
@@ -19,10 +19,11 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// never be under-collateralised: deposits round up and withdrawals round down,
 /// so rounding dust always stays with the vault and every holder.
 ///
-/// Robinhood Stock Tokens apply corporate actions (splits, dividends) through a
-/// multiplier on the token, not by moving raw balances out of holders. A raw-unit
-/// recipe is therefore untouched by corporate actions, and whatever accrues to
-/// the token accrues to every share automatically.
+/// Tokenized stocks that apply corporate actions (splits, dividends) through a
+/// multiplier on the token, as Robinhood Stock Tokens do, never move raw
+/// balances out of holders. A raw-unit recipe is therefore untouched by
+/// corporate actions, and whatever accrues to the token accrues to every share
+/// automatically.
 ///
 /// The recipe is written once, at construction, and has no setter. There is no
 /// owner, no pause and no upgrade path.

@@ -5,3 +5,8 @@ artifacts
 typechain-types
 coverage
 coverage.json
+typechain
+deployments/localhost.json
+deployments/hardhat.json
+.env.*
+!.env.example

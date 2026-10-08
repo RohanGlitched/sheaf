@@ -7,7 +7,14 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "coverage": "hardhat coverage"
+    "coverage": "hardhat coverage",
+    "deploy:robinhood": "hardhat run scripts/deploy-chain.js --network robinhoodTestnet",
+    "deploy:tempo": "hardhat run scripts/deploy-chain.js --network tempoTestnet",
+    "smoke:robinhood": "hardhat run scripts/smoke.js --network robinhoodTestnet",
+    "smoke:tempo": "hardhat run scripts/smoke.js --network tempoTestnet",
+    "verify:robinhood": "hardhat run scripts/verify.js --network robinhoodTestnet",
+    "verify:tempo": "hardhat run scripts/verify-sourcify.js --network tempoTestnet",
+    "sip:tempo": "node scripts/tempo-sip.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
@@ -31,6 +38,7 @@
     "solidity-coverage": "^0.8.17",
     "ts-node": "^10.9.2",
     "typechain": "^8.3.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "viem": "2.56.8"
   }
 }

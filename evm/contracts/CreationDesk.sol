@@ -8,8 +8,9 @@ import {Basket} from "./Basket.sol";
 import {SheafFactory} from "./SheafFactory.sol";
 
 /// @title Sheaf creation desk
-/// @notice Cash creations settled in USDG, the way an ETF's authorised
-/// participants work, but open to anyone.
+/// @notice Cash creations settled in a dollar stablecoin (USDG on Robinhood
+/// Chain, a TIP-20 dollar on Tempo, a labelled mirror elsewhere; called `usdg`
+/// throughout), the way an ETF's authorised participants work, but open to anyone.
 ///
 /// A buyer who holds no stock tokens escrows USDG for a number of basket
 /// shares. Any participant who holds the components can fill the order: the
