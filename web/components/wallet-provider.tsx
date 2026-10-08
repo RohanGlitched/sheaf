@@ -5,7 +5,7 @@ import {
   ConnectionProvider,
   WalletProvider as AdapterWalletProvider,
 } from "@solana/wallet-adapter-react";
-import { WRITE_RPC } from "@/lib/config";
+import { WRITE_RPC, WRITE_WS } from "@/lib/config";
 
 /**
  * Wallets, without the stock modal.
@@ -20,7 +20,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const wallets = useMemo(() => [], []);
 
   return (
-    <ConnectionProvider endpoint={WRITE_RPC} config={{ commitment: "confirmed" }}>
+    <ConnectionProvider endpoint={WRITE_RPC} config={{ commitment: "confirmed", wsEndpoint: WRITE_WS }}>
       <AdapterWalletProvider wallets={wallets} autoConnect>
         {children}
       </AdapterWalletProvider>

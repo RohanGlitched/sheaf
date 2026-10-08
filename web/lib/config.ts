@@ -8,7 +8,7 @@
  * figure on screen stays real.
  */
 
-export const SITE_URL = "https://www.sheaf.vercel.app";
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://sheaf.vercel.app").replace(/\/$/, "");
 
 export const MAINNET_RPC =
   process.env.NEXT_PUBLIC_MAINNET_RPC ?? "https://api.mainnet-beta.solana.com";
@@ -18,11 +18,29 @@ export type WriteCluster = "devnet" | "localnet";
 export const WRITE_CLUSTER: WriteCluster =
   (process.env.NEXT_PUBLIC_WRITE_CLUSTER as WriteCluster) ?? "devnet";
 
+/**
+ * The write cluster's RPC. On the server it is Helius when a key is configured;
+ * in the browser it is this site's own /api/rpc, which forwards to the same
+ * endpoint, so the key never reaches a visitor and the public devnet RPC's rate
+ * limits never reach the page.
+ */
+function serverWriteRpc(): string {
+  const key = process.env.HELIUS_API_KEY?.trim();
+  if (WRITE_CLUSTER === "localnet") return "http://127.0.0.1:8899";
+  return key ? `https://devnet.helius-rpc.com/?api-key=${key}` : "https://api.devnet.solana.com";
+}
+
 export const WRITE_RPC =
-  process.env.NEXT_PUBLIC_WRITE_RPC ??
-  (WRITE_CLUSTER === "devnet"
-    ? "https://api.devnet.solana.com"
-    : "http://127.0.0.1:8899");
+  typeof window === "undefined"
+    ? serverWriteRpc()
+    : WRITE_CLUSTER === "localnet"
+      ? "http://127.0.0.1:8899"
+      : `${window.location.origin}/api/rpc`;
+
+/** Subscriptions cannot go through the proxy; the app confirms by polling, but a wallet may subscribe. */
+export const WRITE_WS = WRITE_CLUSTER === "localnet" ? "ws://127.0.0.1:8900" : "wss://api.devnet.solana.com";
+
+export const serverRpcUrl = serverWriteRpc;
 
 export const SHEAF_PROGRAM_ID =
   process.env.NEXT_PUBLIC_SHEAF_PROGRAM_ID ??
