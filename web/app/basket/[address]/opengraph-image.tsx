@@ -5,20 +5,19 @@ import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint } from "@/lib/mirror";
 import { slotColor } from "@/lib/palette";
 import { fetchBasketAt } from "@/lib/sheaf";
-import { squarify } from "@/lib/treemap";
+import { sheafDataUri } from "@/lib/sheaf-svg";
 
 export const alt = "A Sheaf basket: what one share holds and what it is worth";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const MOSAIC = 470;
 
 export default async function Image({ params }: { params: Promise<{ address: string }> }) {
   const { address } = await params;
   const dir = join(process.cwd(), "app/_og");
-  const [fraunces, archivo, basket, market] = await Promise.all([
-    readFile(join(dir, "fraunces.ttf")),
-    readFile(join(dir, "archivo.ttf")),
+  const [funnel, host, basket, market] = await Promise.all([
+    readFile(join(dir, "funnel-500.ttf")),
+    readFile(join(dir, "host-400.ttf")),
     fetchBasketAt(address),
     // Unfurlers give up after a few seconds; better a card without a price than none.
     Promise.race([
@@ -50,107 +49,64 @@ export default async function Image({ params }: { params: Promise<{ address: str
       : null;
   const share = (p: (typeof parts)[number]) =>
     nav ? (p.value! / nav) * 100 : p.weightBps / 100;
-  const tiles = squarify(
-    parts.map((p) => ({ key: p.key, value: share(p) })),
-    MOSAIC,
-    MOSAIC,
-    6,
-  );
   const byKey = new Map(parts.map((p) => [p.key, p]));
   const name = basket?.name ?? "A Sheaf basket";
 
+  const sheaf = sheafDataUri(parts.map((p) => ({ key: p.key, weight: share(p) / 100, color: p.color })));
+  const top = [...parts].sort((x, y) => share(y) - share(x)).slice(0, 5);
+
   return new ImageResponse(
     (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          background: "#0a1224",
-          padding: 72,
-          fontFamily: "Archivo",
-          color: "#ede6d6",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", width: 560 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <svg width="30" height="30" viewBox="0 0 24 24">
-              <rect x="0" y="0" width="11" height="11" fill="#b18827" />
-              <rect x="13" y="0" width="11" height="6" fill="#ede6d6" opacity="0.55" />
-              <rect x="13" y="8" width="11" height="3" fill="#ede6d6" opacity="0.3" />
-              <rect x="0" y="13" width="6" height="11" fill="#ede6d6" opacity="0.4" />
-              <rect x="8" y="13" width="16" height="11" fill="#ede6d6" opacity="0.22" />
+      <div style={{ width: "100%", height: "100%", display: "flex", background: "#eef1ec", padding: "60px 72px", fontFamily: "Host", color: "#14251c" }}>
+        <div style={{ display: "flex", flexDirection: "column", width: 640 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <svg width="34" height="34" viewBox="0 0 24 24">
+              <path d="M12 2.5 V21.5 M6.4 3.6 L15.6 21 M17.6 3.6 L8.4 21" stroke="#14251c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
+              <rect x="6.6" y="13" width="10.8" height="4" rx="1.4" fill="#3438c9" />
             </svg>
-            <span style={{ fontFamily: "Fraunces", fontSize: 30 }}>Sheaf</span>
+            <span style={{ fontFamily: "Funnel", fontSize: 34, letterSpacing: -1 }}>sheaf</span>
           </div>
-          <div
-            style={{
-              fontFamily: "Fraunces",
-              fontSize: name.length > 18 ? 58 : 76,
-              lineHeight: 1.02,
-              marginTop: 44,
-              letterSpacing: -1,
-            }}
-          >
+          <div style={{ fontFamily: "Funnel", fontSize: name.length > 18 ? 66 : 84, lineHeight: 0.98, letterSpacing: -3, marginTop: 44 }}>
             {name}
           </div>
           {basket && (
-            <div style={{ fontSize: 24, marginTop: 18, color: "#b3ab9c" }}>
+            <div style={{ fontSize: 24, marginTop: 16, color: "#44544a" }}>
               {`${basket.symbol} · ${parts.length} ${parts.length === 1 ? "holding" : "holdings"} · creator fee ${(basket.creatorFeeBps / 100).toFixed(2)}%`}
             </div>
           )}
           {nav != null && (
-            <div style={{ display: "flex", alignItems: "baseline", gap: 20, marginTop: 40 }}>
-              <span style={{ fontFamily: "Fraunces", fontSize: 64 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginTop: 34 }}>
+              <span style={{ fontFamily: "Funnel", fontSize: 60, letterSpacing: -2 }}>
                 {`$${nav.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
-              <span style={{ fontSize: 22, color: "#7c8090" }}>one share</span>
+              <span style={{ fontSize: 22, color: "#65726a" }}>one share</span>
               {change != null && (
-                <span style={{ fontSize: 24, color: change >= 0 ? "#05aa9e" : "#e46a49" }}>
+                <span style={{ fontSize: 24, color: change >= 0 ? "#0b7a6b" : "#b8432c" }}>
                   {`${change >= 0 ? "+" : "−"}${Math.abs(change).toFixed(2)}% today`}
                 </span>
               )}
             </div>
           )}
-          <div style={{ display: "flex", gap: 12, marginTop: "auto", fontSize: 20, color: "#7c8090" }}>
-            <span style={{ color: "#b18827" }}>Backed share for share on Solana</span>
-            <span>·</span>
-            <span>sheaf.vercel.app</span>
+          <div style={{ display: "flex", gap: 28, marginTop: "auto", fontSize: 21, color: "#44544a" }}>
+            {top.map((p) => (
+              <span key={p.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 6, background: p.color }} />
+                {`${p.base} ${share(p).toFixed(0)}%`}
+              </span>
+            ))}
           </div>
         </div>
-        <div style={{ display: "flex", position: "relative", marginLeft: "auto", width: MOSAIC, height: MOSAIC, marginTop: 4 }}>
-          {tiles.map((tile) => {
-            const p = byKey.get(tile.key)!;
-            const roomy = tile.width > 90 && tile.height > 60;
-            return (
-              <div
-                key={tile.key}
-                style={{
-                  position: "absolute",
-                  left: tile.x,
-                  top: tile.y,
-                  width: tile.width,
-                  height: tile.height,
-                  background: p.color,
-                  display: "flex",
-                  flexDirection: "column",
-                  padding: 12,
-                  color: "#0a1224",
-                }}
-              >
-                {roomy && <span style={{ fontSize: 20, fontWeight: 600 }}>{p.base}</span>}
-                {roomy && <span style={{ fontSize: 17, opacity: 0.75 }}>{`${share(p).toFixed(1)}%`}</span>}
-              </div>
-            );
-          })}
+        <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={sheaf} width={420} height={450} alt="" />
         </div>
       </div>
     ),
     {
       ...size,
       fonts: [
-        { name: "Fraunces", data: fraunces, style: "normal", weight: 500 },
-        { name: "Archivo", data: archivo, style: "normal", weight: 400 },
+        { name: "Funnel", data: funnel, style: "normal", weight: 500 },
+        { name: "Host", data: host, style: "normal", weight: 400 },
       ],
     },
   );

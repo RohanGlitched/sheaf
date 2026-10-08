@@ -33,6 +33,8 @@ type Props = {
   bandNote?: string;
   className?: string;
   title?: string;
+  /** Band color; defaults to the theme's binding color. Pass a hex when the SVG is rendered outside the page (share images). */
+  band?: string;
 };
 
 const W = 560;
@@ -42,7 +44,9 @@ const CY = 420;
 
 const deg = (r: number) => (r * 180) / Math.PI;
 
-function layout(stalks: Stalk[]) {
+export const SHEAF_BOX = { W, H, CX, CY };
+
+export function sheafLayout(stalks: Stalk[]) {
   const n = stalks.length;
   if (n === 0) return [];
   // Heaviest stalks stand in the middle, lighter ones lean outward.
@@ -77,28 +81,25 @@ function layout(stalks: Stalk[]) {
   });
 }
 
+/** The grains of one ear: seven seeds alternating either side of the stalk's tip. */
+export function earSeeds(x: number, y: number, ux: number, uy: number) {
+  const px = -uy;
+  const py = ux;
+  const a = deg(Math.atan2(uy, ux)) + 90;
+  return Array.from({ length: 7 }, (_, k) => {
+    const side = k % 2 === 0 ? 1 : -1;
+    const along = 6.4 * k + 4;
+    return { cx: x - ux * along + px * 3.4 * side, cy: y - uy * along + py * 3.4 * side, rot: a + side * 22 };
+  });
+}
+
 function Ear({ x, y, ux, uy, color }: { x: number; y: number; ux: number; uy: number; color: string }) {
   const px = -uy;
   const py = ux;
   const a = deg(Math.atan2(uy, ux)) + 90;
-  const seeds = [];
-  for (let k = 0; k < 7; k++) {
-    const side = k % 2 === 0 ? 1 : -1;
-    const along = 6.4 * k + 4;
-    const cx = x - ux * along + px * 3.4 * side;
-    const cy = y - uy * along + py * 3.4 * side;
-    seeds.push(
-      <ellipse
-        key={k}
-        cx={cx}
-        cy={cy}
-        rx={3.5}
-        ry={7.2}
-        transform={`rotate(${a + side * 22} ${cx} ${cy})`}
-        fill={color}
-      />,
-    );
-  }
+  const seeds = earSeeds(x, y, ux, uy).map((g, k) => (
+    <ellipse key={k} cx={g.cx} cy={g.cy} rx={3.5} ry={7.2} transform={`rotate(${g.rot} ${g.cx} ${g.cy})`} fill={color} />
+  ));
   return (
     <g>
       {seeds}
@@ -128,8 +129,8 @@ function Ear({ x, y, ux, uy, color }: { x: number; y: number; ux: number; uy: nu
   );
 }
 
-export function SheafMark({ stalks, labels = false, animate = false, bandNote, className, title }: Props) {
-  const placed = layout(stalks);
+export function SheafMark({ stalks, labels = false, animate = false, bandNote, className, title, band = "var(--color-bind)" }: Props) {
+  const placed = sheafLayout(stalks);
   const n = placed.length;
   const bandW = 34 + Math.min(n, 8) * 9;
   const strokeW = labels ? 3.2 : 4.2;
@@ -186,7 +187,7 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
             width={bandW}
             height={26}
             rx={8}
-            fill="var(--color-bind)"
+            fill={band}
           />
           <rect
             x={CX - bandW / 2 + 5}
