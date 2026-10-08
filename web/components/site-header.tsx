@@ -9,6 +9,7 @@ import { ConnectButton } from "./connect-button";
 const NAV = [
   { href: "/compose", label: "Create" },
   { href: "/explore", label: "Explore" },
+  { href: "/plans", label: "Plans" },
   { href: "/chains", label: "Chains" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/ledger", label: "Ledger" },
