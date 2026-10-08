@@ -116,7 +116,7 @@ const BY_SYMBOL = new Map([
 const ALL_MIRROR = { ...MIRROR, ...PRESTOCKS_MIRROR };
 
 const idl = JSON.parse(
-  fs.readFileSync(path.join(ROOT, "target/idl/sheaf.json"), "utf8"),
+  fs.readFileSync(path.join(ROOT, "web/lib/sheaf-idl.json"), "utf8"),
 );
 const PROGRAM_ID = new PublicKey(idl.address);
 

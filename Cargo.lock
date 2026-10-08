@@ -1409,6 +1409,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheaf"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "spl-token-2022",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2684,15 +2693,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tessera"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "anchor-spl",
- "spl-token-2022",
 ]
 
 [[package]]

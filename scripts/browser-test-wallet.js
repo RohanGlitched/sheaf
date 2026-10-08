@@ -156,6 +156,9 @@ export function installTestWallet() {
         detail: ({ register }) => register(wallet),
       }),
     );
+    // An app that loads after this script asks again; answer it too, as a real
+    // wallet extension does.
+    window.addEventListener("wallet-standard:app-ready", ({ detail: api }) => api.register(wallet));
 
     return address;
   })();

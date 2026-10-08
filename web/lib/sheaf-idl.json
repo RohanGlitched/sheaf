@@ -1,12 +1,171 @@
 {
-  "address": "F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ",
+  "address": "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz",
   "metadata": {
     "name": "sheaf",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Sheaf: permissionless in-kind index baskets for tokenized equities on Solana"
+    "description": "Sheaf: permissionless in-kind index baskets for tokenized equities on Solana, with an oracle-free Dutch-auction cash desk and recurring buy plans"
   },
   "instructions": [
+    {
+      "name": "cancel_order",
+      "docs": [
+        "Cancel an order and refund its cash to the buyer. The buyer may cancel",
+        "at any time; after `end_ts` anyone may, as a clean-up crank. The refund",
+        "always goes to a cash account the buyer owns."
+      ],
+      "discriminator": [
+        95,
+        129,
+        237,
+        240,
+        8,
+        49,
+        223,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "order",
+          "writable": true
+        },
+        {
+          "name": "buyer",
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "cash_mint",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "order"
+              },
+              {
+                "kind": "account",
+                "path": "cash_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "cash_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "buyer_cash_account",
+          "docs": [
+            "Any cash account the buyer owns; a stranger cannot redirect the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "cash_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_plan",
+      "docs": [
+        "Close a plan. Revokes the plan's allowance on the owner's cash account",
+        "when it is still the delegate there; orders already placed by the plan",
+        "stay open and can still be filled or cancelled."
+      ],
+      "discriminator": [
+        45,
+        137,
+        184,
+        220,
+        162,
+        253,
+        161,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "plan"
+          ]
+        },
+        {
+          "name": "plan",
+          "writable": true
+        },
+        {
+          "name": "owner_cash_account",
+          "docs": [
+            "closed, so it is decoded leniently in the handler."
+          ],
+          "writable": true
+        },
+        {
+          "name": "cash_token_program"
+        }
+      ],
+      "args": []
+    },
     {
       "name": "create_basket",
       "docs": [
@@ -96,6 +255,222 @@
       ]
     },
     {
+      "name": "fill_order",
+      "docs": [
+        "Fill an open order: deliver the components, the buyer gets the shares,",
+        "the filler gets the cash. Permissionless.",
+        "",
+        "The auction's current share count is what the buyer *receives*. The",
+        "filler delivers components for `gross` shares, the smallest count whose",
+        "creator fee (computed exactly as in `mint_shares`) leaves that much for",
+        "the buyer, and the creator receives `gross - received`.",
+        "",
+        "`remaining_accounts` is the same as `mint_shares`, with the filler's",
+        "component accounts as the source."
+      ],
+      "discriminator": [
+        232,
+        122,
+        115,
+        25,
+        199,
+        143,
+        136,
+        162
+      ],
+      "accounts": [
+        {
+          "name": "filler",
+          "signer": true
+        },
+        {
+          "name": "order",
+          "writable": true
+        },
+        {
+          "name": "basket",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "share_mint",
+          "writable": true
+        },
+        {
+          "name": "buyer",
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "buyer_share_account",
+          "docs": [
+            "Shares can only land in the buyer's canonical share account."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "buyer"
+              },
+              {
+                "kind": "account",
+                "path": "share_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "creator_share_account",
+          "docs": [
+            "(must be the basket creator) verified in the handler."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "cash_mint",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "order"
+              },
+              {
+                "kind": "account",
+                "path": "cash_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "cash_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "filler_cash_account",
+          "docs": [
+            "Where the filler wants the cash. The filler signs, so it is theirs to pick."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "plan",
+          "docs": [
+            "and decoded in the handler (it may have been closed since)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "share_token_program"
+        },
+        {
+          "name": "component_token_program"
+        },
+        {
+          "name": "cash_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "mint_shares",
       "docs": [
         "Deposit the recipe in kind and receive `shares` share tokens.",
@@ -132,6 +507,9 @@
         },
         {
           "name": "creator_share_account",
+          "docs": [
+            "(must be the basket creator) verified in the handler."
+          ],
           "writable": true,
           "optional": true
         },
@@ -146,6 +524,272 @@
         {
           "name": "shares",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "open_plan",
+      "docs": [
+        "Open a recurring buy and delegate `cash_per_run * runs` of the owner's",
+        "cash account to the plan PDA, in one instruction."
+      ],
+      "discriminator": [
+        61,
+        182,
+        105,
+        40,
+        217,
+        162,
+        28,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "basket"
+        },
+        {
+          "name": "plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "basket"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "plan_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash_mint"
+        },
+        {
+          "name": "owner_cash_account",
+          "writable": true
+        },
+        {
+          "name": "cash_token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "plan_id",
+          "type": "u64"
+        },
+        {
+          "name": "cash_per_run",
+          "type": "u64"
+        },
+        {
+          "name": "period_secs",
+          "type": "i64"
+        },
+        {
+          "name": "runs",
+          "type": "u32"
+        },
+        {
+          "name": "ref_shares_per_cash_e9",
+          "type": "u64"
+        },
+        {
+          "name": "band_bps",
+          "type": "u16"
+        },
+        {
+          "name": "auction_secs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "place_order",
+      "docs": [
+        "Escrow `cash_amount` of a cash mint and post a Dutch auction for shares.",
+        "",
+        "The number of shares the buyer must *receive* (net of the creator fee)",
+        "is `start_shares` until `start_ts`, decays linearly to `end_shares` at",
+        "`end_ts`, and the order cannot be filled after `end_ts`."
+      ],
+      "discriminator": [
+        51,
+        194,
+        155,
+        175,
+        109,
+        130,
+        96,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "basket"
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "basket"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash_mint"
+        },
+        {
+          "name": "buyer_cash_account",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The order PDA's own associated token account. `init_if_needed` so that",
+            "someone creating it first (it is a predictable address) cannot block",
+            "the order; the amount escrowed is measured as a balance delta."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "order"
+              },
+              {
+                "kind": "account",
+                "path": "cash_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "cash_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "cash_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "cash_amount",
+          "type": "u64"
+        },
+        {
+          "name": "start_shares",
+          "type": "u64"
+        },
+        {
+          "name": "end_shares",
+          "type": "u64"
+        },
+        {
+          "name": "start_ts",
+          "type": "i64"
+        },
+        {
+          "name": "end_ts",
+          "type": "i64"
         }
       ]
     },
@@ -197,6 +841,150 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "run_plan",
+      "docs": [
+        "Turn one slice of a plan into a desk order. Permissionless: whoever",
+        "cranks pays the order's rent and gets it back when the order closes."
+      ],
+      "discriminator": [
+        205,
+        186,
+        38,
+        138,
+        7,
+        106,
+        83,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "plan",
+          "writable": true
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "plan.basket",
+                "account": "Plan"
+              },
+              {
+                "kind": "account",
+                "path": "plan.owner",
+                "account": "Plan"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash_mint",
+          "relations": [
+            "plan"
+          ]
+        },
+        {
+          "name": "owner_cash_account",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "order"
+              },
+              {
+                "kind": "account",
+                "path": "cash_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "cash_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "cash_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -212,6 +1000,32 @@
         218,
         248
       ]
+    },
+    {
+      "name": "Order",
+      "discriminator": [
+        134,
+        173,
+        223,
+        185,
+        77,
+        86,
+        28,
+        51
+      ]
+    },
+    {
+      "name": "Plan",
+      "discriminator": [
+        161,
+        231,
+        251,
+        119,
+        2,
+        12,
+        162,
+        2
+      ]
     }
   ],
   "events": [
@@ -226,6 +1040,84 @@
         85,
         8,
         7
+      ]
+    },
+    {
+      "name": "OrderCancelled",
+      "discriminator": [
+        108,
+        56,
+        128,
+        68,
+        168,
+        113,
+        168,
+        239
+      ]
+    },
+    {
+      "name": "OrderFilled",
+      "discriminator": [
+        120,
+        124,
+        109,
+        66,
+        249,
+        116,
+        174,
+        30
+      ]
+    },
+    {
+      "name": "OrderPlaced",
+      "discriminator": [
+        96,
+        130,
+        204,
+        234,
+        169,
+        219,
+        216,
+        227
+      ]
+    },
+    {
+      "name": "PlanClosed",
+      "discriminator": [
+        244,
+        135,
+        44,
+        167,
+        104,
+        238,
+        207,
+        12
+      ]
+    },
+    {
+      "name": "PlanOpened",
+      "discriminator": [
+        180,
+        40,
+        139,
+        132,
+        248,
+        34,
+        213,
+        58
+      ]
+    },
+    {
+      "name": "PlanRun",
+      "discriminator": [
+        30,
+        122,
+        22,
+        214,
+        159,
+        151,
+        245,
+        139
       ]
     },
     {
@@ -375,6 +1267,91 @@
       "code": 6023,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6024,
+      "name": "CreatorShareAccountOwner",
+      "msg": "Creator fee shares must go to an account the basket creator owns"
+    },
+    {
+      "code": 6025,
+      "name": "ZeroCash",
+      "msg": "Cash amount must be greater than zero"
+    },
+    {
+      "code": 6026,
+      "name": "BadAuctionShares",
+      "msg": "Auction shares must satisfy start >= end > 0"
+    },
+    {
+      "code": 6027,
+      "name": "BadAuctionWindow",
+      "msg": "Auction window must satisfy start_ts < end_ts and end in the future"
+    },
+    {
+      "code": 6028,
+      "name": "OrderExpired",
+      "msg": "The auction has ended; the order can only be cancelled"
+    },
+    {
+      "code": 6029,
+      "name": "OrderNotExpired",
+      "msg": "Only the buyer can cancel before the auction ends"
+    },
+    {
+      "code": 6030,
+      "name": "OrderAccountMismatch",
+      "msg": "Account does not match the order"
+    },
+    {
+      "code": 6031,
+      "name": "MissingPlanAccount",
+      "msg": "This order came from a plan; pass the plan account"
+    },
+    {
+      "code": 6032,
+      "name": "PlanMismatch",
+      "msg": "Plan account does not match the order"
+    },
+    {
+      "code": 6033,
+      "name": "PlanAccountMismatch",
+      "msg": "Account does not match the plan"
+    },
+    {
+      "code": 6034,
+      "name": "BadPlanSchedule",
+      "msg": "Plan needs a positive period, run count and auction length"
+    },
+    {
+      "code": 6035,
+      "name": "BadReferenceRate",
+      "msg": "Reference rate must be greater than zero"
+    },
+    {
+      "code": 6036,
+      "name": "BandTooWide",
+      "msg": "Plan band cannot exceed 50%"
+    },
+    {
+      "code": 6037,
+      "name": "PlanAmountTooSmall",
+      "msg": "Cash per run is too small to buy a raw share unit at this rate"
+    },
+    {
+      "code": 6038,
+      "name": "PlanTooEarly",
+      "msg": "The next run of this plan is not due yet"
+    },
+    {
+      "code": 6039,
+      "name": "PlanExhausted",
+      "msg": "This plan has no runs left"
+    },
+    {
+      "code": 6040,
+      "name": "DelegateInUse",
+      "msg": "Cash account already delegates a live allowance to someone else"
     }
   ],
   "types": [
@@ -530,6 +1507,497 @@
           {
             "name": "weight_bps",
             "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "docs": [
+        "A cash order on the desk. PDA: `[\"order\", basket, buyer, nonce_le]`.",
+        "Its escrow is the order PDA's associated token account for `cash_mint`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "docs": [
+              "Receives the shares (in their canonical share ATA) and any refund."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Paid the order's and escrow's rent; gets it back when the order closes.",
+              "The buyer for `place_order`, the cranker for `run_plan`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "plan",
+            "docs": [
+              "The plan that placed this order, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "cash_amount",
+            "docs": [
+              "Cash actually received into escrow (net of any Token-2022 transfer fee)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_shares",
+            "docs": [
+              "Shares the buyer receives, net of the creator fee, at `start_ts`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "end_shares",
+            "docs": [
+              "Shares the buyer receives at `end_ts`: the buyer's floor."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "plan",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_refunded",
+            "type": "u64"
+          },
+          {
+            "name": "expired",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderFilled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "filler",
+            "type": "pubkey"
+          },
+          {
+            "name": "plan",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "shares",
+            "docs": [
+              "Shares the buyer received."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_fee_shares",
+            "docs": [
+              "Shares the creator received on top; the filler delivered for both."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cash",
+            "docs": [
+              "Cash the order escrowed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cash_paid",
+            "docs": [
+              "Cash that left escrow to the filler (`cash` plus anything donated)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Raw cash units per whole share the buyer received, rounded down."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "filled_at",
+            "type": "i64"
+          },
+          {
+            "name": "plan_ref_shares_per_cash_e9",
+            "docs": [
+              "The plan's new reference rate, when this fill updated one."
+            ],
+            "type": {
+              "option": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderPlaced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "plan",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "cash_amount",
+            "type": "u64"
+          },
+          {
+            "name": "start_shares",
+            "type": "u64"
+          },
+          {
+            "name": "end_shares",
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Plan",
+      "docs": [
+        "A recurring buy. PDA: `[\"plan\", basket, owner, plan_id_le]`. It is the SPL",
+        "delegate of `cash_account` for the remaining allowance."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "plan_id",
+            "type": "u64"
+          },
+          {
+            "name": "cash_per_run",
+            "type": "u64"
+          },
+          {
+            "name": "period_secs",
+            "type": "i64"
+          },
+          {
+            "name": "runs_total",
+            "type": "u32"
+          },
+          {
+            "name": "runs_left",
+            "type": "u32"
+          },
+          {
+            "name": "next_run_ts",
+            "type": "i64"
+          },
+          {
+            "name": "ref_shares_per_cash_e9",
+            "docs": [
+              "Raw share units per raw cash unit, times 10^9. Follows every fill."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "band_bps",
+            "type": "u16"
+          },
+          {
+            "name": "auction_secs",
+            "type": "i64"
+          },
+          {
+            "name": "last_order",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "fills",
+            "type": "u32"
+          },
+          {
+            "name": "last_fill_ts",
+            "type": "i64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlanClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "plan",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "runs_done",
+            "type": "u32"
+          },
+          {
+            "name": "runs_left",
+            "type": "u32"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlanOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "plan",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_per_run",
+            "type": "u64"
+          },
+          {
+            "name": "period_secs",
+            "type": "i64"
+          },
+          {
+            "name": "runs",
+            "type": "u32"
+          },
+          {
+            "name": "ref_shares_per_cash_e9",
+            "type": "u64"
+          },
+          {
+            "name": "band_bps",
+            "type": "u16"
+          },
+          {
+            "name": "auction_secs",
+            "type": "i64"
+          },
+          {
+            "name": "allowance",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlanRun",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "plan",
+            "type": "pubkey"
+          },
+          {
+            "name": "order",
+            "type": "pubkey"
+          },
+          {
+            "name": "run",
+            "docs": [
+              "1-based index of this run."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cash",
+            "type": "u64"
+          },
+          {
+            "name": "start_shares",
+            "type": "u64"
+          },
+          {
+            "name": "end_shares",
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "ref_shares_per_cash_e9",
+            "type": "u64"
+          },
+          {
+            "name": "runs_left",
+            "type": "u32"
+          },
+          {
+            "name": "next_run_ts",
+            "type": "i64"
           }
         ]
       }

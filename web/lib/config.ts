@@ -44,7 +44,7 @@ export const serverRpcUrl = serverWriteRpc;
 
 export const SHEAF_PROGRAM_ID =
   process.env.NEXT_PUBLIC_SHEAF_PROGRAM_ID ??
-  "F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ";
+  "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz";
 
 /** Where a signature can be looked up, for the cluster it was signed on. */
 export function explorerTx(signature: string): string {

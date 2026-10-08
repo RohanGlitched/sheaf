@@ -9,9 +9,9 @@ import { CardSkeletons } from "./skeletons";
 
 /** Shown first, in this order; any other basket only fills a gap if one cannot be read. */
 const FEATURED = [
-  "5Z8XUzGVJjcYPxPZ6Hfxx8uJRNKibFcmZd7yStuSPr1p",
-  "6cUCq5GdhrdLGqJiy63iuc1epLFrEmAYQ45JvYEYGbg3",
-  "EQRdi2tYRbrdbWdxEV3Yv6oph9JVVB27gpNFr5DkrohG",
+  "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
+  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
 ];
 
 export function FeaturedBaskets() {

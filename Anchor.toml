@@ -6,7 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-tessera = "F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ"
+sheaf = "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz"
+
+[programs.devnet]
+sheaf = "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz"
 
 [registry]
 url = "https://api.apr.dev"

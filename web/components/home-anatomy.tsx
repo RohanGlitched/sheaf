@@ -9,7 +9,7 @@ import { Ticker } from "./ticker";
 import { money, percent, quantity, shortAddress } from "@/lib/format";
 
 /** The basket taken apart on the home page: The Big Five, the oldest one with holders. */
-const ANATOMY = "6cUCq5GdhrdLGqJiy63iuc1epLFrEmAYQ45JvYEYGbg3";
+const ANATOMY = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
 
 /**
  * One share, taken apart. The recipe's raw units, the live price and multiplier

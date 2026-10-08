@@ -1,12 +1,12 @@
 [package]
-name = "tessera"
+name = "sheaf"
 version = "0.1.0"
-description = "Tessera: permissionless in-kind index baskets for tokenized equities on Solana"
+description = "Sheaf: permissionless in-kind index baskets for tokenized equities on Solana, with an oracle-free Dutch-auction cash desk and recurring buy plans"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "tessera"
+name = "sheaf"
 
 [features]
 default = []
@@ -17,6 +17,6 @@ no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
-anchor-lang = "0.31.1"
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
 anchor-spl = { version = "0.31.1", features = ["token_2022"] }
 spl-token-2022 = { version = "6.0.0", features = ["no-entrypoint"] }

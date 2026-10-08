@@ -55,3 +55,6 @@ SUBMISSION.md
 TECHNICAL-VIDEO.md
 PITCH-VIDEO.md
 .shots/
+
+# Program and deploy keypairs
+.keys/

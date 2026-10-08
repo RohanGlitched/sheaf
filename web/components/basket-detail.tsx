@@ -24,6 +24,8 @@ import {
 import { symbolForWriteMint } from "@/lib/mirror";
 import { PRESTOCK_SYMBOLS, BY_SYMBOL_PRESTOCKS } from "@/lib/prestocks";
 import { BasketLaunch } from "./launch-market";
+import { DollarOrder } from "./dollar-order";
+import { PlanForm } from "./plan-form";
 import { BasketPredict } from "./basket-predict";
 import { ConnectButton } from "./connect-button";
 import { explorerAddress, explorerTx, WRITE_RPC } from "@/lib/config";
@@ -638,7 +640,14 @@ function Command({
 
 // ------------------------------------------------------------------ trade panel
 
-type Mode = "create" | "redeem";
+type Mode = "create" | "redeem" | "cash" | "plan";
+
+const TABS: { mode: Mode; label: string }[] = [
+  { mode: "cash", label: "With dollars" },
+  { mode: "plan", label: "Monthly" },
+  { mode: "create", label: "In kind" },
+  { mode: "redeem", label: "Redeem" },
+];
 
 function TradePanel({
   basket,
@@ -655,7 +664,7 @@ function TradePanel({
 }) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
-  const [mode, setMode] = useState<Mode>("create");
+  const [mode, setMode] = useState<Mode>("cash");
   const [amount, setAmount] = useState("1");
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<{ done: number; total: number } | null>(null);
@@ -739,32 +748,33 @@ function TradePanel({
   }
 
   return (
-    <div className="border border-line bg-raised">
-      <div className="grid grid-cols-2">
-        {(["create", "redeem"] as Mode[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => {
-              setMode(tab);
-              setSignature(null);
-              setError(null);
-            }}
-            aria-pressed={mode === tab}
-            className="border-b px-4 py-4 text-sm transition-colors rounded-[var(--radius-control)]"
-            style={{
-              borderColor: mode === tab ? "var(--color-bind)" : "var(--color-line)",
-              color:
-                mode === tab ? "var(--color-ink)" : "var(--color-ink-3)",
-              background:
-                mode === tab ? "var(--color-sunk)" : "transparent",
-            }}
-          >
-            {tab === "create" ? "Create shares" : "Redeem shares"}
-          </button>
-        ))}
+    <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
+      <div className="p-2">
+        <div className="grid grid-cols-4 gap-1 rounded-[var(--radius-control)] bg-sunk p-1" role="tablist" aria-label="How to get shares">
+          {TABS.map((tab) => (
+            <button
+              key={tab.mode}
+              type="button"
+              role="tab"
+              aria-selected={mode === tab.mode}
+              onClick={() => {
+                setMode(tab.mode);
+                setSignature(null);
+                setError(null);
+              }}
+              className={`rounded-[8px] px-2 py-2 text-[13px] transition-all ${
+                mode === tab.mode ? "bg-surface text-ink shadow-[0_1px_3px_rgb(20_37_28/0.15)]" : "text-ink-3 hover:text-ink"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {mode === "cash" && <DollarOrder basket={basket} navPerShare={navPerShare} onDone={onDone} />}
+      {mode === "plan" && <PlanForm basket={basket} navPerShare={navPerShare} onDone={onDone} />}
+      {(mode === "create" || mode === "redeem") && (
       <div className="p-6">
         <label className="block">
           <span className="text-xs text-ink-3">
@@ -939,6 +949,7 @@ function TradePanel({
             : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favor."}
         </p>
       </div>
+      )}
     </div>
   );
 }
