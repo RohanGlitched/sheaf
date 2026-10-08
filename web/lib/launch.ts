@@ -13,7 +13,7 @@ import { SITE_URL } from "./config";
 /** The curve opens at half the basket's NAV and graduates at twenty times it. */
 export const OPEN_MULTIPLE = 0.5;
 export const GRADUATION_MULTIPLE = 20;
-/** Share of curve trading fees that goes to the basket's creator; the rest to Tessera. */
+/** Share of curve trading fees that goes to the basket's creator; the rest to Sheaf. */
 export const CREATOR_FEE_SHARE = 50;
 
 /**

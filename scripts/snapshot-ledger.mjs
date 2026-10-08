@@ -9,7 +9,7 @@
  *   node scripts/snapshot-ledger.mjs [--url https://api.devnet.solana.com]
  *
  * The decoder below mirrors web/lib/ledger.ts (the event layouts come from
- * target/idl/tessera.json). If the program's events change, change both.
+ * target/idl/sheaf.json). If the program's events change, change both.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

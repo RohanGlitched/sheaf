@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import { BasketDetail } from "@/components/basket-detail";
 import { stockForWriteMint } from "@/lib/mirror";
-import { fetchBasketAt } from "@/lib/tessera";
+import { fetchBasketAt } from "@/lib/sheaf";
 
 // Read once per request; the metadata and the page both need it.
 const readBasket = cache(fetchBasketAt);

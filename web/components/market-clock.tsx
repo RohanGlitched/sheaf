@@ -41,10 +41,10 @@ export function MarketClock({ compact = false }: { compact?: boolean }) {
       <div className="flex items-center gap-2 text-xs">
         <span
           aria-hidden
-          className={`size-1.5 ${state?.open ? "bg-gain pulse" : "bg-ivory-faint"}`}
+          className={`size-1.5 ${state?.open ? "bg-gain pulse" : "bg-ink-3"}`}
           style={{ clipPath: "polygon(50% 0,100% 50%,50% 100%,0 50%)" }}
         />
-        <span className="text-ivory-dim">
+        <span className="text-ink-2">
           {state == null
             ? " "
             : state.open
@@ -52,7 +52,7 @@ export function MarketClock({ compact = false }: { compact?: boolean }) {
               : "NYSE closed"}
         </span>
         {state?.secondsToFlip != null && (
-          <span className="tnum text-ivory-faint">
+          <span className="tnum text-ink-3">
             {duration(state.secondsToFlip)}
           </span>
         )}
@@ -61,25 +61,25 @@ export function MarketClock({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="grid divide-y divide-rule border border-rule sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+    <div className="grid divide-y divide-line border border-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
       <div className="p-5">
         <div className="flex items-baseline justify-between gap-3">
-          <h3 className="text-sm text-ivory-dim">New York Stock Exchange</h3>
+          <h3 className="text-sm text-ink-2">New York Stock Exchange</h3>
           <span
             aria-hidden
-            className={`size-2 shrink-0 ${state?.open ? "bg-gain" : "bg-ivory-faint"}`}
+            className={`size-2 shrink-0 ${state?.open ? "bg-gain" : "bg-ink-3"}`}
             style={{ clipPath: "polygon(50% 0,100% 50%,50% 100%,0 50%)" }}
           />
         </div>
-        <p className="display mt-3 text-3xl text-ivory">
+        <p className="display mt-3 text-3xl text-ink">
           {state == null ? " " : state.open ? "Open" : "Closed"}
         </p>
-        <p className="mt-2 text-sm text-ivory-faint">
+        <p className="mt-2 text-sm text-ink-3">
           {state == null ? " " : CLOSED_REASON[state.reason]}
         </p>
         {state?.secondsToFlip != null && (
-          <p className="mt-4 text-sm text-ivory-dim">
-            <span className="tnum text-ivory">
+          <p className="mt-4 text-sm text-ink-2">
+            <span className="tnum text-ink">
               {duration(state.secondsToFlip)}
             </span>{" "}
             until it {state.edge.startsWith("opens") ? "opens" : "closes"}
@@ -88,20 +88,20 @@ export function MarketClock({ compact = false }: { compact?: boolean }) {
       </div>
       <div className="p-5">
         <div className="flex items-baseline justify-between gap-3">
-          <h3 className="text-sm text-ivory-dim">Solana</h3>
+          <h3 className="text-sm text-ink-2">Solana</h3>
           <span
             aria-hidden
             className="size-2 shrink-0 bg-gain pulse"
             style={{ clipPath: "polygon(50% 0,100% 50%,50% 100%,0 50%)" }}
           />
         </div>
-        <p className="display mt-3 text-3xl text-ivory">Open</p>
-        <p className="mt-2 text-sm text-ivory-faint">
+        <p className="display mt-3 text-3xl text-ink">Open</p>
+        <p className="mt-2 text-sm text-ink-3">
           No session, no holidays, no bell
         </p>
-        <p className="mt-4 text-sm text-ivory-dim">
+        <p className="mt-4 text-sm text-ink-2">
           Trades and settles in about{" "}
-          <span className="tnum text-ivory">400ms</span>
+          <span className="tnum text-ink">400ms</span>
         </p>
       </div>
     </div>

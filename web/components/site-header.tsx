@@ -22,7 +22,7 @@ export function SiteHeader() {
        in reach. On a phone the destinations move to a second row, and two rows of
        chrome following you down a 390-pixel screen is too much to ask, so there
        the header scrolls away with everything else. */
-    <header className="border-b border-rule bg-ground-deep/85 backdrop-blur-md sm:sticky sm:top-0 sm:z-40">
+    <header className="border-b border-line bg-page/85 backdrop-blur-md sm:sticky sm:top-0 sm:z-40">
       <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-6 px-5 sm:px-8">
         <Link href="/" className="shrink-0">
           <Wordmark />
@@ -38,13 +38,13 @@ export function SiteHeader() {
                 aria-current={active ? "page" : undefined}
                 className={`px-3 py-1.5 text-sm transition-colors ${
                   active
-                    ? "text-ivory"
-                    : "text-ivory-dim hover:text-ivory"
+                    ? "text-ink"
+                    : "text-ink-2 hover:text-ink"
                 }`}
               >
                 {item.label}
                 {active && (
-                  <span className="mt-1 block h-px bg-gold" aria-hidden />
+                  <span className="mt-1 block h-px bg-bind" aria-hidden />
                 )}
               </Link>
             );
@@ -60,7 +60,7 @@ export function SiteHeader() {
       </div>
 
       {/* The same destinations, laid as tiles across the full width. */}
-      <nav className="flex border-t border-rule text-sm sm:hidden">
+      <nav className="flex border-t border-line text-sm sm:hidden">
         {NAV.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -69,13 +69,13 @@ export function SiteHeader() {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={`flex-1 border-r border-rule py-3 text-center last:border-r-0 ${
-                active ? "bg-ground-raised text-ivory" : "text-ivory-dim"
+              className={`flex-1 border-r border-line py-3 text-center last:border-r-0 ${
+                active ? "bg-raised text-ink" : "text-ink-2"
               }`}
             >
               {item.label}
               {active && (
-                <span className="mx-auto mt-1 block h-px w-6 bg-gold" aria-hidden />
+                <span className="mx-auto mt-1 block h-px w-6 bg-bind" aria-hidden />
               )}
             </Link>
           );

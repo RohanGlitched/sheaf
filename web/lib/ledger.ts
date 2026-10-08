@@ -16,14 +16,14 @@
  * first visit starts from there and only reads what landed since. Every row links
  * to its transaction, so the snapshot is a cache, never the source of truth.
  *
- * The event layouts are copied from target/idl/tessera.json, which the program
+ * The event layouts are copied from target/idl/sheaf.json, which the program
  * itself emits; if the program changes, that file changes and so must this one.
  */
 
 import { Connection, PublicKey } from "@solana/web3.js";
-import { TESSERA_PROGRAM_ID } from "./config";
+import { SHEAF_PROGRAM_ID } from "./config";
 
-const PROGRAM_ID = new PublicKey(TESSERA_PROGRAM_ID);
+const PROGRAM_ID = new PublicKey(SHEAF_PROGRAM_ID);
 
 export type LedgerEntry = {
   signature: string;
@@ -60,7 +60,7 @@ const EVENT_MINTED = [127, 139, 238, 41, 118, 47, 122, 39];
 const EVENT_REDEEMED = [232, 166, 7, 56, 67, 19, 42, 117];
 const ONE_SHARE = 1_000_000;
 const PREFIX = "Program data: ";
-const STORE = "tessera:ledger:v1";
+const STORE = "sheaf:ledger:v1";
 
 class Reader {
   private offset = 8;

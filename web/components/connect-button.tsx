@@ -72,7 +72,7 @@ export function ConnectButton({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="group flex items-center gap-2.5 border border-rule bg-ground-raised px-3.5 py-2 text-sm text-ivory transition-colors hover:border-rule-bright"
+          className="group flex items-center gap-2.5 border border-line bg-raised px-3.5 py-2 text-sm text-ink transition-colors hover:border-line-strong"
         >
           <span
             aria-hidden
@@ -82,8 +82,8 @@ export function ConnectButton({
           <span className="tnum">{shortAddress(publicKey.toBase58())}</span>
         </button>
         {open && (
-          <div className="absolute right-0 top-full z-50 mt-1.5 w-60 border border-rule bg-ground-raised p-1 shadow-2xl shadow-black/50">
-            <div className="px-3 py-2.5 text-xs text-ivory-faint">
+          <div className="absolute right-0 top-full z-50 mt-1.5 w-60 border border-line bg-raised p-1 shadow-2xl shadow-black/50">
+            <div className="px-3 py-2.5 text-xs text-ink-3">
               {wallet?.adapter.name} on {WRITE_CLUSTER}
             </div>
             <button
@@ -92,7 +92,7 @@ export function ConnectButton({
                 void navigator.clipboard.writeText(publicKey.toBase58());
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left text-sm text-ivory-dim transition-colors hover:bg-ground-high hover:text-ivory"
+              className="w-full px-3 py-2 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
             >
               Copy address
             </button>
@@ -102,7 +102,7 @@ export function ConnectButton({
                 void disconnect();
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left text-sm text-ivory-dim transition-colors hover:bg-ground-high hover:text-ivory"
+              className="w-full px-3 py-2 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
             >
               Disconnect
             </button>
@@ -120,39 +120,39 @@ export function ConnectButton({
         disabled={connecting}
         className={
           block
-            ? "w-full border border-gold bg-gold px-5 py-3.5 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:opacity-60"
-            : "border border-gold/60 bg-gold/10 px-4 py-2 text-sm text-ivory transition-colors hover:bg-gold/20 disabled:opacity-60"
+            ? "w-full border border-bind bg-bind px-5 py-3.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-60"
+            : "border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20 disabled:opacity-60"
         }
       >
         {connecting ? "Connecting…" : label}
       </button>
       {open && (
         <div
-          className={`absolute top-full z-50 mt-1.5 border border-rule bg-ground-raised p-1 shadow-2xl shadow-black/50 ${
+          className={`absolute top-full z-50 mt-1.5 border border-line bg-raised p-1 shadow-2xl shadow-black/50 ${
             block ? "left-0 right-0" : "right-0 w-64"
           }`}
         >
           {installed.length === 0 ? (
-            <div className="px-3 py-3 text-sm leading-relaxed text-ivory-dim">
-              <p>No Solana wallet in this browser. On a phone, open Tessera inside your wallet app:</p>
+            <div className="px-3 py-3 text-sm leading-relaxed text-ink-2">
+              <p>No Solana wallet in this browser. On a phone, open Sheaf inside your wallet app:</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {walletBrowseLinks().map((w) => (
                   <a
                     key={w.name}
                     href={w.href}
-                    className="border border-rule-bright px-3 py-2 text-xs text-ivory transition-colors hover:border-gold hover:text-gold"
+                    className="border border-line-strong px-3 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind"
                   >
                     Open in {w.name}
                   </a>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-ivory-faint">
+              <p className="mt-3 text-xs text-ink-3">
                 On a computer,{" "}
                 <a
                   href="https://phantom.app/download"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-gold underline decoration-gold/40 underline-offset-2"
+                  className="text-bind underline decoration-bind/40 underline-offset-2"
                 >
                   install Phantom
                 </a>{" "}
@@ -165,7 +165,7 @@ export function ConnectButton({
                 key={w.adapter.name}
                 type="button"
                 onClick={() => pick(w.adapter.name)}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-ivory-dim transition-colors hover:bg-ground-high hover:text-ivory"
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
               >
                 {w.adapter.icon && (
                   /* eslint-disable-next-line @next/next/no-img-element */

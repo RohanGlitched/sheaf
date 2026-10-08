@@ -9,7 +9,7 @@ import {
   fetchBasket,
   type Basket,
   type BasketJson,
-} from "./tessera";
+} from "./sheaf";
 import { WRITE_CLUSTER, WRITE_RPC } from "./config";
 
 /**

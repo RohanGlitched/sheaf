@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TESSERA_PROGRAM_ID, explorerAddress } from "@/lib/config";
+import { SHEAF_PROGRAM_ID, explorerAddress } from "@/lib/config";
 import { TREASURY } from "@/lib/dbc";
 import { shortAddress } from "@/lib/format";
 
@@ -26,25 +26,25 @@ export function Revenue() {
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
       <div className="max-w-[40ch]">
-        <h2 className="display text-title text-ivory">Nothing is charged for a basket. The markets pay.</h2>
-        <p className="mt-5 text-base leading-relaxed text-ivory-dim">
+        <h2 className="display text-title text-ink">Nothing is charged for a basket. The markets pay.</h2>
+        <p className="mt-5 text-base leading-relaxed text-ink-2">
           Creating a basket, creating shares and redeeming them cost nothing beyond Solana&rsquo;s fee, and the creator fee is the creator&rsquo;s in
-          full. Tessera&rsquo;s treasury is the Meteora partner on every launch curve instead, and is paid for as long as the token trades.
+          full. Sheaf&rsquo;s treasury is the Meteora partner on every launch curve instead, and is paid for as long as the token trades.
         </p>
-        <p className="mt-4 text-sm leading-relaxed text-ivory-faint">
+        <p className="mt-4 text-sm leading-relaxed text-ink-3">
           Treasury{" "}
-          <a href={explorerAddress(TREASURY.toBase58())} target="_blank" rel="noreferrer" className="tnum text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory">
+          <a href={explorerAddress(TREASURY.toBase58())} target="_blank" rel="noreferrer" className="tnum text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
             {shortAddress(TREASURY.toBase58(), 6, 4)}
           </a>
           : it claims fees and does nothing else.
         </p>
       </div>
-      <ol className="grid gap-px bg-rule sm:grid-cols-3">
+      <ol className="grid gap-px bg-line sm:grid-cols-3">
         {REVENUE.map((r) => (
-          <li key={r.title} className="bg-ground-deep p-6">
-            <p className="tnum display text-5xl text-gold">{r.share}</p>
-            <p className="mt-3 text-sm text-ivory">{r.title}</p>
-            <p className="mt-2 text-xs leading-relaxed text-ivory-faint">{r.body}</p>
+          <li key={r.title} className="bg-page p-6">
+            <p className="tnum display text-5xl text-bind">{r.share}</p>
+            <p className="mt-3 text-sm text-ink">{r.title}</p>
+            <p className="mt-2 text-xs leading-relaxed text-ink-3">{r.body}</p>
           </li>
         ))}
       </ol>
@@ -79,13 +79,13 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
   },
   {
     what: "The faucet key",
-    who: "Tessera's server",
+    who: "Sheaf's server",
     can: "Mint the devnet mirror tokens for a visitor.",
     cannot: "Touch a basket, a vault or anything on mainnet.",
   },
   {
     what: "The treasury key",
-    who: "Tessera",
+    who: "Sheaf",
     can: "Claim the partner fees from launch markets.",
     cannot: "Change a fee, a curve or a basket.",
   },
@@ -103,20 +103,20 @@ export function Keys() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-[46ch]">
-          <h2 className="display text-title text-ivory">Who holds which key.</h2>
-          <p className="mt-4 text-base leading-relaxed text-ivory-dim">
+          <h2 className="display text-title text-ink">Who holds which key.</h2>
+          <p className="mt-4 text-base leading-relaxed text-ink-2">
             The whole trust model, in one table. The program never prices anything and nobody can edit a recipe, so there is very little a key could do
             even if it wanted to.
           </p>
         </div>
-        <a href={explorerAddress(TESSERA_PROGRAM_ID)} target="_blank" rel="noreferrer" className="tnum text-sm text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory">
-          Program {shortAddress(TESSERA_PROGRAM_ID, 6, 4)} on Solana Explorer
+        <a href={explorerAddress(SHEAF_PROGRAM_ID)} target="_blank" rel="noreferrer" className="tnum text-sm text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+          Program {shortAddress(SHEAF_PROGRAM_ID, 6, 4)} on Solana Explorer
         </a>
       </div>
-      <div className="mt-8 overflow-x-auto border border-rule">
+      <div className="mt-8 overflow-x-auto border border-line">
         <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
-            <tr className="bg-ground text-left text-xs text-ivory-faint">
+            <tr className="bg-surface text-left text-xs text-ink-3">
               <th className="px-4 py-3 font-normal">What</th>
               <th className="px-4 py-3 font-normal">Held by</th>
               <th className="px-4 py-3 font-normal">Can</th>
@@ -125,19 +125,19 @@ export function Keys() {
           </thead>
           <tbody>
             {KEYS.map((k) => (
-              <tr key={k.what} className="border-t border-rule align-top">
-                <td className="px-4 py-3 text-ivory">{k.what}</td>
-                <td className="px-4 py-3 text-ivory-dim">{k.who}</td>
-                <td className="px-4 py-3 text-ivory-dim">{k.can}</td>
-                <td className="px-4 py-3 text-ivory-dim">{k.cannot}</td>
+              <tr key={k.what} className="border-t border-line align-top">
+                <td className="px-4 py-3 text-ink">{k.what}</td>
+                <td className="px-4 py-3 text-ink-2">{k.who}</td>
+                <td className="px-4 py-3 text-ink-2">{k.can}</td>
+                <td className="px-4 py-3 text-ink-2">{k.cannot}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="mt-4 text-xs leading-relaxed text-ivory-faint">
-        Not yet audited. Tessera runs on devnet, holds no real assets, and will not hold real tokenised equities before an audit.{" "}
-        <Link href="/method" className="text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory">
+      <p className="mt-4 text-xs leading-relaxed text-ink-3">
+        Not yet audited. Sheaf runs on devnet, holds no real assets, and will not hold real tokenised equities before an audit.{" "}
+        <Link href="/method" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
           How the program is built
         </Link>
       </p>

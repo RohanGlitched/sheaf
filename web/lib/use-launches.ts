@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { openLaunches } from "./dbc";
-import type { Basket } from "./tessera";
+import type { Basket } from "./sheaf";
 
 /** The set of these baskets that have an open launch market. */
 export function useOpenLaunches(baskets: Basket[] | null): Set<string> {

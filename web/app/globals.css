@@ -1,46 +1,54 @@
-@import "tailwindcss";
+@import "tailwindcss" source("../");
 
 /*
-  Tessera's surfaces are a deep lapis, the ground of a Byzantine mosaic, with
-  limestone-ivory type over it. Data colours live in lib/palette.ts and are
-  validated by scripts/build-palette.mjs — never hand-pick a chart colour here.
+  Sheaf is a light, cool field: a pale haze ground, white surfaces, text in a
+  deep chlorophyll ink, and one ultramarine "binding" colour for the band that
+  ties a basket together and for every action. Data colours live in
+  lib/palette.ts — never hand-pick a chart colour here.
 */
 @theme {
-  --color-ground: #0f1b33;
-  --color-ground-deep: #0a1224;
-  --color-ground-raised: #16233d;
-  --color-ground-high: #1d2c4a;
+  --color-page: #eef1ec;
+  --color-surface: #ffffff;
+  --color-raised: #f6f8f4;
+  --color-sunk: #e4e9e1;
 
-  --color-ivory: #ede6d6;
-  --color-ivory-dim: #b3ab9c;
-  --color-ivory-faint: #888c9c;
+  --color-ink: #14251c;
+  --color-ink-2: #44544a;
+  --color-ink-3: #65726a;
 
-  --color-rule: #24314e;
-  --color-rule-bright: #35446a;
+  --color-line: #dbe1d6;
+  --color-line-strong: #c2cbbd;
 
-  --color-gold: #b18827;
+  --color-bind: #3438c9;
+  --color-bind-deep: #262a9e;
+  --color-bind-wash: #e7e8fb;
 
-  --color-gain: #05aa9e;
-  --color-loss: #e46a49;
-  --color-flat: #616367;
+  --color-vault: #10201a;
+  --color-vault-ink: #e9efe7;
 
-  --font-display: var(--font-fraunces), Georgia, serif;
-  --font-sans: var(--font-archivo), system-ui, sans-serif;
+  --color-gain: #0b7a6b;
+  --color-loss: #b8432c;
+  --color-flat: #6b736e;
 
-  --text-hero: clamp(2.75rem, 7vw, 6rem);
-  --text-title: clamp(1.75rem, 3.2vw, 2.75rem);
+  --font-display: var(--font-funnel), system-ui, sans-serif;
+  --font-sans: var(--font-host), system-ui, sans-serif;
+
+  --text-hero: clamp(2.6rem, 6.4vw, 5.6rem);
+  --text-title: clamp(1.7rem, 3vw, 2.6rem);
+
+  --radius-panel: 18px;
+  --radius-control: 10px;
 }
 
 html {
-  background: var(--color-ground-deep);
-  color-scheme: dark;
+  background: var(--color-page);
+  color-scheme: light;
 }
 
 body {
-  background: var(--color-ground-deep);
-  color: var(--color-ivory);
+  background: var(--color-page);
+  color: var(--color-ink);
   font-family: var(--font-sans);
-  font-feature-settings: "cv05" 1;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -53,26 +61,21 @@ body {
 
 .display {
   font-family: var(--font-display);
-  font-optical-sizing: auto;
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 1.02;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 0.98;
 }
 
-/* A hairline that reads as inlaid grout rather than a border. */
-.grout {
-  border-color: var(--color-rule);
-}
 
 ::selection {
-  background: color-mix(in oklab, var(--color-gold) 45%, transparent);
-  color: var(--color-ivory);
+  background: var(--color-bind-wash);
+  color: var(--color-ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-gold);
+  outline: 2px solid var(--color-bind);
   outline-offset: 2px;
-  border-radius: 1px;
+  border-radius: 4px;
 }
 
 html {
@@ -95,7 +98,7 @@ html {
   }
 }
 
-@keyframes tessera-pulse {
+@keyframes sheaf-pulse {
   0%,
   100% {
     opacity: 1;
@@ -106,10 +109,10 @@ html {
 }
 
 .pulse {
-  animation: tessera-pulse 2.4s ease-in-out infinite;
+  animation: sheaf-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes tessera-rise {
+@keyframes sheaf-rise {
   from {
     opacity: 0;
     transform: translateY(14px);
@@ -118,7 +121,7 @@ html {
 
 /* First paint: the hero settles in line by line. */
 .rise {
-  animation: tessera-rise 640ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: sheaf-rise 640ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   animation-delay: calc(var(--i, 0) * 90ms);
 }
 
@@ -126,13 +129,13 @@ html {
    drive it from the scroll position; elsewhere they are simply there. */
 @supports (animation-timeline: view()) {
   .reveal {
-    animation: tessera-rise 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation: sheaf-rise 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
     animation-timeline: view();
     animation-range: entry 0% entry 30%;
   }
 }
 
-@keyframes tessera-ping {
+@keyframes sheaf-ping {
   to {
     transform: scale(2.8);
     opacity: 0;
@@ -148,7 +151,7 @@ html {
   inset: 0;
   border-radius: inherit;
   background: inherit;
-  animation: tessera-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: sheaf-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
 .lift {
@@ -159,21 +162,21 @@ html {
 }
 .lift:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 36px -20px rgb(0 0 0 / 0.7);
+  box-shadow: 0 18px 40px -24px rgb(20 37 28 / 0.35);
 }
 
 button:not(:disabled):active {
   transform: translateY(1px);
 }
 
-@keyframes tessera-tile-in {
+@keyframes sheaf-tile-in {
   from {
     opacity: 0;
   }
 }
 
 .mosaic-tile {
-  animation: tessera-tile-in 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: sheaf-tile-in 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 .mosaic-tile > rect,
@@ -189,10 +192,10 @@ button:not(:disabled):active {
 /* Thin scrollbars so dense tables do not gain a heavy chrome edge. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-rule-bright) transparent;
+  scrollbar-color: var(--color-line-strong) transparent;
 }
 
-@keyframes tessera-shimmer {
+@keyframes sheaf-shimmer {
   to {
     background-position: -200% 0;
   }
@@ -201,12 +204,12 @@ button:not(:disabled):active {
 .skeleton {
   background: linear-gradient(
       90deg,
-      var(--color-ground-raised) 30%,
-      var(--color-ground-high) 50%,
-      var(--color-ground-raised) 70%
+      var(--color-raised) 30%,
+      var(--color-sunk) 50%,
+      var(--color-raised) 70%
     )
     0 0 / 200% 100%;
-  animation: tessera-shimmer 1.6s linear infinite;
+  animation: sheaf-shimmer 1.6s linear infinite;
 }
 
 /* Native sliders pick their empty track from the accent's lightness, so dark
@@ -223,13 +226,13 @@ button:not(:disabled):active {
   background: linear-gradient(
     to right,
     var(--fill) var(--filled),
-    var(--color-rule-bright) var(--filled)
+    var(--color-line-strong) var(--filled)
   );
 }
 .slider::-moz-range-track {
   height: 4px;
   border-radius: 2px;
-  background: var(--color-rule-bright);
+  background: var(--color-line-strong);
 }
 .slider::-moz-range-progress {
   height: 4px;
@@ -242,21 +245,45 @@ button:not(:disabled):active {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 2px solid var(--color-ground-deep);
+  border: 2px solid var(--color-page);
   background: var(--fill);
 }
 .slider::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 2px solid var(--color-ground-deep);
+  border: 2px solid var(--color-page);
   background: var(--fill);
 }
 .slider:focus-visible {
-  outline: 2px solid var(--color-gold);
+  outline: 2px solid var(--color-bind);
   outline-offset: 3px;
 }
 .slider:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+/* The Sheaf mark: stalks gather from a loose fan into their bound angles, then
+   the band ties them. It plays once, on the home page only. */
+@keyframes sheaf-gather {
+  from {
+    transform: rotate(var(--a0, 0deg));
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+@keyframes sheaf-bind {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes sheaf-fade {
+  from {
+    opacity: 0;
+  }
 }

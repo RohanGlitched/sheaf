@@ -1,7 +1,7 @@
 /**
  * Build the mirror: a stand-in for every mainnet xStock on the write cluster.
  *
- * The twenty tokenised equities Tessera composes exist only on Solana mainnet, and
+ * The twenty tokenised equities Sheaf composes exist only on Solana mainnet, and
  * deploying an unaudited program that takes custody of real ones would be
  * reckless. So the write cluster gets a mirror instead — a mint per ticker,
  * created with the same extensions the real ones carry:
@@ -160,7 +160,7 @@ async function ensureMint(symbol, company, multiplier, existing) {
       mint.publicKey,
       8,
       payer.publicKey,
-      null, // no freeze authority, matching how Tessera treats a share mint
+      null, // no freeze authority, matching how Sheaf treats a share mint
       TOKEN_2022_PROGRAM_ID,
     ),
   );

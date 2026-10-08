@@ -1,10 +1,10 @@
 {
   "address": "F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ",
   "metadata": {
-    "name": "tessera",
+    "name": "sheaf",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Tessera: permissionless in-kind index baskets for tokenized equities on Solana"
+    "description": "Sheaf: permissionless in-kind index baskets for tokenized equities on Solana"
   },
   "instructions": [
     {

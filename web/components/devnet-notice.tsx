@@ -66,15 +66,15 @@ export function DevnetNotice() {
   }
 
   return (
-    <div role="status" className="border-b border-gold/30 bg-gold/[0.07]">
+    <div role="status" className="border-b border-bind/30 bg-bind/[0.07]">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-5 py-3 text-sm sm:px-8 md:flex-row md:items-center md:gap-6">
-        <p className="leading-relaxed text-ivory-dim md:flex-1">
-          <span className="text-ivory">
+        <p className="leading-relaxed text-ink-2 md:flex-1">
+          <span className="text-ink">
             {balance.lamports > 0
               ? "This wallet is running low on test SOL."
               : "This wallet has no test SOL yet."}
           </span>{" "}
-          Tessera runs on Solana devnet while it is in testing, so trying it is free: one click
+          Sheaf runs on Solana devnet while it is in testing, so trying it is free: one click
           sends enough to create a basket, create shares and open a launch market.
           {error && <span className="mt-1 block text-loss">{error}</span>}
         </p>
@@ -83,7 +83,7 @@ export function DevnetNotice() {
             type="button"
             onClick={fund}
             disabled={busy}
-            className="border border-gold bg-gold px-4 py-2 text-xs text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:opacity-60"
+            className="border border-bind bg-bind px-4 py-2 text-xs text-page transition-colors hover:bg-bind-deep disabled:opacity-60"
           >
             {busy ? "Sending…" : "Get free test SOL"}
           </button>
@@ -91,7 +91,7 @@ export function DevnetNotice() {
             href="https://faucet.solana.com"
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-ivory-faint underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+            className="text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink-2"
           >
             or faucet.solana.com
           </a>

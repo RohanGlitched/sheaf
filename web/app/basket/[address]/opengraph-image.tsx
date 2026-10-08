@@ -4,10 +4,10 @@ import { ImageResponse } from "next/og";
 import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint } from "@/lib/mirror";
 import { slotColor } from "@/lib/palette";
-import { fetchBasketAt } from "@/lib/tessera";
+import { fetchBasketAt } from "@/lib/sheaf";
 import { squarify } from "@/lib/treemap";
 
-export const alt = "A Tessera basket: what one share holds and what it is worth";
+export const alt = "A Sheaf basket: what one share holds and what it is worth";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -57,7 +57,7 @@ export default async function Image({ params }: { params: Promise<{ address: str
     6,
   );
   const byKey = new Map(parts.map((p) => [p.key, p]));
-  const name = basket?.name ?? "A Tessera basket";
+  const name = basket?.name ?? "A Sheaf basket";
 
   return new ImageResponse(
     (
@@ -81,7 +81,7 @@ export default async function Image({ params }: { params: Promise<{ address: str
               <rect x="0" y="13" width="6" height="11" fill="#ede6d6" opacity="0.4" />
               <rect x="8" y="13" width="16" height="11" fill="#ede6d6" opacity="0.22" />
             </svg>
-            <span style={{ fontFamily: "Fraunces", fontSize: 30 }}>Tessera</span>
+            <span style={{ fontFamily: "Fraunces", fontSize: 30 }}>Sheaf</span>
           </div>
           <div
             style={{
@@ -115,7 +115,7 @@ export default async function Image({ params }: { params: Promise<{ address: str
           <div style={{ display: "flex", gap: 12, marginTop: "auto", fontSize: 20, color: "#7c8090" }}>
             <span style={{ color: "#b18827" }}>Backed share for share on Solana</span>
             <span>·</span>
-            <span>teserra.world</span>
+            <span>sheaf.vercel.app</span>
           </div>
         </div>
         <div style={{ display: "flex", position: "relative", marginLeft: "auto", width: MOSAIC, height: MOSAIC, marginTop: 4 }}>

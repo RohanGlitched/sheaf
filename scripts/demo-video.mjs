@@ -13,7 +13,7 @@
  * than a browser extension, and the run prints every signature it produced so
  * each one can be checked on an explorer.
  *
- *   node scripts/demo-video.mjs --site https://tessera-fund.vercel.app
+ *   node scripts/demo-video.mjs --site https://sheaf-fund.vercel.app
  *
  * Writes demo/technical-demo.webm and demo/shots/NN-*.png. Follows the beats in
  * TECHNICAL-VIDEO.md, captioned so it reads without narration; pass
@@ -43,7 +43,7 @@ const flag = (name, fallback = null) => {
 };
 const has = (name) => args.includes(`--${name}`);
 
-const SITE = (flag("site") ?? "https://tessera-fund.vercel.app").replace(/\/$/, "");
+const SITE = (flag("site") ?? "https://sheaf-fund.vercel.app").replace(/\/$/, "");
 const OUT = path.resolve(flag("out") ?? path.join(ROOT, "demo"));
 const SHOTS = path.join(OUT, "shots");
 const CAPTIONS = !has("no-captions");
@@ -300,14 +300,14 @@ async function run(page) {
   await wait(1200);
   await say(
     page,
-    "Tessera",
+    "Sheaf",
     "An ETF launchpad on Solana. An index fund is a list of companies and a set of weights — everything else is administration.",
     5200,
   );
   await frame(page, "home");
   await say(
     page,
-    "Tessera",
+    "Sheaf",
     "Pick the list, set the weights, one transaction — and you get a token backed share for share by a vault anyone can read.",
     5000,
   );
@@ -652,8 +652,8 @@ async function run(page) {
   await wait(2500);
   await say(
     page,
-    "Tessera",
-    "Anchor program, three instructions, ten passing tests, zero oracles. Live at tessera-fund.vercel.app; the program and the tests are on GitHub.",
+    "Sheaf",
+    "Anchor program, three instructions, ten passing tests, zero oracles. Live at sheaf-fund.vercel.app; the program and the tests are on GitHub.",
     6000,
   );
   await frame(page, "close");

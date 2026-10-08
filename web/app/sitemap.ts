@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { Connection } from "@solana/web3.js";
 import { SITE_URL, WRITE_RPC } from "@/lib/config";
-import { fetchBaskets } from "@/lib/tessera";
+import { fetchBaskets } from "@/lib/sheaf";
 
 export const revalidate = 3600;
 

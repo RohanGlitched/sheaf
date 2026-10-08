@@ -45,7 +45,7 @@ import {
   tokenAccount,
   type Basket,
   type ComponentArg,
-} from "./tessera";
+} from "./sheaf";
 import { SHARE_DECIMALS } from "./config";
 import { confirmSignature } from "./confirm";
 
@@ -447,7 +447,7 @@ export async function buildRedeemShares(params: {
 }
 
 /** Turn a program error code into the sentence the program itself wrote. */
-export const TESSERA_ERRORS: Record<number, string> = {
+export const SHEAF_ERRORS: Record<number, string> = {
   6000: "The name has to be between 1 and 32 characters.",
   6001: "The symbol has to be between 1 and 10 characters.",
   6002: "The creator fee cannot be more than 1%.",
@@ -486,14 +486,14 @@ export function explainError(error: unknown): string {
   const custom = /custom program error: 0x([0-9a-f]+)/i.exec(raw);
   if (custom) {
     const code = parseInt(custom[1], 16);
-    if (TESSERA_ERRORS[code]) return TESSERA_ERRORS[code];
+    if (SHEAF_ERRORS[code]) return SHEAF_ERRORS[code];
   }
-  for (const [code, message] of Object.entries(TESSERA_ERRORS)) {
+  for (const [code, message] of Object.entries(SHEAF_ERRORS)) {
     if (raw.includes(code)) return message;
   }
 
   if (/no record of a prior credit|blockhash not found/i.test(raw)) {
-    return "Your wallet looks to be on a different network. Switch it to devnet, where Tessera settles, and try again.";
+    return "Your wallet looks to be on a different network. Switch it to devnet, where Sheaf settles, and try again.";
   }
   if (/insufficient lamports|insufficient funds/i.test(raw)) {
     return "Not enough SOL in the wallet to pay for this transaction.";

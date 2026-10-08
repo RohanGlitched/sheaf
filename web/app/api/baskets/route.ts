@@ -1,6 +1,6 @@
 import { Connection } from "@solana/web3.js";
 import { WRITE_RPC } from "@/lib/config";
-import { basketToJson, fetchBaskets } from "@/lib/tessera";
+import { basketToJson, fetchBaskets } from "@/lib/sheaf";
 
 /**
  * Every basket, read once for everybody. Listing baskets is a scan of the

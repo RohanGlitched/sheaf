@@ -8,7 +8,7 @@ import { useBaskets } from "@/lib/use-baskets";
 import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
 import { count, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
-import type { Basket } from "@/lib/tessera";
+import type { Basket } from "@/lib/sheaf";
 
 /**
  * The program's whole history, from its own logs.
@@ -61,7 +61,7 @@ export function useLedger(basket?: string) {
 }
 
 const KIND: Record<LedgerEntry["kind"], { label: string; color: string }> = {
-  created: { label: "Basket created", color: "var(--color-gold)" },
+  created: { label: "Basket created", color: "var(--color-bind)" },
   minted: { label: "Shares created", color: "var(--color-gain)" },
   redeemed: { label: "Shares redeemed", color: "var(--color-loss)" },
 };
@@ -88,10 +88,10 @@ export function LedgerTable({
   showBasket?: boolean;
 }) {
   return (
-    <div className="min-w-0 overflow-x-auto border border-rule">
+    <div className="min-w-0 overflow-x-auto border border-line">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-rule text-left text-xs text-ivory-faint">
+          <tr className="border-b border-line text-left text-xs text-ink-3">
             <th className="px-3 py-3 font-normal sm:px-4">When</th>
             <th className="px-3 py-3 font-normal sm:px-4">What</th>
             {showBasket && <th className="px-3 py-3 font-normal sm:px-4">Basket</th>}
@@ -106,38 +106,38 @@ export function LedgerTable({
             const basket = baskets.get(e.basket);
             const kind = KIND[e.kind];
             return (
-              <tr key={`${e.signature}-${e.kind}`} className="border-b border-rule/60 last:border-0">
-                <td className="tnum whitespace-nowrap px-3 py-3 text-ivory-dim sm:px-4" title={new Date(e.time * 1000).toISOString()}>
+              <tr key={`${e.signature}-${e.kind}`} className="border-b border-line/60 last:border-0">
+                <td className="tnum whitespace-nowrap px-3 py-3 text-ink-2 sm:px-4" title={new Date(e.time * 1000).toISOString()}>
                   {timeAgo(e.time)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 sm:px-4">
                   <span className="flex items-center gap-2">
                     <span aria-hidden className="size-2 shrink-0" style={{ background: kind.color }} />
-                    <span className="text-ivory">{kind.label}</span>
+                    <span className="text-ink">{kind.label}</span>
                   </span>
                 </td>
                 {showBasket && (
                   <td className="px-3 py-3 sm:px-4">
-                    <Link href={`/basket/${e.basket}`} className="text-ivory underline decoration-rule-bright underline-offset-4 hover:decoration-ivory-dim">
+                    <Link href={`/basket/${e.basket}`} className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
                       {basket?.symbol ?? e.symbol ?? shortAddress(e.basket)}
                     </Link>
-                    <span className="ml-2 hidden text-xs text-ivory-faint lg:inline">{basket?.name ?? e.name}</span>
+                    <span className="ml-2 hidden text-xs text-ink-3 lg:inline">{basket?.name ?? e.name}</span>
                   </td>
                 )}
                 <td className="tnum whitespace-nowrap px-3 py-3 sm:px-4">
-                  <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory">
+                  <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                     {shortAddress(e.actor)}
                   </a>
                 </td>
-                <td className="tnum px-3 py-3 text-right text-ivory sm:px-4">
+                <td className="tnum px-3 py-3 text-right text-ink sm:px-4">
                   {e.kind === "created"
                     ? `${e.componentCount} ${e.componentCount === 1 ? "holding" : "holdings"}`
                     : quantity(e.shares ?? 0, 4)}
-                  {e.feeShares ? <span className="block text-xs text-ivory-faint">+{quantity(e.feeShares, 4)} to the creator</span> : null}
+                  {e.feeShares ? <span className="block text-xs text-ink-3">+{quantity(e.feeShares, 4)} to the creator</span> : null}
                 </td>
-                <td className="tnum hidden px-4 py-3 text-xs text-ivory-faint md:table-cell">{describe(e, basket)}</td>
+                <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">{describe(e, basket)}</td>
                 <td className="tnum whitespace-nowrap px-3 py-3 text-right sm:px-4">
-                  <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory">
+                  <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                     {shortAddress(e.signature, 4, 4)}
                   </a>
                 </td>
@@ -175,8 +175,8 @@ export function LedgerPage() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-8">
         <div>
-          <h1 className="display text-hero leading-[0.95] text-ivory">The ledger</h1>
-          <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ivory-dim">
+          <h1 className="display text-hero leading-[0.95] text-ink">The ledger</h1>
+          <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
             Every basket created, every share created and every share redeemed,
             read from the events the program wrote into its own transactions.
             There is no database behind this page: anyone can rebuild it from the
@@ -192,15 +192,15 @@ export function LedgerPage() {
               ["Wallets", count(stats.wallets)],
             ].map(([label, value]) => (
               <div key={label}>
-                <dt className="text-xs text-ivory-faint">{label}</dt>
-                <dd className="display mt-1 text-xl text-ivory">{value}</dd>
+                <dt className="text-xs text-ink-3">{label}</dt>
+                <dd className="display mt-1 text-xl text-ink">{value}</dd>
               </div>
             ))}
           </dl>
         )}
       </div>
 
-      {loading && <p className="mt-12 text-sm text-ivory-faint">Reading the program&rsquo;s transactions…</p>}
+      {loading && <p className="mt-12 text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>}
       {error && (
         <p className="mt-12 border-l-2 border-loss pl-3 text-sm leading-relaxed text-loss">
           {ledger && ledger.done < ledger.total
@@ -212,7 +212,7 @@ export function LedgerPage() {
 
       {ledger && (
         <>
-          <p className="tnum mt-10 text-xs text-ivory-faint">
+          <p className="tnum mt-10 text-xs text-ink-3">
             {decoding
               ? `Decoding ${count(ledger.done)} of ${count(ledger.total)} transactions in your browser…`
               : `${count(ledger.entries.length)} events on ${WRITE_CLUSTER}`}
@@ -227,22 +227,22 @@ export function LedgerPage() {
           </p>
           <div className="mt-4">
             {ledger.entries.length === 0 && decoding ? (
-              <p className="text-sm text-ivory-faint">Reading the program&rsquo;s transactions…</p>
+              <p className="text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>
             ) : ledger.entries.length === 0 ? (
-              <p className="border border-dashed border-rule-bright/60 px-6 py-10 text-sm text-ivory-dim">
+              <p className="border border-dashed border-line-strong/60 px-6 py-10 text-sm text-ink-2">
                 The program has not settled anything yet.
               </p>
             ) : (
               <LedgerTable entries={ledger.entries} baskets={byAddress} />
             )}
           </div>
-          <p className="mt-6 max-w-[62ch] text-xs leading-relaxed text-ivory-faint">
-            Each row is one <code className="text-ivory-dim">BasketCreated</code>,{" "}
-            <code className="text-ivory-dim">SharesMinted</code> or{" "}
-            <code className="text-ivory-dim">SharesRedeemed</code> event, decoded from
-            the <code className="text-ivory-dim">Program data</code> lines of the
+          <p className="mt-6 max-w-[62ch] text-xs leading-relaxed text-ink-3">
+            Each row is one <code className="text-ink-2">BasketCreated</code>,{" "}
+            <code className="text-ink-2">SharesMinted</code> or{" "}
+            <code className="text-ink-2">SharesRedeemed</code> event, decoded from
+            the <code className="text-ink-2">Program data</code> lines of the
             transaction log, in your browser, against the public RPC. The decoder is{" "}
-            <code className="text-ivory-dim">web/lib/ledger.ts</code>. The repository
+            <code className="text-ink-2">web/lib/ledger.ts</code>. The repository
             carries what was decoded at the last release, and what this browser decodes
             on top stays here, so a visit only reads the transactions that are new. Every
             row links to its transaction, so neither is the source of truth; the chain is.
@@ -259,25 +259,25 @@ export function BasketHistory({ basket }: { basket: Basket }) {
   const baskets = useMemo(() => new Map([[basket.address, basket]]), [basket]);
   return (
     <section className="mt-16">
-      <h2 className="display text-title text-ivory">Everything that has happened to it</h2>
-      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ivory-dim">
+      <h2 className="display text-title text-ink">Everything that has happened to it</h2>
+      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
         Every creation and redemption since the basket was made, decoded from the
         program&rsquo;s own events. The full ledger across every basket is on{" "}
-        <Link href="/ledger" className="text-ivory underline decoration-rule-bright underline-offset-4 hover:decoration-ivory-dim">
+        <Link href="/ledger" className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
           one page
         </Link>
         .
       </p>
       <div className="mt-7">
-        {loading && <p className="text-sm text-ivory-faint">Reading the transactions…</p>}
+        {loading && <p className="text-sm text-ink-3">Reading the transactions…</p>}
         {error && <p className="text-sm text-loss">Could not read the history. {error}</p>}
         {ledger && ledger.entries.length === 0 && !decoding && (
-          <p className="border border-dashed border-rule-bright/60 px-6 py-8 text-sm text-ivory-dim">
+          <p className="border border-dashed border-line-strong/60 px-6 py-8 text-sm text-ink-2">
             Nothing yet beyond the basket being created.
           </p>
         )}
         {ledger && decoding && (
-          <p className="mb-3 text-xs text-ivory-faint">
+          <p className="mb-3 text-xs text-ink-3">
             Decoding {count(ledger.done)} of {count(ledger.total)} transactions…
           </p>
         )}

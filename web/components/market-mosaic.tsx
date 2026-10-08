@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { squarify, fitsTile } from "@/lib/treemap";
-import { changeColor, CHANGE_LEGEND, CHART_SURFACE, COMPONENT_SLOTS } from "@/lib/palette";
+import { changeColor, CHANGE_LEGEND, CHART_SURFACE, COMPONENT_SLOTS, inkOn } from "@/lib/palette";
 import {
   money,
   moneyCompact,
@@ -87,10 +87,10 @@ export function MarketMosaic({
       {!bare && (
         <figcaption className="mb-3 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="display text-xl text-ivory">
+            <h2 className="display text-xl text-ink">
               Tokenised equities and pre-IPO SPVs, live on Solana
             </h2>
-            <p className="mt-1 text-sm text-ivory-dim">
+            <p className="mt-1 text-sm text-ink-2">
               Tile area is {SIZE_LABEL[size]}. Colour is the 24-hour move. The{" "}
               <span
                 className="inline-block size-2 rounded-full align-[-1px]"
@@ -109,8 +109,8 @@ export function MarketMosaic({
                 aria-pressed={size === option}
                 className={`border px-2.5 py-1.5 transition-colors ${
                   size === option
-                    ? "border-gold/60 bg-gold/10 text-ivory"
-                    : "border-rule text-ivory-dim hover:border-rule-bright hover:text-ivory"
+                    ? "border-bind/60 bg-bind/10 text-ink"
+                    : "border-line text-ink-2 hover:border-line-strong hover:text-ink"
                 }`}
               >
                 {option === "liquidity" ? "Liquidity" : "Volume"}
@@ -122,8 +122,8 @@ export function MarketMosaic({
               aria-pressed={asTable}
               className={`ml-2 border px-2.5 py-1.5 transition-colors ${
                 asTable
-                  ? "border-gold/60 bg-gold/10 text-ivory"
-                  : "border-rule text-ivory-dim hover:border-rule-bright hover:text-ivory"
+                  ? "border-bind/60 bg-bind/10 text-ink"
+                  : "border-line text-ink-2 hover:border-line-strong hover:text-ink"
               }`}
             >
               Table
@@ -213,7 +213,7 @@ export function MarketMosaic({
                         width={Math.max(0, tile.width - 2)}
                         height={Math.max(0, tile.height - 2)}
                         fill="none"
-                        stroke={isSelected ? "var(--color-gold)" : "var(--color-ivory)"}
+                        stroke={isSelected ? "var(--color-bind)" : "var(--color-ink)"}
                         strokeWidth={2}
                       />
                     )}
@@ -224,7 +224,7 @@ export function MarketMosaic({
                         y={tile.y + 5}
                         width={4}
                         height={4}
-                        fill="var(--color-gold)"
+                        fill="var(--color-bind)"
                       />
                     )}
                     {PRESTOCK_SYMBOLS.has(q.symbol) &&
@@ -244,7 +244,7 @@ export function MarketMosaic({
                         x={tile.x + 9}
                         y={tile.y + 20}
                         className="tnum"
-                        fill="#ede6d6"
+                        fill={inkOn(changeColor(q.change24h))}
                         fontSize={13}
                         fontWeight={500}
                         pointerEvents="none"
@@ -257,7 +257,7 @@ export function MarketMosaic({
                         x={tile.x + 9}
                         y={tile.y + 37}
                         className="tnum"
-                        fill="#ede6d6"
+                        fill={inkOn(changeColor(q.change24h))}
                         fillOpacity={0.86}
                         fontSize={12}
                         pointerEvents="none"
@@ -269,7 +269,7 @@ export function MarketMosaic({
                       <text
                         x={tile.x + 9}
                         y={tile.y + tile.height - 10}
-                        fill="#ede6d6"
+                        fill={inkOn(changeColor(q.change24h))}
                         fillOpacity={0.62}
                         fontSize={11}
                         pointerEvents="none"
@@ -322,16 +322,16 @@ function TileTooltip({
 
   return (
     <div
-      className="pointer-events-none absolute z-30 border border-rule-bright bg-ground-deep/97 p-4 shadow-2xl shadow-black/60"
+      className="pointer-events-none absolute z-30 border border-line-strong bg-page/97 p-4 shadow-2xl shadow-black/60"
       style={{ width: W, ...style }}
       role="tooltip"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-sm text-ivory">{quote.company}</span>
-        <span className="tnum text-xs text-ivory-faint">{quote.symbol}</span>
+        <span className="text-sm text-ink">{quote.company}</span>
+        <span className="tnum text-xs text-ink-3">{quote.symbol}</span>
       </div>
       <div className="mt-3 flex items-baseline gap-2.5">
-        <span className="tnum display text-2xl text-ivory">
+        <span className="tnum display text-2xl text-ink">
           {money(quote.price)}
         </span>
         <span
@@ -339,7 +339,7 @@ function TileTooltip({
           style={{
             color:
               quote.change24h == null
-                ? "var(--color-ivory-dim)"
+                ? "var(--color-ink-2)"
                 : quote.change24h > 0
                   ? "var(--color-gain)"
                   : "var(--color-loss)",
@@ -397,9 +397,9 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-ivory-faint">{label}</dt>
+      <dt className="text-ink-3">{label}</dt>
       <dd
-        className={`tnum ${gold ? "text-gold" : "text-ivory-dim"}`}
+        className={`tnum ${gold ? "text-bind" : "text-ink-2"}`}
         style={lapis ? { color: COMPONENT_SLOTS[3] } : undefined}
       >
         {value}
@@ -410,7 +410,7 @@ function Row({
 
 export function ChangeLegend() {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ivory-faint">
+    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-3">
       <div className="flex items-center gap-1.5">
         {CHANGE_LEGEND.map((step) => (
           <span
@@ -424,7 +424,7 @@ export function ChangeLegend() {
         <span className="ml-1.5">24h move, −3% to +3%</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="size-1.5 bg-gold" aria-hidden />
+        <span className="size-1.5 bg-bind" aria-hidden />
         <span>pays a dividend into its multiplier</span>
       </div>
       <div className="flex items-center gap-1.5">
@@ -452,14 +452,14 @@ export function QuoteTable({
     // Seven columns of numbers will not fit a phone, so this one does scroll
     // sideways — but `min-w-0` keeps the scrolling inside the box instead of
     // letting the table's minimum width widen the page around it.
-    <div className="min-w-0 overflow-x-auto border border-rule">
+    <div className="min-w-0 overflow-x-auto border border-line">
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <caption className="sr-only">
           Every tokenised equity with its price, 24-hour move, premium to the
           listed share, liquidity and accrued dividends.
         </caption>
         <thead>
-          <tr className="border-b border-rule text-left text-xs text-ivory-faint">
+          <tr className="border-b border-line text-left text-xs text-ink-3">
             <th scope="col" className="px-4 py-3 font-normal">Ticker</th>
             <th scope="col" className="px-4 py-3 text-right font-normal">Token</th>
             <th scope="col" className="px-4 py-3 text-right font-normal">24h</th>
@@ -475,7 +475,7 @@ export function QuoteTable({
             return (
               <tr
                 key={q.mint}
-                className={`border-b border-rule/60 last:border-0 ${isSelected ? "bg-gold/[0.06]" : ""}`}
+                className={`border-b border-line/60 last:border-0 ${isSelected ? "bg-bind/[0.06]" : ""}`}
               >
                 <th scope="row" className="px-4 py-2.5 text-left font-normal">
                   {onToggle ? (
@@ -486,23 +486,23 @@ export function QuoteTable({
                       role="checkbox"
                       aria-checked={isSelected}
                       onClick={() => onToggle(q.mint)}
-                      className="-mx-2 -my-1.5 flex items-center gap-2.5 px-2 py-1.5 text-left transition-colors hover:bg-ground-high"
+                      className="-mx-2 -my-1.5 flex items-center gap-2.5 px-2 py-1.5 text-left transition-colors hover:bg-sunk"
                     >
                       <span
                         aria-hidden
-                        className={`size-3 shrink-0 border ${isSelected ? "border-gold bg-gold" : "border-rule-bright"}`}
+                        className={`size-3 shrink-0 border ${isSelected ? "border-bind bg-bind" : "border-line-strong"}`}
                       />
-                      <span className="text-ivory">{q.base}</span>
-                      <span className="text-xs text-ivory-faint">{q.company}</span>
+                      <span className="text-ink">{q.base}</span>
+                      <span className="text-xs text-ink-3">{q.company}</span>
                     </button>
                   ) : (
                     <>
-                      <span className="text-ivory">{q.base}</span>
-                      <span className="ml-2 text-xs text-ivory-faint">{q.company}</span>
+                      <span className="text-ink">{q.base}</span>
+                      <span className="ml-2 text-xs text-ink-3">{q.company}</span>
                     </>
                   )}
                 </th>
-                <td className="tnum px-4 py-2.5 text-right text-ivory">
+                <td className="tnum px-4 py-2.5 text-right text-ink">
                   <Ticker value={money(q.price)} />
                 </td>
                 <td
@@ -510,7 +510,7 @@ export function QuoteTable({
                   style={{
                     color:
                       q.change24h == null
-                        ? "var(--color-ivory-dim)"
+                        ? "var(--color-ink-2)"
                         : q.change24h > 0
                           ? "var(--color-gain)"
                           : "var(--color-loss)",
@@ -518,24 +518,24 @@ export function QuoteTable({
                 >
                   {signedPercent(q.change24h)}
                 </td>
-                <td className="tnum px-4 py-2.5 text-right text-ivory-dim">
+                <td className="tnum px-4 py-2.5 text-right text-ink-2">
                   {money(q.sharePrice)}
                 </td>
-                <td className="tnum px-4 py-2.5 text-right text-ivory-dim">
+                <td className="tnum px-4 py-2.5 text-right text-ink-2">
                   {q.premiumBps == null
                     ? "—"
                     : `${q.premiumBps > 0 ? "+" : "−"}${Math.abs(q.premiumBps / 100).toFixed(2)}%`}
                 </td>
-                <td className="tnum px-4 py-2.5 text-right text-ivory-dim">
+                <td className="tnum px-4 py-2.5 text-right text-ink-2">
                   {moneyCompact(q.liquidity)}
                 </td>
                 <td className="tnum px-4 py-2.5 text-right">
                   {q.paysDividend ? (
-                    <span className="text-gold">+{percent(q.accruedYieldPct)}</span>
+                    <span className="text-bind">+{percent(q.accruedYieldPct)}</span>
                   ) : PRESTOCK_SYMBOLS.has(q.symbol) ? (
-                    <span className="text-ivory-faint">pre-IPO</span>
+                    <span className="text-ink-3">pre-IPO</span>
                   ) : (
-                    <span className="text-ivory-faint">none yet</span>
+                    <span className="text-ink-3">none yet</span>
                   )}
                 </td>
               </tr>

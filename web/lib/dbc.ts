@@ -1,5 +1,5 @@
 /**
- * Meteora Dynamic Bonding Curve launch markets for Tessera baskets.
+ * Meteora Dynamic Bonding Curve launch markets for Sheaf baskets.
  *
  * A launch is a separate token from the basket's own share, a front-market and
  * not a redemption right, on the real DBC program (same address on devnet and
@@ -61,7 +61,7 @@ export function launchName(name: string): string {
 }
 
 async function seeded(basket: string, role: "config" | "mint"): Promise<Keypair> {
-  const bytes = new TextEncoder().encode(`tessera-launch-v1:${role}:${basket}`);
+  const bytes = new TextEncoder().encode(`sheaf-launch-v1:${role}:${basket}`);
   return Keypair.fromSeed(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 }
 

@@ -67,11 +67,11 @@ export function LaunchMarket() {
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
       <div className="max-w-[40ch] self-center">
-        <p className="text-xs tracking-wide text-gold">Meteora Dynamic Bonding Curve</p>
-        <h2 className="display mt-3 text-title text-ivory">
+        <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+        <h2 className="display mt-3 text-title text-ink">
           A basket can trade before anyone has built a share.
         </h2>
-        <p className="mt-5 text-base leading-relaxed text-ivory-dim">
+        <p className="mt-5 text-base leading-relaxed text-ink-2">
           A new basket starts with no shares, and nobody wants to be first to
           assemble every component. So a bonding curve opens in front of it: a
           token priced along a curve that starts at half the basket&rsquo;s NAV
@@ -79,7 +79,7 @@ export function LaunchMarket() {
           curve opens on a shelf, so early money gets nearly the same price, and
           steepens only once a basket has proven it has takers.
         </p>
-        <p className="mt-4 text-sm leading-relaxed text-ivory-faint">
+        <p className="mt-4 text-sm leading-relaxed text-ink-3">
           Any basket&rsquo;s creator can open one from the basket page in a single
           signature, and earns half of its trading fees. This one stands in front
           of the Frontier Labs basket: buy a little and the dot moves, because
@@ -108,7 +108,7 @@ export function FeaturedLaunch() {
 }
 
 function LaunchSkeleton() {
-  return <div className="h-[420px] animate-pulse border border-rule bg-ground-raised" />;
+  return <div className="h-[420px] animate-pulse border border-line bg-raised" />;
 }
 
 /**
@@ -140,9 +140,9 @@ export function BasketLaunch({
     return (
       <section id="launch" className="mt-12 scroll-mt-24">
         <div className="mb-5 max-w-[62ch]">
-          <p className="text-xs tracking-wide text-gold">Meteora Dynamic Bonding Curve</p>
-          <h2 className="display mt-2 text-xl text-ivory">{basket.symbol} has a launch market</h2>
-          <p className="mt-2 text-sm leading-relaxed text-ivory-dim">
+          <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+          <h2 className="display mt-2 text-xl text-ink">{basket.symbol} has a launch market</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">
             {launch.info.baseSymbol} is a separate token priced off {basket.symbol}&rsquo;s NAV: the
             curve opened at half of it and{" "}
             {launch.state.migrated
@@ -218,11 +218,11 @@ function OpenLaunch({
   }
 
   return (
-    <div className="border border-gold/40 bg-ground-raised">
+    <div className="border border-bind/40 bg-raised">
       <div className="px-6 py-6">
-        <p className="text-xs tracking-wide text-gold">Meteora Dynamic Bonding Curve</p>
-        <h2 className="display mt-2 text-xl text-ivory">Open a launch market for {basket.symbol}</h2>
-        <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-ivory-dim">
+        <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+        <h2 className="display mt-2 text-xl text-ink">Open a launch market for {basket.symbol}</h2>
+        <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-ink-2">
           Give people a way in before anyone has assembled a share. {info.baseSymbol} trades on
           a Meteora curve priced from this basket&rsquo;s own value: it opens at half the NAV and
           graduates into a Meteora DAMM v2 pool, liquidity locked for good, at twenty times it.
@@ -231,7 +231,7 @@ function OpenLaunch({
           trading fee on the curve.
         </p>
       </div>
-      <dl className="grid grid-cols-1 gap-px border-y border-rule bg-rule sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-px border-y border-line bg-line sm:grid-cols-3">
         <Fact
           label="Opens at"
           value={navSol != null ? `${quantity(navSol / 2, 2)} SOL` : "—"}
@@ -249,14 +249,14 @@ function OpenLaunch({
           type="button"
           onClick={open}
           disabled={busy || navSol == null}
-          className="border border-gold bg-gold px-5 py-3 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:opacity-50"
+          className="border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
         >
           {busy ? "Opening the market…" : "Open the launch market"}
         </button>
         {error && (
           <p className="mt-4 border-l-2 border-loss pl-3 text-sm text-loss">{error}</p>
         )}
-        <p className="mt-4 text-xs leading-relaxed text-ivory-faint">
+        <p className="mt-4 text-xs leading-relaxed text-ink-3">
           One signature and about 0.02 SOL of rent. The token is fixed once it exists: no mint
           authority, no edits, and one launch per basket.
         </p>
@@ -451,13 +451,13 @@ export function LaunchCard({
   }
 
   return (
-    <div className="border border-gold/40 bg-ground-raised">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-rule px-6 py-4">
-        <p className="text-sm text-ivory">
+    <div className="border border-bind/40 bg-raised">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line px-6 py-4">
+        <p className="text-sm text-ink">
           <span className="display text-lg">{info.baseSymbol}</span>{" "}
-          <span className="text-ivory-dim">{info.baseName}</span>
+          <span className="text-ink-2">{info.baseName}</span>
         </p>
-        <p className="flex items-center gap-2 text-xs text-ivory-faint">
+        <p className="flex items-center gap-2 text-xs text-ink-3">
           <span className={`size-1.5 rounded-full bg-gain ${state?.migrated ? "" : "live-dot"}`} aria-hidden />
           {state?.migrated
             ? "Graduated to Meteora DAMM v2"
@@ -469,7 +469,7 @@ export function LaunchCard({
 
       <Curve state={state} error={readError} />
 
-      <dl className="grid grid-cols-3 gap-px border-y border-rule bg-rule">
+      <dl className="grid grid-cols-3 gap-px border-y border-line bg-line">
         <Fact
           label="Opened at"
           value={state ? `${quantity(state.openCap, 2)} SOL` : "—"}
@@ -495,14 +495,14 @@ export function LaunchCard({
 
       <div className="px-6 py-5">
         {state?.migrated && (
-          <p className="mb-4 text-sm leading-relaxed text-ivory-dim">
+          <p className="mb-4 text-sm leading-relaxed text-ink-2">
             The curve filled and its liquidity moved into a Meteora DAMM v2 pool, locked for good.
             Trading carries on there, from this card.{" "}
             <a
               href={explorerAddress(dammV2PoolAddress(info.baseMint))}
               target="_blank"
               rel="noreferrer"
-              className="text-ivory underline decoration-rule-bright underline-offset-4 hover:decoration-gold"
+              className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-bind"
             >
               The DAMM v2 pool
             </a>
@@ -520,9 +520,9 @@ export function LaunchCard({
                   onClick={() => setSide(value)}
                   className="-ml-px border px-3 py-2.5 text-sm capitalize transition-colors first:ml-0"
                   style={{
-                    borderColor: side === value ? "var(--color-ivory-dim)" : "var(--color-rule)",
-                    color: side === value ? "var(--color-ivory)" : "var(--color-ivory-faint)",
-                    background: side === value ? "var(--color-ground-high)" : "transparent",
+                    borderColor: side === value ? "var(--color-ink-2)" : "var(--color-line)",
+                    color: side === value ? "var(--color-ink)" : "var(--color-ink-3)",
+                    background: side === value ? "var(--color-sunk)" : "transparent",
                     position: side === value ? "relative" : undefined,
                   }}
                 >
@@ -546,8 +546,8 @@ export function LaunchCard({
                     onClick={() => (side === "buy" ? setAmount(value) : setSellShare(value))}
                     className="tnum -ml-px border px-3 py-2.5 text-sm transition-colors first:ml-0"
                     style={{
-                      borderColor: on ? "var(--color-gold)" : "var(--color-rule)",
-                      color: on ? "var(--color-ivory)" : "var(--color-ivory-faint)",
+                      borderColor: on ? "var(--color-bind)" : "var(--color-line)",
+                      color: on ? "var(--color-ink)" : "var(--color-ink-3)",
                       position: on ? "relative" : undefined,
                     }}
                   >
@@ -565,7 +565,7 @@ export function LaunchCard({
                 (side === "sell" && !(held && held.raw > 0n)) ||
                 (side === "buy" && !state.migrated && state.raised >= state.threshold)
               }
-              className="border border-gold bg-gold px-5 py-2.5 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:opacity-50"
+              className="border border-bind bg-bind px-5 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
             >
               {busy === "trade"
                 ? side === "buy"
@@ -574,13 +574,13 @@ export function LaunchCard({
                 : `${side === "buy" ? "Buy" : "Sell"} ${info.baseSymbol}`}
             </button>
             {side === "sell" && !(held && held.raw > 0n) && (
-              <p className="w-full text-xs text-ivory-faint">You hold no {info.baseSymbol} to sell.</p>
+              <p className="w-full text-xs text-ink-3">You hold no {info.baseSymbol} to sell.</p>
             )}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-4">
             <ConnectButton />
-            <p className="text-xs text-ivory-faint">
+            <p className="text-xs text-ink-3">
               Connect a wallet to buy or sell.
             </p>
           </div>
@@ -590,22 +590,22 @@ export function LaunchCard({
           <p className="mt-4 border-l-2 border-loss pl-3 text-sm text-loss">{error}</p>
         )}
         {done && (
-          <p className="mt-4 text-sm text-ivory-dim">
+          <p className="mt-4 text-sm text-ink-2">
             {done.what}{" "}
             <a
               href={explorerTx(done.signature)}
               target="_blank"
               rel="noreferrer"
-              className="underline decoration-rule-bright underline-offset-4 hover:text-ivory"
+              className="underline decoration-line-strong underline-offset-4 hover:text-ink"
             >
               View the transaction
             </a>
           </p>
         )}
         {state && !state.migrated && state.raised >= state.threshold && (
-          <div className="mt-5 border border-gold/40 bg-gold/[0.06] p-4">
-            <p className="text-sm leading-relaxed text-ivory-dim">
-              <span className="text-ivory">The curve is full.</span> Anyone can move it into its
+          <div className="mt-5 border border-bind/40 bg-bind/[0.06] p-4">
+            <p className="text-sm leading-relaxed text-ink-2">
+              <span className="text-ink">The curve is full.</span> Anyone can move it into its
               Meteora DAMM v2 pool, where the liquidity is locked for good and trading carries on.
             </p>
             {connected && (
@@ -613,7 +613,7 @@ export function LaunchCard({
                 type="button"
                 onClick={graduate}
                 disabled={busy != null}
-                className="mt-3 border border-gold bg-gold px-4 py-2.5 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:opacity-50"
+                className="mt-3 border border-bind bg-bind px-4 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:opacity-50"
               >
                 {busy === "graduate" ? "Graduating…" : "Graduate to Meteora DAMM v2"}
               </button>
@@ -621,50 +621,50 @@ export function LaunchCard({
           </div>
         )}
         {isCreator && state && (
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
-            <p className="tnum text-sm text-ivory-dim">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <p className="tnum text-sm text-ink-2">
               You created this market. Curve fees owed to you:{" "}
-              <span className="text-ivory">{quantity(state.creatorFees, 6)} SOL</span>
+              <span className="text-ink">{quantity(state.creatorFees, 6)} SOL</span>
             </p>
             <button
               type="button"
               onClick={claim}
               disabled={busy != null || state.creatorFees <= 0}
-              className="border border-rule-bright px-4 py-2 text-xs text-ivory transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:text-ivory-faint"
+              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3"
             >
               {busy === "claim" ? "Claiming…" : "Claim fees"}
             </button>
           </div>
         )}
         {position && (
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
-            <p className="tnum text-sm text-ivory-dim">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <p className="tnum text-sm text-ink-2">
               Your locked liquidity in the DAMM v2 pool has earned{" "}
-              <span className="text-ivory">{quantity(position.feeSol, 6)} SOL</span> since your
+              <span className="text-ink">{quantity(position.feeSol, 6)} SOL</span> since your
               last claim.
             </p>
             <button
               type="button"
               onClick={claimPool}
               disabled={busy != null || position.feeSol <= 0}
-              className="border border-rule-bright px-4 py-2 text-xs text-ivory transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:text-ivory-faint"
+              className="border border-line-strong px-4 py-2 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:text-ink-3"
             >
               {busy === "poolClaim" ? "Claiming…" : "Claim pool fees"}
             </button>
           </div>
         )}
         {held != null && held.ui > 0 && (
-          <p className="tnum mt-2 text-xs text-ivory-faint">
+          <p className="tnum mt-2 text-xs text-ink-3">
             You hold {count(Math.floor(held.ui))} {info.baseSymbol}
             {state && ` · about ${quantity((state.cap / info.supply) * held.ui, 4)} SOL at today's price`}
           </p>
         )}
 
-        <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ivory-faint">
+        <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
           {!onBasketPage && (
             <Link
               href={`/basket/${basketAddress}`}
-              className="underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+              className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
             >
               The basket behind it
             </Link>
@@ -673,7 +673,7 @@ export function LaunchCard({
             href={explorerAddress(info.pool)}
             target="_blank"
             rel="noreferrer"
-            className="underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+            className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
           >
             Pool on Explorer
           </a>
@@ -685,10 +685,10 @@ export function LaunchCard({
 
 function Fact({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="bg-ground-raised px-4 py-4 sm:px-6">
-      <dt className="text-xs text-ivory-faint">{label}</dt>
-      <dd className="tnum display mt-1 text-lg text-ivory">{value}</dd>
-      <dd className="mt-1 text-xs text-ivory-faint">{note}</dd>
+    <div className="bg-raised px-4 py-4 sm:px-6">
+      <dt className="text-xs text-ink-3">{label}</dt>
+      <dd className="tnum display mt-1 text-lg text-ink">{value}</dd>
+      <dd className="mt-1 text-xs text-ink-3">{note}</dd>
     </div>
   );
 }
@@ -727,7 +727,7 @@ function Curve({ state, error }: { state: DbcState | null; error: string | null 
       {state && width > 0 ? (
         <CurvePlot state={state} W={width} progress={progress} />
       ) : (
-        <p className="flex h-full items-center justify-center px-6 text-center text-xs text-ivory-faint">
+        <p className="flex h-full items-center justify-center px-6 text-center text-xs text-ink-3">
           {error ?? "Reading the pool"}
         </p>
       )}
@@ -802,32 +802,32 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
       role="img"
       aria-label={`Bonding curve: ${quantity(state.raised, 4)} of ${quantity(state.threshold, 2)} SOL raised, market cap ${quantity(state.cap, 2)} SOL`}
     >
-      <line x1={x(0)} x2={x(state.threshold)} y1={base} y2={base} stroke="var(--color-rule)" />
-      <path d={line(0, 1)} fill="none" stroke="var(--color-rule-bright)" strokeWidth="2" strokeDasharray="4 4" />
-      <path d={filled} fill="var(--color-gold)" fillOpacity="0.18" />
-      <path d={line(0, progress)} fill="none" stroke="var(--color-gold)" strokeWidth="2.5" />
-      <line x1={px} x2={px} y1={base} y2={y(cap)} stroke="var(--color-gold)" strokeDasharray="2 3" />
-      <circle cx={px} cy={y(cap)} r="6" fill="var(--color-gold)" stroke="var(--color-ground-raised)" strokeWidth="2" />
+      <line x1={x(0)} x2={x(state.threshold)} y1={base} y2={base} stroke="var(--color-line)" />
+      <path d={line(0, 1)} fill="none" stroke="var(--color-line-strong)" strokeWidth="2" strokeDasharray="4 4" />
+      <path d={filled} fill="var(--color-bind)" fillOpacity="0.18" />
+      <path d={line(0, progress)} fill="none" stroke="var(--color-bind)" strokeWidth="2.5" />
+      <line x1={px} x2={px} y1={base} y2={y(cap)} stroke="var(--color-bind)" strokeDasharray="2 3" />
+      <circle cx={px} cy={y(cap)} r="6" fill="var(--color-bind)" stroke="var(--color-raised)" strokeWidth="2" />
       {/* Past the middle the label sits left of the dot, so it never runs off the edge. */}
       <text
         x={progress > 0.6 ? px - 12 : px + 12}
         y={progress > 0.6 ? y(cap) + 20 : y(cap) - 10}
-        fill="var(--color-ivory)"
+        fill="var(--color-ink)"
         fontSize="13"
         textAnchor={progress > 0.6 ? "end" : "start"}
       >
         {state.migrated ? "graduated" : "now"} · {quantity(raised, 4)} SOL in
       </text>
-      <circle cx={x(state.threshold)} cy={y(state.graduationCap)} r="4" fill="none" stroke="var(--color-ivory-dim)" strokeWidth="1.5" />
+      <circle cx={x(state.threshold)} cy={y(state.graduationCap)} r="4" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.5" />
       {progress < 0.85 && (
-        <text x={x(state.threshold) - 10} y={y(state.graduationCap) + 4} fill="var(--color-ivory-dim)" fontSize="12" textAnchor="end">
+        <text x={x(state.threshold) - 10} y={y(state.graduationCap) + 4} fill="var(--color-ink-2)" fontSize="12" textAnchor="end">
           graduates to Meteora DAMM v2
         </text>
       )}
-      <text x={x(0)} y={H - 8} fill="var(--color-ivory-faint)" fontSize="12">
+      <text x={x(0)} y={H - 8} fill="var(--color-ink-3)" fontSize="12">
         0 SOL raised
       </text>
-      <text x={x(state.threshold)} y={H - 8} fill="var(--color-ivory-faint)" fontSize="12" textAnchor="end">
+      <text x={x(state.threshold)} y={H - 8} fill="var(--color-ink-3)" fontSize="12" textAnchor="end">
         {quantity(state.threshold, 2)} SOL
       </text>
     </svg>

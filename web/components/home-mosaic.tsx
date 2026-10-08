@@ -16,11 +16,11 @@ export function HomeMosaic() {
 
   if (!snapshot) {
     return (
-      <div className="flex h-[460px] flex-col items-center justify-center gap-3 border border-rule bg-ground px-8 text-center">
-        <p className="text-sm text-ivory-dim">
+      <div className="flex h-[460px] flex-col items-center justify-center gap-3 border border-line bg-surface px-8 text-center">
+        <p className="text-sm text-ink-2">
           Mainnet prices are unavailable right now.
         </p>
-        <p className="text-xs text-ivory-faint">{error}</p>
+        <p className="text-xs text-ink-3">{error}</p>
       </div>
     );
   }
@@ -28,7 +28,7 @@ export function HomeMosaic() {
   return (
     <div>
       <MarketMosaic quotes={snapshot.quotes} height={460} />
-      <div className="mt-4 flex flex-wrap items-baseline justify-between gap-3 text-xs text-ivory-faint">
+      <div className="mt-4 flex flex-wrap items-baseline justify-between gap-3 text-xs text-ink-3">
         <span>
           {count(snapshot.quotes.length)} tickers ·{" "}
           {moneyCompact(
@@ -100,12 +100,12 @@ export function HomeStats() {
   ];
 
   return (
-    <dl className="grid grid-cols-2 gap-px bg-rule lg:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
       {stats.map((s) => (
-        <div key={s.label} className="bg-ground-deep p-5">
-          <dt className="text-xs text-ivory-faint">{s.label}</dt>
-          <dd className="display tnum mt-2 text-2xl text-ivory">{s.value}</dd>
-          <dd className="mt-1.5 text-xs leading-relaxed text-ivory-faint">
+        <div key={s.label} className="bg-page p-5">
+          <dt className="text-xs text-ink-3">{s.label}</dt>
+          <dd className="display tnum mt-2 text-2xl text-ink">{s.value}</dd>
+          <dd className="mt-1.5 text-xs leading-relaxed text-ink-3">
             {s.note}
           </dd>
         </div>
@@ -122,7 +122,7 @@ export function ComposeCta({
   return (
     <Link
       href="/compose"
-      className="inline-flex items-center gap-2.5 border border-gold bg-gold px-5 py-3 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e]"
+      className="inline-flex items-center gap-2.5 rounded-[10px] bg-bind px-5 py-3 text-sm font-medium text-white shadow-[0_8px_20px_-10px_rgb(52_56_201/0.7)] transition-colors hover:bg-bind-deep"
     >
       {children}
     </Link>

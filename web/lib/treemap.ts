@@ -1,7 +1,7 @@
 /**
  * Squarified treemap, after Bruls, Huizing and van Wijk (2000).
  *
- * A mosaic wants tesserae that are close to square: a long thin sliver is hard to
+ * A mosaic wants sheaves that are close to square: a long thin sliver is hard to
  * read, hard to label, and hard to hit with a cursor. The squarified algorithm
  * lays a row along the shorter side of the remaining space and stops adding to
  * that row the moment the worst aspect ratio in it starts getting worse.
@@ -134,7 +134,7 @@ export function squarify(
 /**
  * Whether a tile is wide enough for a string, without measuring it.
  *
- * SVG text has no clipping box, so a ticker one pixel too long for its tessera
+ * SVG text has no clipping box, so a ticker one pixel too long for its sheaf
  * renders straight across its neighbour. Both faces sit near 0.68em per uppercase
  * glyph and per tabular digit, which errs wide for lowercase: a label that passes
  * has room to spare.

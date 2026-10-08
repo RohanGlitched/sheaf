@@ -2,7 +2,7 @@
  * The two clocks a tokenised stock lives under.
  *
  * The exchange keeps banker's hours. The chain does not. That gap is the whole
- * reason these tokens are interesting, so Tessera shows both clocks side by side
+ * reason these tokens are interesting, so Sheaf shows both clocks side by side
  * rather than pretending there is one.
  *
  * The exchange schedule is not hardcoded here: it is the string Pyth publishes

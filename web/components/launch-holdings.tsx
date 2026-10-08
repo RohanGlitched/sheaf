@@ -6,7 +6,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { launchFor, readDbcState, type DbcPoolInfo } from "@/lib/dbc";
 import { count, quantity } from "@/lib/format";
-import { TOKEN_2022_PROGRAM_ID, type Basket } from "@/lib/tessera";
+import { TOKEN_2022_PROGRAM_ID, type Basket } from "@/lib/sheaf";
 
 type Holding = { basket: Basket; info: DbcPoolInfo; amount: number; valueSol: number | null; graduated: boolean };
 
@@ -56,29 +56,29 @@ export function LaunchHoldings({ baskets }: { baskets: Basket[] | null }) {
 
   return (
     <section className="mt-16">
-      <h2 className="display text-title text-ivory">Launch tokens</h2>
-      <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-ivory-dim">
+      <h2 className="display text-title text-ink">Launch tokens</h2>
+      <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-ink-2">
         Bought on a basket&rsquo;s Meteora curve. Each is a separate token priced off its
         basket, valued here at the curve&rsquo;s price right now.
       </p>
-      <div className="mt-7 divide-y divide-rule border border-rule">
+      <div className="mt-7 divide-y divide-line border border-line">
         {holdings.map((h) => (
           <Link
             key={h.info.baseMint}
             href={`/basket/${h.basket.address}#launch`}
-            className="flex flex-wrap items-baseline justify-between gap-4 px-5 py-5 transition-colors hover:bg-ground-raised"
+            className="flex flex-wrap items-baseline justify-between gap-4 px-5 py-5 transition-colors hover:bg-raised"
           >
             <div className="min-w-0">
-              <p className="display truncate text-lg text-ivory">{h.info.baseSymbol}</p>
-              <p className="tnum mt-0.5 text-xs text-ivory-faint">
+              <p className="display truncate text-lg text-ink">{h.info.baseSymbol}</p>
+              <p className="tnum mt-0.5 text-xs text-ink-3">
                 {count(Math.floor(h.amount))} tokens · {h.info.baseName}
               </p>
             </div>
             <div className="text-right">
-              <p className="tnum display text-lg text-ivory">
+              <p className="tnum display text-lg text-ink">
                 {h.valueSol != null ? `${quantity(h.valueSol, 4)} SOL` : "—"}
               </p>
-              <p className="text-xs text-ivory-faint">
+              <p className="text-xs text-ink-3">
                 {h.graduated ? "Graduated to DAMM v2" : "On the curve"}
               </p>
             </div>

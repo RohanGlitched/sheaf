@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HomeMosaic, HomeStats, ComposeCta } from "@/components/home-mosaic";
+import { HomeSheaf } from "@/components/home-sheaf";
 import { MarketClock } from "@/components/market-clock";
 import { FeaturedBaskets } from "@/components/featured-baskets";
 import { LaunchMarket } from "@/components/launch-market";
@@ -12,7 +13,7 @@ const LIFE = [
   {
     n: "1",
     title: "Write the recipe",
-    on: "Tessera program",
+    on: "Sheaf program",
     body: "Pick up to eight tokenised equities, xStocks or PreStocks SPVs over OpenAI, Anthropic and SpaceX, and weigh them. The program stores the exact raw units per share and gives up the power to change them.",
   },
   {
@@ -44,65 +45,64 @@ export default function Home() {
         <div className="max-w-[34rem] self-center">
           <Link
             href="#launch"
-            className="rise mb-7 inline-flex items-center gap-2.5 border border-gold/40 px-3 py-1.5 text-xs text-ivory-dim transition-colors hover:border-gold hover:text-ivory"
+            className="rise mb-8 inline-flex items-center gap-2.5 rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-bind hover:text-ink"
           >
             <span className="live-dot size-1.5 shrink-0 rounded-full bg-gain" aria-hidden />
-            Live now: a basket trading on a Meteora bonding curve
-            <span aria-hidden>↓</span>
+            A basket is trading on a Meteora curve right now
           </Link>
-          <h1 className="rise display text-hero text-ivory" style={{ "--i": 1 } as React.CSSProperties}>
-            An index fund is a list of companies and a set of weights.
+          <h1 className="rise display text-hero text-ink" style={{ "--i": 1 } as React.CSSProperties}>
+            Bind any eight stocks into one share.
           </h1>
-          <p className="rise mt-7 max-w-[46ch] text-lg leading-relaxed text-ivory-dim" style={{ "--i": 2 } as React.CSSProperties}>
-            Tessera is an ETF launchpad on Solana. Pick up to eight tokenised
-            stocks and pre-IPO companies such as OpenAI and SpaceX, set the
-            weights, and launch them as one token. Every share is backed by the
-            real tokens in an on-chain vault and can be redeemed for them at any
-            time. You earn a fee on every share created.
+          <p className="rise mt-7 max-w-[44ch] text-lg leading-relaxed text-ink-2" style={{ "--i": 2 } as React.CSSProperties}>
+            Sheaf turns tokenized stocks into index funds anyone can launch. Pick
+            up to eight companies and set the weights. Every share is backed by the
+            real stocks in an onchain vault, and redeeming one hands you the stocks
+            back.
           </p>
-          <div className="rise mt-9 flex flex-wrap items-center gap-4" style={{ "--i": 3 } as React.CSSProperties}>
-            <ComposeCta />
+          <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
+            <ComposeCta>Launch a basket</ComposeCta>
             <Link
               href="/explore"
-              className="border border-rule px-5 py-3 text-sm text-ivory-dim transition-colors hover:border-rule-bright hover:text-ivory"
+              className="rounded-[10px] border border-line-strong bg-surface px-5 py-3 text-sm text-ink transition-colors hover:border-ink-3"
             >
-              Explore baskets
+              Browse baskets
             </Link>
           </div>
-          <p className="rise mt-7 text-sm leading-relaxed text-ivory-faint" style={{ "--i": 4 } as React.CSSProperties}>
-            Nothing is priced by an oracle. A share is created by handing the vault
-            the exact tokens the recipe names, and redeemed by taking them back.
+          <p className="rise mt-8 max-w-[52ch] text-sm leading-relaxed text-ink-3" style={{ "--i": 4 } as React.CSSProperties}>
+            No oracle prices a share. It is created by depositing the exact stocks
+            its recipe names and redeemed by withdrawing them, so the vault can
+            only ever hold more than the shares claim.
           </p>
         </div>
 
         <div className="self-center">
-          <HomeMosaic />
+          <HomeSheaf />
         </div>
       </section>
 
       {/* ------------------------------------------------------------ stats */}
-      <section className="reveal border-y border-rule py-px">
+      <section className="reveal border-y border-line py-px">
         <HomeStats />
       </section>
 
       {/* ------------------------------------------------------- lifecycle */}
       <section className="reveal py-20">
-        <h2 className="display text-title max-w-[26ch] text-ivory">
+        <h2 className="display text-title max-w-[26ch] text-ink">
           From a recipe to a market, and none of it trusts us.
         </h2>
-        <ol className="mt-12 grid gap-px bg-rule sm:grid-cols-2 lg:grid-cols-4">
+        <ol className="mt-12 grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
           {LIFE.map((step) => (
-            <li key={step.title} className="flex flex-col bg-ground-deep p-7">
+            <li key={step.title} className="flex flex-col bg-page p-7">
               <p className="flex items-baseline justify-between gap-3 text-xs">
-                <span className="tnum text-gold">{step.n}</span>
-                <span className="text-ivory-faint">{step.on}</span>
+                <span className="tnum text-bind">{step.n}</span>
+                <span className="text-ink-3">{step.on}</span>
               </p>
-              <h3 className="display mt-3 text-xl text-ivory">{step.title}</h3>
-              <p className="mt-3 text-sm leading-relaxed text-ivory-dim">{step.body}</p>
+              <h3 className="display mt-3 text-xl text-ink">{step.title}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-ink-2">{step.body}</p>
               {step.href && (
                 <Link
                   href={step.href}
-                  className="mt-auto pt-4 text-sm text-gold underline decoration-gold/40 underline-offset-4 hover:decoration-gold"
+                  className="mt-auto pt-4 text-sm text-bind underline decoration-bind/40 underline-offset-4 hover:decoration-bind"
                 >
                   See the live one
                 </Link>
@@ -110,20 +110,20 @@ export default function Home() {
             </li>
           ))}
         </ol>
-        <p className="mt-8 max-w-[62ch] text-sm leading-relaxed text-ivory-faint">
+        <p className="mt-8 max-w-[62ch] text-sm leading-relaxed text-ink-3">
           Deposits round up and redemptions round down, so every rounding remainder
           stays in the vault. The vault can therefore only ever hold more than the
           outstanding shares claim, never less.{" "}
           <Link
             href="/method"
-            className="text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory"
+            className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
           >
             How the program is built
           </Link>
           {" "}· every creation and redemption it has ever settled is on{" "}
           <Link
             href="/ledger"
-            className="text-ivory-dim underline decoration-rule-bright underline-offset-4 hover:text-ivory"
+            className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
           >
             the ledger
           </Link>
@@ -139,7 +139,7 @@ export default function Home() {
       </section>
 
       {/* ---------------------------------------------------------- launch */}
-      <section id="launch" className="reveal scroll-mt-24 border-t border-rule py-20">
+      <section id="launch" className="reveal scroll-mt-24 border-t border-line py-20">
         <LaunchMarket />
       </section>
 
@@ -148,10 +148,10 @@ export default function Home() {
       {/* -------------------------------------------------------- premiums */}
       <section className="reveal py-20">
         <div className="max-w-[46ch]">
-          <h2 className="display text-title text-ivory">Two prices for one company.</h2>
-          <p className="mt-5 text-base leading-relaxed text-ivory-dim">
+          <h2 className="display text-title text-ink">Two prices for one company.</h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
             Every token here has the price it trades at on Solana and the price of the listed share
-            behind it. The gap between them is the premium. A basket cannot wish it away, so Tessera
+            behind it. The gap between them is the premium. A basket cannot wish it away, so Sheaf
             shows it on every component and values a share both ways.
           </p>
         </div>
@@ -161,13 +161,13 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------- dividends */}
-      <section className="reveal border-t border-rule py-20">
+      <section className="reveal border-t border-line py-20">
         <div className="max-w-[46ch]">
-          <h2 className="display text-title text-ivory">A dividend is a number going up.</h2>
-          <p className="mt-5 text-base leading-relaxed text-ivory-dim">
+          <h2 className="display text-title text-ink">A dividend is a number going up.</h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
             Tokenised equities pay dividends by raising a multiplier on the mint, not by sending
             anything. A recipe written in displayed balances would come up short by exactly the
-            dividends already paid. Tessera stores recipes in raw units and applies the live
+            dividends already paid. Sheaf stores recipes in raw units and applies the live
             multiplier when it prices a share, so a share redeems for the same units before and after
             a dividend, and is worth more after.
           </p>
@@ -178,18 +178,18 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------- two clocks */}
-      <section className="reveal grid gap-10 border-t border-rule py-20 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
+      <section className="reveal grid gap-10 border-t border-line py-20 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
         <div className="max-w-[38ch] self-center">
-          <h2 className="display text-title text-ivory">
+          <h2 className="display text-title text-ink">
             The exchange keeps hours. Your basket does not.
           </h2>
-          <p className="mt-5 text-base leading-relaxed text-ivory-dim">
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
             A tokenised share trades every minute of every day, including the
             hours when the listing behind it is dark. That is where the gap between
-            token and share opens up, and it is why Tessera shows you both prices
+            token and share opens up, and it is why Sheaf shows you both prices
             rather than one.
           </p>
-          <p className="mt-4 text-sm leading-relaxed text-ivory-faint">
+          <p className="mt-4 text-sm leading-relaxed text-ink-3">
             The exchange calendar here is the one Pyth publishes for each listing,
             holidays and shortened sessions included.
           </p>
@@ -207,7 +207,7 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------------ keys */}
-      <section className="reveal border-t border-rule py-20">
+      <section className="reveal border-t border-line py-20">
         <Keys />
       </section>
 

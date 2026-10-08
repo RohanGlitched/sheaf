@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { squarify, fitsTile, fitLabel } from "@/lib/treemap";
-import { slotColor, CHART_SURFACE } from "@/lib/palette";
+import { slotColor, CHART_SURFACE, inkOn } from "@/lib/palette";
 import { percent } from "@/lib/format";
 import { useMeasure } from "@/lib/use-measure";
 
@@ -18,7 +18,7 @@ export type BasketTile = {
 };
 
 /**
- * The basket as it stands: one tesserae per component, area exactly its weight.
+ * The basket as it stands: one sheaves per component, area exactly its weight.
  *
  * Colour here is identity, not magnitude, so it comes from the eight-slot
  * categorical palette and is pinned to the component rather than to its rank. Drag
@@ -53,10 +53,10 @@ export function BasketMosaic({
     <div ref={ref} style={{ height }} className="relative">
       {tiles.length === 0 ? (
         <div
-          className="flex h-full items-center justify-center border border-dashed border-rule-bright/60"
+          className="flex h-full items-center justify-center border border-dashed border-line-strong/60"
           style={{ background: CHART_SURFACE }}
         >
-          <p className="max-w-[24ch] text-center text-sm leading-relaxed text-ivory-faint">
+          <p className="max-w-[24ch] text-center text-sm leading-relaxed text-ink-3">
             {emptyHint}
           </p>
         </div>
@@ -74,7 +74,7 @@ export function BasketMosaic({
             {laid.map((tile) => {
               const color = slotColor(tile.meta.slot);
               // Nothing clips an SVG label, so each line is drawn only if the
-              // string it holds fits the tessera it belongs to.
+              // string it holds fits the sheaf it belongs to.
               const weight = percent(tile.meta.weightBps / 100, 1);
               const label =
                 tile.height > 26 ? fitLabel(tile.meta.label, 13, tile.width, 8) : null;
@@ -111,7 +111,7 @@ export function BasketMosaic({
                     <text
                       x={tile.x + 8}
                       y={tile.y + 19}
-                      fill="#0f1b33"
+                      fill={inkOn(color)}
                       fontSize={13}
                       fontWeight={600}
                       pointerEvents="none"
@@ -125,7 +125,7 @@ export function BasketMosaic({
                       x={tile.x + 8}
                       y={tile.y + 35}
                       className="tnum"
-                      fill="#0f1b33"
+                      fill={inkOn(color)}
                       fillOpacity={0.7}
                       fontSize={12}
                       pointerEvents="none"
@@ -138,7 +138,7 @@ export function BasketMosaic({
                     <text
                       x={tile.x + 8}
                       y={tile.y + tile.height - 9}
-                      fill="#0f1b33"
+                      fill={inkOn(color)}
                       fillOpacity={0.55}
                       fontSize={11}
                       pointerEvents="none"

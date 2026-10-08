@@ -74,11 +74,11 @@ export function FillCostPanel({
   );
 
   return (
-    <section className="mt-16 border-t border-rule pt-10">
+    <section className="mt-16 border-t border-line pt-10">
       <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-5">
         <div className="max-w-[62ch]">
-          <h2 className="display text-xl text-ivory">The last mile</h2>
-          <p className="mt-2 text-sm leading-relaxed text-ivory-dim">
+          <h2 className="display text-xl text-ink">The last mile</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">
             Creating shares means handing the vault the components themselves,
             which is what lets the program refuse to trust a price. Somebody
             holding only dollars has to buy those components first, so here is
@@ -95,10 +95,10 @@ export function FillCostPanel({
               onClick={() => void run(size)}
               disabled={loading || !priceable}
               aria-pressed={cost != null && shares === size}
-              className={`border px-3 py-2 transition-colors disabled:cursor-not-allowed disabled:border-rule disabled:text-ivory-faint/50 ${
+              className={`border px-3 py-2 transition-colors disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3/50 ${
                 cost != null && shares === size
-                  ? "border-gold/60 bg-gold/10 text-ivory"
-                  : "border-rule text-ivory-dim hover:border-rule-bright hover:text-ivory"
+                  ? "border-bind/60 bg-bind/10 text-ink"
+                  : "border-line text-ink-2 hover:border-line-strong hover:text-ink"
               }`}
             >
               {size === 1 ? "One share" : `${size} shares`}
@@ -108,14 +108,14 @@ export function FillCostPanel({
       </div>
 
       {!priceable && (
-        <p className="mt-7 text-sm text-ivory-faint">
+        <p className="mt-7 text-sm text-ink-3">
           One component has no mainnet price, so there is nothing honest to
           quote.
         </p>
       )}
 
       {loading && (
-        <p className="mt-7 text-sm text-ivory-faint">
+        <p className="mt-7 text-sm text-ink-3">
           Routing {components.length} components through Jupiter…
         </p>
       )}
@@ -127,7 +127,7 @@ export function FillCostPanel({
       )}
 
       {!loading && !error && !cost && priceable && (
-        <p className="mt-7 text-sm text-ivory-faint">
+        <p className="mt-7 text-sm text-ink-3">
           Pick a size to price it. Nothing is bought — this asks for a quote and
           reads the answer.
         </p>
@@ -135,7 +135,7 @@ export function FillCostPanel({
 
       {cost && !loading && (
         <>
-          <dl className="mt-7 grid grid-cols-1 gap-px bg-rule sm:grid-cols-3">
+          <dl className="mt-7 grid grid-cols-1 gap-px bg-line sm:grid-cols-3">
             <Figure
               label={`Buying the components for ${shares === 1 ? "one share" : `${shares} shares`}`}
               value={money(cost.usdcIn)}
@@ -174,14 +174,14 @@ export function FillCostPanel({
 
           {/* Six columns of numbers will not fit a phone, so this one scrolls
               sideways. `min-w-0` keeps the scrolling inside the box. */}
-          <div className="mt-6 min-w-0 overflow-x-auto border border-rule">
+          <div className="mt-6 min-w-0 overflow-x-auto border border-line">
             <table className="w-full border-collapse text-sm sm:min-w-[40rem]">
               <caption className="sr-only">
                 Every component, with the USDC a route would take, how much of the
                 recipe that fills, the price impact and the venues used.
               </caption>
               <thead>
-                <tr className="border-b border-rule text-left text-xs text-ivory-faint">
+                <tr className="border-b border-line text-left text-xs text-ink-3">
                   <th scope="col" className="px-3 py-3 font-normal sm:px-4">
                     Component
                   </th>
@@ -213,42 +213,42 @@ export function FillCostPanel({
               </thead>
               <tbody>
                 {cost.legs.map((leg) => (
-                  <tr key={leg.base} className="border-b border-rule/60 last:border-0">
+                  <tr key={leg.base} className="border-b border-line/60 last:border-0">
                     <th
                       scope="row"
-                      className="px-3 py-2.5 text-left font-normal text-ivory sm:px-4"
+                      className="px-3 py-2.5 text-left font-normal text-ink sm:px-4"
                     >
                       {leg.base}
                     </th>
-                    <td className="tnum px-3 py-2.5 text-right text-ivory-dim sm:px-4">
+                    <td className="tnum px-3 py-2.5 text-right text-ink-2 sm:px-4">
                       {money(leg.usdcIn)}
                     </td>
                     <td className="tnum px-3 py-2.5 text-right sm:px-4">
                       {leg.roundTripBps == null ? (
-                        <span className="text-ivory-faint">
+                        <span className="text-ink-3">
                           {leg.error ?? "—"}
                         </span>
                       ) : (
                         <span
                           className={
-                            leg.roundTripBps > 100 ? "text-loss" : "text-ivory-dim"
+                            leg.roundTripBps > 100 ? "text-loss" : "text-ink-2"
                           }
                         >
                           {percent(leg.roundTripBps / 100, 2)}
                         </span>
                       )}
                     </td>
-                    <td className="tnum hidden px-4 py-2.5 text-right text-ivory-dim sm:table-cell">
+                    <td className="tnum hidden px-4 py-2.5 text-right text-ink-2 sm:table-cell">
                       {leg.coverage == null
                         ? "—"
                         : percent(leg.coverage * 100, 1)}
                     </td>
-                    <td className="tnum hidden px-4 py-2.5 text-right text-ivory-dim sm:table-cell">
+                    <td className="tnum hidden px-4 py-2.5 text-right text-ink-2 sm:table-cell">
                       {leg.priceImpactPct == null
                         ? "—"
                         : percent(leg.priceImpactPct, 3)}
                     </td>
-                    <td className="hidden px-4 py-2.5 text-xs text-ivory-faint md:table-cell">
+                    <td className="hidden px-4 py-2.5 text-xs text-ink-3 md:table-cell">
                       {leg.venues.length ? leg.venues.join(" → ") : "—"}
                     </td>
                   </tr>
@@ -257,7 +257,7 @@ export function FillCostPanel({
             </table>
           </div>
 
-          <p className="mt-5 max-w-[80ch] text-xs leading-relaxed text-ivory-faint">
+          <p className="mt-5 max-w-[80ch] text-xs leading-relaxed text-ink-3">
             Each component is quoted twice through the same router — dollars in,
             then straight back out — so the round trip is what a buyer pays to
             hold the component instead of the dollars, measured against itself

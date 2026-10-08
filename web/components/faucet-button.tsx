@@ -56,7 +56,7 @@ export function FaucetButton({
 
   if (!connected) {
     return (
-      <p className="text-xs text-ivory-faint">
+      <p className="text-xs text-ink-3">
         Connect a wallet to claim test tokens.
       </p>
     );
@@ -68,7 +68,7 @@ export function FaucetButton({
         type="button"
         disabled={busy || symbols.length === 0}
         onClick={claim}
-        className="border border-rule-bright px-4 py-2.5 text-xs text-ivory transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:border-rule disabled:text-ivory-faint"
+        className="border border-line-strong px-4 py-2.5 text-xs text-ink transition-colors hover:border-bind hover:text-bind disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3"
       >
         {busy
           ? "Minting…"

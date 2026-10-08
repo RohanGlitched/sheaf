@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     connection.getBalance(keypair.publicKey),
   ]);
   if (balance >= ONLY_BELOW) {
-    return Response.json({ error: "This wallet already has enough SOL to try Tessera." }, { status: 400 });
+    return Response.json({ error: "This wallet already has enough SOL to try Sheaf." }, { status: 400 });
   }
   if (reserve - GRANT < RESERVE) {
     return Response.json(

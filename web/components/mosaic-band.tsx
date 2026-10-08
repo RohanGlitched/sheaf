@@ -1,6 +1,6 @@
 /**
  * A running key, laid in stone: the meander border that frames a Byzantine floor,
- * built from 4px tesserae with a grout line between them. Gold stones trace the
+ * built from 4px sheaves with a grout line between them. Gold stones trace the
  * key; the ground between them is set in dark lapis, so the band is a floor, not
  * a line drawing. It marks the seams between sections the way a border marks the
  * edge of a mosaic.
@@ -26,7 +26,7 @@ export function MosaicBand({ className = "" }: { className?: string }) {
   return (
     <svg className={`block w-full ${className}`} height={H} aria-hidden focusable="false">
       <defs>
-        <pattern id="tessera-key" width={W} height={H} patternUnits="userSpaceOnUse">
+        <pattern id="sheaf-key" width={W} height={H} patternUnits="userSpaceOnUse">
           {KEY.flatMap((row, y) =>
             [...row].map((c, x) => (
               <rect
@@ -35,14 +35,14 @@ export function MosaicBand({ className = "" }: { className?: string }) {
                 y={y * CELL}
                 width={STONE}
                 height={STONE}
-                fill={c === "X" ? "var(--color-gold)" : "var(--color-ground-high)"}
+                fill={c === "X" ? "var(--color-bind)" : "var(--color-sunk)"}
                 opacity={c === "X" ? shade(x, y) : 0.9}
               />
             )),
           )}
         </pattern>
       </defs>
-      <rect width="100%" height={H} fill="url(#tessera-key)" />
+      <rect width="100%" height={H} fill="url(#sheaf-key)" />
     </svg>
   );
 }

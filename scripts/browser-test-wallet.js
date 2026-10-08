@@ -111,7 +111,7 @@ export function installTestWallet() {
     const listeners = {};
     const wallet = {
       version: "1.0.0",
-      name: "Tessera Test Wallet",
+      name: "Sheaf Test Wallet",
       icon:
         "data:image/svg+xml;base64," +
         btoa(

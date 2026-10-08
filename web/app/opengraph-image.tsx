@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 
-export const alt = "Tessera: the ETF launchpad on Solana";
+export const alt = "Sheaf: the ETF launchpad on Solana";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -46,7 +46,7 @@ export default async function Image() {
               <rect x="0" y="13" width="6" height="11" fill="#ede6d6" opacity="0.4" />
               <rect x="8" y="13" width="16" height="11" fill="#ede6d6" opacity="0.22" />
             </svg>
-            <span style={{ fontFamily: "Fraunces", fontSize: 40 }}>Tessera</span>
+            <span style={{ fontFamily: "Fraunces", fontSize: 40 }}>Sheaf</span>
           </div>
           <div
             style={{
@@ -66,7 +66,7 @@ export default async function Image() {
           <div style={{ display: "flex", gap: 12, marginTop: "auto", fontSize: 20, color: "#7c8090" }}>
             <span style={{ color: "#b18827" }}>The ETF launchpad on Solana</span>
             <span>·</span>
-            <span>teserra.world</span>
+            <span>sheaf.vercel.app</span>
           </div>
         </div>
         <div style={{ display: "flex", position: "relative", marginLeft: "auto", width: 450, height: 470, marginTop: 8 }}>

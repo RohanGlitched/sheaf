@@ -43,7 +43,7 @@ fi
 step "Building and deploying the program to devnet"
 anchor build
 anchor deploy --provider.cluster "$RPC" --provider.wallet "$WALLET"
-PROGRAM_ID=$(solana address -k target/deploy/tessera-keypair.json)
+PROGRAM_ID=$(solana address -k target/deploy/sheaf-keypair.json)
 echo "Program $PROGRAM_ID"
 
 step "Creating the mirror mints and regenerating web/lib/mirror.generated.ts"
@@ -70,7 +70,7 @@ web/.env.local now holds the faucet key. Set the other three:
 
   NEXT_PUBLIC_WRITE_CLUSTER=devnet
   NEXT_PUBLIC_WRITE_RPC=$RPC
-  NEXT_PUBLIC_TESSERA_PROGRAM_ID=$PROGRAM_ID
+  NEXT_PUBLIC_SHEAF_PROGRAM_ID=$PROGRAM_ID
 
 Then rebuild:  cd web && pnpm build && pnpm start
 

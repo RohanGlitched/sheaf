@@ -1,5 +1,5 @@
 /**
- * Open a Meteora Dynamic Bonding Curve pool for one Tessera basket.
+ * Open a Meteora Dynamic Bonding Curve pool for one Sheaf basket.
  *
  * A brand-new basket has zero shares and zero liquidity, and nobody wants to be
  * the first person to assemble eight components to find out if anyone else wants
@@ -11,13 +11,13 @@
  *
  *   initialMarketCap       set at half the basket's own stated NAV per share,
  *                          in SOL at today's price — the curve opens near a
- *                          number Tessera already computes, instead of at an
+ *                          number Sheaf already computes, instead of at an
  *                          arbitrary round one.
  *   migrationMarketCap     20x the same NAV, so graduation triggers at a
  *                          multiple of something real.
  *   tokenAuthorityOption: Immutable
  *                          the base mint gets no upgrade path, same reason a
- *                          Tessera share mint has no freeze authority: nothing
+ *                          Sheaf share mint has no freeze authority: nothing
  *                          here should be editable after the fact.
  *
  *   node scripts/dbc-launch.mjs --url devnet --basket <address> --nav 500
@@ -122,7 +122,7 @@ const curve = buildCurveWithMarketCap({
   },
   liquidityDistribution: {
     // All of it locked, permanently, split evenly. Nobody here can pull
-    // migrated liquidity later, by construction, the same reason a Tessera
+    // migrated liquidity later, by construction, the same reason a Sheaf
     // vault has no withdrawal instruction a creator can call.
     partnerPermanentLockedLiquidityPercentage: 50,
     partnerLiquidityPercentage: 0,
@@ -155,7 +155,7 @@ const tx = await client.partner.createConfigAndPool({
   preCreatePoolParam: {
     name: "Frontier Labs, early access",
     symbol: "FRNTRA",
-    uri: "https://www.teserra.world/basket/5Z8XUzGVJjcYPxPZ6Hfxx8uJRNKibFcmZd7yStuSPr1p",
+    uri: "https://www.sheaf.vercel.app/basket/5Z8XUzGVJjcYPxPZ6Hfxx8uJRNKibFcmZd7yStuSPr1p",
     poolCreator: payer.publicKey,
     baseMint: baseMintKeypair.publicKey,
   },

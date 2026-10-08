@@ -99,10 +99,10 @@ export function Explorer() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-8">
         <div>
-          <h1 className="display text-hero leading-[0.95] text-ivory">
+          <h1 className="display text-hero leading-[0.95] text-ink">
             Every basket
           </h1>
-          <p className="mt-4 max-w-[54ch] text-base leading-relaxed text-ivory-dim">
+          <p className="mt-4 max-w-[54ch] text-base leading-relaxed text-ink-2">
             Read straight from the program. Nothing here is listed,
             approved, or promoted. If somebody created it, it is on this page.
           </p>
@@ -110,14 +110,14 @@ export function Explorer() {
         {baskets && baskets.length > 0 && (
           <dl className="tnum flex gap-8 text-sm">
             <div>
-              <dt className="text-xs text-ivory-faint">Baskets</dt>
-              <dd className="display mt-1 text-xl text-ivory">
+              <dt className="text-xs text-ink-3">Baskets</dt>
+              <dd className="display mt-1 text-xl text-ink">
                 {count(baskets.length)}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-ivory-faint">Combined share price</dt>
-              <dd className="display mt-1 text-xl text-ivory">
+              <dt className="text-xs text-ink-3">Combined share price</dt>
+              <dd className="display mt-1 text-xl text-ink">
                 {money(totalValue)}
               </dd>
             </div>
@@ -126,7 +126,7 @@ export function Explorer() {
       </div>
 
       {baskets && baskets.length > 0 && (
-        <div className="mt-10 flex flex-wrap items-center gap-3 border-y border-rule py-4">
+        <div className="mt-10 flex flex-wrap items-center gap-3 border-y border-line py-4">
           <label className="flex-1 min-w-[14rem]">
             <span className="sr-only">Search baskets</span>
             <input
@@ -134,7 +134,7 @@ export function Explorer() {
               value={query}
               placeholder="Search by name, ticker, or creator"
               onChange={(event) => setQuery(event.target.value)}
-              className="w-full border border-rule bg-ground px-3 py-2.5 text-sm text-ivory placeholder:text-ivory-faint outline-none focus-visible:border-gold"
+              className="w-full border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-3 outline-none focus-visible:border-bind"
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -148,12 +148,12 @@ export function Explorer() {
                 style={{
                   borderColor:
                     sort === option.key
-                      ? "var(--color-gold)"
-                      : "var(--color-rule)",
+                      ? "var(--color-bind)"
+                      : "var(--color-line)",
                   color:
                     sort === option.key
-                      ? "var(--color-gold)"
-                      : "var(--color-ivory-dim)",
+                      ? "var(--color-bind)"
+                      : "var(--color-ink-2)",
                 }}
               >
                 {option.label}
@@ -172,15 +172,15 @@ export function Explorer() {
       )}
 
       {baskets && baskets.length === 0 && (
-        <div className="mt-12 border border-dashed border-rule-bright/60 px-8 py-16 text-center">
-          <p className="display text-xl text-ivory">The program is empty.</p>
-          <p className="mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed text-ivory-dim">
+        <div className="mt-12 border border-dashed border-line-strong/60 px-8 py-16 text-center">
+          <p className="display text-xl text-ink">The program is empty.</p>
+          <p className="mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed text-ink-2">
             No baskets exist on this cluster yet. Creating one takes a
             single transaction.
           </p>
           <Link
             href="/compose"
-            className="mt-7 inline-block border border-gold bg-gold px-5 py-3 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e]"
+            className="mt-7 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep"
           >
             Create the first one
           </Link>
@@ -188,7 +188,7 @@ export function Explorer() {
       )}
 
       {baskets && baskets.length > 0 && rows.length === 0 && (
-        <p className="mt-12 text-sm leading-relaxed text-ivory-dim">
+        <p className="mt-12 text-sm leading-relaxed text-ink-2">
           Nothing matches “{query.trim()}”. Clear the search to see all{" "}
           {count(baskets.length)}.
         </p>

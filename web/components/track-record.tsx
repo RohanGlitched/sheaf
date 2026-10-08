@@ -48,8 +48,8 @@ export function TrackRecord({
     <section className="mt-16">
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div>
-          <h2 className="display text-title text-ivory">What this recipe would have done</h2>
-          <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ivory-dim">
+          <h2 className="display text-title text-ink">What this recipe would have done</h2>
+          <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
             One {symbol} share is a fixed quantity of each holding, so its value on
             any past day is those quantities times that day&rsquo;s prices. Dividends
             are counted the way the tokens pay them, by compounding into the holding.
@@ -64,8 +64,8 @@ export function TrackRecord({
               aria-pressed={range === r.key}
               className="border px-3 py-2 text-xs transition-colors"
               style={{
-                borderColor: range === r.key ? "var(--color-gold)" : "var(--color-rule)",
-                color: range === r.key ? "var(--color-gold)" : "var(--color-ivory-dim)",
+                borderColor: range === r.key ? "var(--color-bind)" : "var(--color-line)",
+                color: range === r.key ? "var(--color-bind)" : "var(--color-ink-2)",
               }}
             >
               {r.label}
@@ -75,11 +75,11 @@ export function TrackRecord({
       </div>
 
       {loading && !track ? (
-        <div className="mt-7 flex h-[280px] items-center justify-center border border-rule bg-ground text-sm text-ivory-faint">
+        <div className="mt-7 flex h-[280px] items-center justify-center border border-line bg-surface text-sm text-ink-3">
           Reading a year of closes…
         </div>
       ) : !track ? (
-        <div className="mt-7 border border-dashed border-rule-bright/60 px-6 py-10 text-sm leading-relaxed text-ivory-dim">
+        <div className="mt-7 border border-dashed border-line-strong/60 px-6 py-10 text-sm leading-relaxed text-ink-2">
           {components.length && components.every((c) => !history?.series[c.base]) ? (
             <>
               Every holding in this basket is a pre-IPO company. There is no listed
@@ -92,11 +92,11 @@ export function TrackRecord({
         </div>
       ) : (
         <>
-          <div className="mt-7 border border-rule bg-ground p-4 sm:p-6">
+          <div className="mt-7 border border-line bg-surface p-4 sm:p-6">
             <Chart track={track} symbol={symbol} benchmark={history?.benchmark ?? "SPY"} createdAt={createdAt} />
           </div>
 
-          <dl className="mt-px grid grid-cols-2 gap-px bg-rule lg:grid-cols-4">
+          <dl className="mt-px grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
             <Figure
               label={`${RANGES.find((r) => r.key === range)?.label ?? ""}, total return`}
               value={signedPercent(track.returnPct)}
@@ -166,7 +166,7 @@ function Notes({ track, asOf }: { track: Track; asOf?: string }) {
     "A backtest of the recipe at today's quantities, from the listed shares' closes. It is not the token's own trading history, and it does not include the cost of assembling the basket.",
   );
   return (
-    <ul className="mt-5 max-w-[70ch] space-y-1.5 text-xs leading-relaxed text-ivory-faint">
+    <ul className="mt-5 max-w-[70ch] space-y-1.5 text-xs leading-relaxed text-ink-3">
       {notes.map((n) => (
         <li key={n}>{n}</li>
       ))}
@@ -246,17 +246,17 @@ function Chart({
 
   return (
     <div ref={ref} className="min-w-0">
-      <div className="tnum flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-xs text-ivory-faint">
+      <div className="tnum flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-xs text-ink-3">
         <span>
-          <span className="text-ivory">{shortDay(p.d, true)}</span>
+          <span className="text-ink">{shortDay(p.d, true)}</span>
           {" · "}
           <span className="inline-block size-2 align-middle" style={{ background: line }} aria-hidden />{" "}
-          {symbol} <span className="text-ivory">{money(p.nav)}</span>
+          {symbol} <span className="text-ink">{money(p.nav)}</span>
           {p.bench != null && (
             <>
               {" · "}
-              <span className="inline-block h-px w-3 border-t border-dashed border-ivory-dim align-middle" aria-hidden />{" "}
-              {benchmark} <span className="text-ivory">{money(p.bench)}</span>
+              <span className="inline-block h-px w-3 border-t border-dashed border-ink-2 align-middle" aria-hidden />{" "}
+              {benchmark} <span className="text-ink">{money(p.bench)}</span>
             </>
           )}
         </span>
@@ -283,36 +283,36 @@ function Chart({
 
         {levels.map((v) => (
           <g key={v}>
-            <line x1={PAD.left} x2={w - PAD.right} y1={y(v)} y2={y(v)} stroke="var(--color-rule)" />
-            <text x={PAD.left - 8} y={y(v) + 3} textAnchor="end" fontSize="10" fill="var(--color-ivory-faint)" className="tnum">
+            <line x1={PAD.left} x2={w - PAD.right} y1={y(v)} y2={y(v)} stroke="var(--color-line)" />
+            <text x={PAD.left - 8} y={y(v) + 3} textAnchor="end" fontSize="10" fill="var(--color-ink-3)" className="tnum">
               {money(v)}
             </text>
           </g>
         ))}
-        <line x1={PAD.left} x2={w - PAD.right} y1={y0} y2={y0} stroke="var(--color-rule-bright)" strokeDasharray="2 4" />
+        <line x1={PAD.left} x2={w - PAD.right} y1={y0} y2={y0} stroke="var(--color-line-strong)" strokeDasharray="2 4" />
 
         {ticks.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10" fill="var(--color-ivory-faint)">
+          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10" fill="var(--color-ink-3)">
             {shortDay(points[i].d)}
           </text>
         ))}
 
         {createdIndex > 0 && (
           <g>
-            <line x1={x(createdIndex)} x2={x(createdIndex)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--color-gold)" strokeDasharray="2 3" />
-            <text x={x(createdIndex) + 5} y={PAD.top + 10} fontSize="10" fill="var(--color-gold)">
+            <line x1={x(createdIndex)} x2={x(createdIndex)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--color-bind)" strokeDasharray="2 3" />
+            <text x={x(createdIndex) + 5} y={PAD.top + 10} fontSize="10" fill="var(--color-bind)">
               basket created
             </text>
           </g>
         )}
 
         <path d={area} fill={`url(#${gradientId})`} />
-        {benchPath && <path d={benchPath} fill="none" stroke="var(--color-ivory-dim)" strokeWidth="1.25" strokeDasharray="4 4" />}
+        {benchPath && <path d={benchPath} fill="none" stroke="var(--color-ink-2)" strokeWidth="1.25" strokeDasharray="4 4" />}
         <path d={navPath} fill="none" stroke={line} strokeWidth="2" strokeLinejoin="round" />
 
-        <line x1={x(at)} x2={x(at)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--color-ivory-faint)" strokeOpacity={hover == null ? 0 : 0.6} />
-        {p.bench != null && <circle cx={x(at)} cy={y(p.bench)} r="3" fill="var(--color-ground)" stroke="var(--color-ivory-dim)" strokeWidth="1.5" />}
-        <circle cx={x(at)} cy={y(p.nav)} r="4.5" fill={line} stroke="var(--color-ground)" strokeWidth="2" />
+        <line x1={x(at)} x2={x(at)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--color-ink-3)" strokeOpacity={hover == null ? 0 : 0.6} />
+        {p.bench != null && <circle cx={x(at)} cy={y(p.bench)} r="3" fill="var(--color-surface)" stroke="var(--color-ink-2)" strokeWidth="1.5" />}
+        <circle cx={x(at)} cy={y(p.nav)} r="4.5" fill={line} stroke="var(--color-surface)" strokeWidth="2" />
       </svg>
     </div>
   );
@@ -330,17 +330,17 @@ export function TrackFigure({ components }: { components: TrackComponent[] }) {
 
   if (loading && !track) {
     return (
-      <div className="col-span-2 bg-ground p-5">
-        <p className="text-xs text-ivory-faint">Past year</p>
-        <p className="mt-1.5 text-sm text-ivory-faint">Reading a year of closes…</p>
+      <div className="col-span-2 bg-surface p-5">
+        <p className="text-xs text-ink-3">Past year</p>
+        <p className="mt-1.5 text-sm text-ink-3">Reading a year of closes…</p>
       </div>
     );
   }
   if (!track) {
     return (
-      <div className="col-span-2 bg-ground p-5">
-        <p className="text-xs text-ivory-faint">Past year</p>
-        <p className="mt-1.5 text-sm text-ivory-dim">
+      <div className="col-span-2 bg-surface p-5">
+        <p className="text-xs text-ink-3">Past year</p>
+        <p className="mt-1.5 text-sm text-ink-2">
           No listed history: every pick is a pre-IPO company.
         </p>
       </div>
@@ -348,14 +348,14 @@ export function TrackFigure({ components }: { components: TrackComponent[] }) {
   }
   const relative = track.benchReturnPct == null ? null : track.returnPct - track.benchReturnPct;
   return (
-    <div className="col-span-2 bg-ground p-5">
+    <div className="col-span-2 bg-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs text-ivory-faint">Past year, had it existed</p>
+          <p className="text-xs text-ink-3">Past year, had it existed</p>
           <p className="tnum display mt-1.5 text-xl" style={{ color: track.returnPct >= 0 ? "var(--color-gain)" : "var(--color-loss)" }}>
             {signedPercent(track.returnPct)}
           </p>
-          <p className="mt-1 text-xs leading-relaxed text-ivory-faint">
+          <p className="mt-1 text-xs leading-relaxed text-ink-3">
             {relative == null
               ? "dividends compounded, costs excluded"
               : `${relative >= 0 ? "ahead of" : "behind"} ${history?.benchmark ?? "SPY"} by ${percent(Math.abs(relative), 1)} · fell ${percent(Math.abs(track.maxDrawdownPct), 0)} at worst`}
@@ -380,7 +380,7 @@ export function Sparkline({ track, width = 100, height = 32 }: { track: Track; w
   const line = track.returnPct >= 0 ? "var(--color-gain)" : "var(--color-loss)";
   return (
     <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} className="shrink-0" aria-hidden>
-      <line x1={0} x2={width} y1={y(points[0].nav)} y2={y(points[0].nav)} stroke="var(--color-rule-bright)" strokeDasharray="2 3" />
+      <line x1={0} x2={width} y1={y(points[0].nav)} y2={y(points[0].nav)} stroke="var(--color-line-strong)" strokeDasharray="2 3" />
       <path d={d} fill="none" stroke={line} strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
@@ -391,7 +391,7 @@ export function CardTrack({ components }: { components: TrackComponent[] }) {
   const { history } = useHistory();
   const track = useMemo(() => trackRecord(components, history, "1y"), [components, history]);
   if (!track) {
-    return <span className="text-ivory-faint">{history ? "pre-IPO, no history" : "…"}</span>;
+    return <span className="text-ink-3">{history ? "pre-IPO, no history" : "…"}</span>;
   }
   return (
     <span className="flex items-center gap-2">

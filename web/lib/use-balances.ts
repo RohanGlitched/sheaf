@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { tokenAccount } from "./tessera";
+import { tokenAccount } from "./sheaf";
 
 /**
  * What the connected wallet actually holds, for a named set of mints.

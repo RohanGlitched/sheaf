@@ -1,5 +1,5 @@
 /**
- * A year of daily closes for every listed company Tessera composes.
+ * A year of daily closes for every listed company Sheaf composes.
  *
  * The program never prices anything, but a person deciding whether to hold a
  * basket wants to know what that recipe would have done, so every basket gets a

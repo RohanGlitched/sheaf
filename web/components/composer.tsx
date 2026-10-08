@@ -14,7 +14,7 @@ import { money, percent, moneyCompact, quantity, signedPercent } from "@/lib/for
 import { equalWeights, proportionalWeights, setWeight, WEIGHT_TOTAL } from "@/lib/weights";
 import { COMPOSABLE, writeMint } from "@/lib/mirror";
 import { PRESTOCK_SYMBOLS } from "@/lib/prestocks";
-import { unitsForWeights } from "@/lib/tessera";
+import { unitsForWeights } from "@/lib/sheaf";
 import { buildCreateBasket, sendSteps, explainError } from "@/lib/tx";
 import { MAX_COMPONENTS, MAX_CREATOR_FEE_BPS, explorerTx } from "@/lib/config";
 import type { Quote } from "@/lib/market";
@@ -384,9 +384,9 @@ export function Composer() {
     return (
       <div className="mx-auto max-w-[60rem] py-20">
         <div className="text-center">
-          <p className="text-sm text-gold">Created</p>
-          <h1 className="display mt-4 text-title text-ivory">{trimmedName} exists.</h1>
-          <p className="mx-auto mt-5 max-w-[42rem] text-base leading-relaxed text-ivory-dim">
+          <p className="text-sm text-bind">Created</p>
+          <h1 className="display mt-4 text-title text-ink">{trimmedName} exists.</h1>
+          <p className="mx-auto mt-5 max-w-[42rem] text-base leading-relaxed text-ink-2">
             The recipe is written into a program account and the share mint&apos;s authority
             now belongs to it. Anybody can create shares by handing the vault the components,
             and redeem them for the same components back.{" "}
@@ -394,18 +394,18 @@ export function Composer() {
               href={explorerTx(done.signature)}
               target="_blank"
               rel="noreferrer"
-              className="underline decoration-rule-bright underline-offset-4 hover:text-ivory"
+              className="underline decoration-line-strong underline-offset-4 hover:text-ink"
             >
               View the transaction
             </a>
           </p>
         </div>
-        <ol className="mt-14 grid gap-px border border-rule bg-rule md:grid-cols-3">
+        <ol className="mt-14 grid gap-px border border-line bg-line md:grid-cols-3">
           {next.map((step) => (
-            <li key={step.n} className="flex flex-col bg-ground-raised p-6">
-              <p className="display text-2xl text-gold">{step.n}</p>
-              <h2 className="mt-3 text-base text-ivory">{step.title}</h2>
-              <p className="mt-2 flex-1 text-sm leading-relaxed text-ivory-dim">{step.body}</p>
+            <li key={step.n} className="flex flex-col bg-raised p-6">
+              <p className="display text-2xl text-bind">{step.n}</p>
+              <h2 className="mt-3 text-base text-ink">{step.title}</h2>
+              <p className="mt-2 flex-1 text-sm leading-relaxed text-ink-2">{step.body}</p>
               <button
                 type="button"
                 onClick={() => {
@@ -419,8 +419,8 @@ export function Composer() {
                 }}
                 className={
                   step.n === "1"
-                    ? "mt-6 border border-gold bg-gold px-4 py-2.5 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e]"
-                    : "mt-6 border border-rule-bright px-4 py-2.5 text-sm text-ivory transition-colors hover:border-gold hover:text-gold"
+                    ? "mt-6 border border-bind bg-bind px-4 py-2.5 text-sm text-page transition-colors hover:bg-bind-deep"
+                    : "mt-6 border border-line-strong px-4 py-2.5 text-sm text-ink transition-colors hover:border-bind hover:text-bind"
                 }
               >
                 {step.copy && copied ? "Copied" : step.cta}
@@ -440,8 +440,8 @@ export function Composer() {
           the market picture needs to be, and a market you are asked to click
           should fill that space rather than leave it blank. */}
       <div className="flex flex-col">
-        <h1 className="display text-title text-ivory">Create a basket</h1>
-        <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ivory-dim">
+        <h1 className="display text-title text-ink">Create a basket</h1>
+        <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
           Pick a tile to put that company in the basket, or pick it from the
           Table, then set the weights. Up to {MAX_COMPONENTS} components, and every one of them is
           a token already trading on Solana — public equities as xStocks, and
@@ -455,7 +455,7 @@ export function Composer() {
               type="button"
               onClick={() => applyPreset(preset)}
               title={preset.hint}
-              className="border border-rule px-3 py-2 text-xs text-ivory-dim transition-colors hover:border-rule-bright hover:text-ivory"
+              className="border border-line px-3 py-2 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
             >
               {preset.label}
             </button>
@@ -467,7 +467,7 @@ export function Composer() {
                 setPicks([]);
                 setWeights([]);
               }}
-              className="border border-rule px-3 py-2 text-xs text-ivory-faint transition-colors hover:border-loss/60 hover:text-loss"
+              className="border border-line px-3 py-2 text-xs text-ink-3 transition-colors hover:border-loss/60 hover:text-loss"
             >
               Clear
             </button>
@@ -494,36 +494,36 @@ export function Composer() {
             are still picking, and the panel beside them is much the taller of
             the two columns — the mosaic above takes whatever height this leaves,
             so moving the form here squares the page up as a side effect. */}
-        <div className="mt-10 border-t border-rule pt-8">
-          <h2 className="display text-xl text-ivory">Name the token</h2>
-          <p className="mt-1.5 max-w-[62ch] text-sm leading-relaxed text-ivory-dim">
+        <div className="mt-10 border-t border-line pt-8">
+          <h2 className="display text-xl text-ink">Name the token</h2>
+          <p className="mt-1.5 max-w-[62ch] text-sm leading-relaxed text-ink-2">
             The share carries this name and symbol on chain. The target price
             only sets how much of each component stands behind one share.
           </p>
 
           <div className="mt-6 grid gap-5 sm:grid-cols-[minmax(0,1fr)_9rem] lg:grid-cols-[minmax(0,1fr)_9rem_11rem]">
             <label className="block">
-              <span className="text-xs text-ivory-faint">Name</span>
+              <span className="text-xs text-ink-3">Name</span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={32}
                 placeholder="Semiconductors, equal weight"
-                className="mt-1.5 w-full border border-rule bg-ground-deep px-3 py-2 text-sm text-ivory placeholder:text-ivory-faint/60"
+                className="mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-ivory-faint">Symbol</span>
+              <span className="text-xs text-ink-3">Symbol</span>
               <input
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                 maxLength={10}
                 placeholder="CHIPS"
-                className="tnum mt-1.5 w-full border border-rule bg-ground-deep px-3 py-2 text-sm text-ivory placeholder:text-ivory-faint/60"
+                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60"
               />
             </label>
             <label className="block sm:col-span-2 lg:col-span-1">
-              <span className="text-xs text-ivory-faint">Target share price</span>
+              <span className="text-xs text-ink-3">Target share price</span>
               <input
                 type="number"
                 min={1}
@@ -532,7 +532,7 @@ export function Composer() {
                 onChange={(e) =>
                   setSharePrice(Math.max(1, Number(e.target.value) || 1))
                 }
-                className="tnum mt-1.5 w-full border border-rule bg-ground-deep px-3 py-2 text-sm text-ivory"
+                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink"
               />
             </label>
           </div>
@@ -540,10 +540,10 @@ export function Composer() {
           <div className="mt-8 grid items-start gap-x-10 gap-y-3 sm:grid-cols-2">
             <div>
               <div className="flex items-baseline justify-between">
-                <span className="text-xs text-ivory-faint">
+                <span className="text-xs text-ink-3">
                   Your fee on every share created
                 </span>
-                <span className="tnum text-sm text-ivory">
+                <span className="tnum text-sm text-ink">
                   {percent(feeBps / 100)}
                 </span>
               </div>
@@ -556,10 +556,10 @@ export function Composer() {
                 aria-label="Creator fee in basis points"
                 onChange={(e) => setFeeBps(Number(e.target.value))}
                 className="slider mt-3 w-full"
-                style={sliderStyle("var(--color-gold)", feeBps, 0, MAX_CREATOR_FEE_BPS)}
+                style={sliderStyle("var(--color-bind)", feeBps, 0, MAX_CREATOR_FEE_BPS)}
               />
             </div>
-            <p className="text-xs leading-relaxed text-ivory-faint">
+            <p className="text-xs leading-relaxed text-ink-3">
               Taken in shares, not out of the vault, so it can never eat into
               what a holder can redeem. The program caps it at{" "}
               {percent(MAX_CREATOR_FEE_BPS / 100)}.
@@ -570,12 +570,12 @@ export function Composer() {
 
       {/* ------------------------------------------------------------ basket */}
       <div ref={panel} className="scroll-mt-4 sm:scroll-mt-24 lg:sticky lg:top-24 lg:self-start">
-        <div className="border border-rule bg-ground">
-          <div className="border-b border-rule px-6 py-5">
-            <h2 className="display text-xl text-ivory">
+        <div className="border border-line bg-surface">
+          <div className="border-b border-line px-6 py-5">
+            <h2 className="display text-xl text-ink">
               {trimmedName || "Your basket"}
             </h2>
-            <p className="mt-1 text-xs text-ivory-faint">
+            <p className="mt-1 text-xs text-ink-3">
               {picks.length === 0
                 ? "Nothing in it yet"
                 : `${picks.length} component${picks.length === 1 ? "" : "s"} · one share targets ${money(sharePrice)}`}
@@ -596,11 +596,11 @@ export function Composer() {
             {recipe.rows.length > 0 && (
               <div>
                 <div className="flex items-baseline justify-between">
-                  <h3 className="text-sm text-ivory">Weights</h3>
+                  <h3 className="text-sm text-ink">Weights</h3>
                   <button
                     type="button"
                     onClick={weightByLiquidity}
-                    className="text-xs text-ivory-faint underline decoration-rule-bright underline-offset-2 hover:text-ivory"
+                    className="text-xs text-ink-3 underline decoration-line-strong underline-offset-2 hover:text-ink"
                   >
                     Weight by liquidity
                   </button>
@@ -614,18 +614,18 @@ export function Composer() {
                           style={{ background: slotColor(row.pick.slot) }}
                           aria-hidden
                         />
-                        <span className="text-sm text-ivory">
+                        <span className="text-sm text-ink">
                           {row.stock.base}
                         </span>
                         {PRESTOCK_SYMBOLS.has(row.stock.symbol) && (
-                          <span className="text-xs text-ivory-faint">
+                          <span className="text-xs text-ink-3">
                             PreStocks
                           </span>
                         )}
-                        <span className="truncate text-xs text-ivory-faint">
+                        <span className="truncate text-xs text-ink-3">
                           {row.stock.company}
                         </span>
-                        <span className="tnum ml-auto text-sm text-ivory">
+                        <span className="tnum ml-auto text-sm text-ink">
                           {percent(row.weightBps / 100, 1)}
                         </span>
                       </div>
@@ -649,7 +649,7 @@ export function Composer() {
                         )}
                       />
                       {row.quote && recipe.units && (
-                        <p className="tnum mt-1 text-xs text-ivory-faint">
+                        <p className="tnum mt-1 text-xs text-ink-3">
                           {quantity(
                             Number(recipe.units[i].unitsPerShare) /
                               10 ** row.stock.decimals,
@@ -657,7 +657,7 @@ export function Composer() {
                           )}{" "}
                           {row.stock.symbol} per share · {money(row.quote.price)}
                           {row.quote.paysDividend && (
-                            <span className="text-gold">
+                            <span className="text-bind">
                               {" "}
                               · +{percent(row.quote.accruedYieldPct)} accrued
                             </span>
@@ -673,7 +673,7 @@ export function Composer() {
 
           {/* the numbers */}
           {recipe.nav != null && (
-            <dl className="grid grid-cols-2 gap-px border-t border-rule bg-rule">
+            <dl className="grid grid-cols-2 gap-px border-t border-line bg-line">
               <Figure
                 label="One share, right now"
                 value={money(recipe.nav)}
@@ -719,14 +719,14 @@ export function Composer() {
           )}
 
           {/* submit */}
-          <div className="border-t border-rule px-6 py-6">
+          <div className="border-t border-line px-6 py-6">
             {error && (
               <p className="mb-4 border-l-2 border-loss pl-3 text-sm leading-relaxed text-loss">
                 {error}
               </p>
             )}
             {connected && problems.length > 0 && (
-              <ul className="mb-4 space-y-1 text-sm text-ivory-faint">
+              <ul className="mb-4 space-y-1 text-sm text-ink-3">
                 {problems.slice(0, 2).map((p) => (
                   <li key={p}>{p}</li>
                 ))}
@@ -739,7 +739,7 @@ export function Composer() {
               type="button"
               onClick={() => void create()}
               disabled={!ready || submitting}
-              className="w-full border border-gold bg-gold px-5 py-3 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:cursor-not-allowed disabled:border-rule disabled:bg-transparent disabled:text-ivory-faint"
+              className="w-full border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3"
             >
               {submitting
                 ? step && step.total > 1
@@ -750,7 +750,7 @@ export function Composer() {
                 : "Create the basket"}
             </button>
             )}
-            <p className="mt-3 text-xs leading-relaxed text-ivory-faint">
+            <p className="mt-3 text-xs leading-relaxed text-ink-3">
               It creates the share mint, names it, hands its authority to the
               basket, and writes the recipe. Nothing is minted yet. A Solana
               transaction holds 1,232 bytes, so the largest baskets ask for a
@@ -761,13 +761,13 @@ export function Composer() {
       </div>
 
       {picks.length > 0 && panelBelow && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-rule bg-ground-raised/95 backdrop-blur-md lg:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-raised/95 backdrop-blur-md lg:hidden">
           <div className="flex items-center justify-between gap-4 px-5 py-3">
             <div className="min-w-0">
-              <p className="text-sm text-ivory">
+              <p className="text-sm text-ink">
                 {picks.length} of {MAX_COMPONENTS} picked
               </p>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ivory-faint">
+              <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-3">
                 {picks.map((pick) => (
                   <span key={pick.symbol} className="flex items-center gap-1">
                     <span aria-hidden className="size-2" style={{ background: slotColor(pick.slot) }} />
@@ -779,7 +779,7 @@ export function Composer() {
             <button
               type="button"
               onClick={() => panel.current?.scrollIntoView({ block: "start" })}
-              className="shrink-0 border border-gold/60 bg-gold/10 px-4 py-2 text-sm text-ivory transition-colors hover:bg-gold/20"
+              className="shrink-0 border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20"
             >
               Set weights
             </button>

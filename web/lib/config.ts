@@ -1,5 +1,5 @@
 /**
- * Tessera reads from one cluster and writes to another.
+ * Sheaf reads from one cluster and writes to another.
  *
  * Prices, premiums and dividend multipliers come from mainnet, because the twenty
  * xStocks only exist there. Minting and redeeming run on
@@ -8,7 +8,7 @@
  * figure on screen stays real.
  */
 
-export const SITE_URL = "https://www.teserra.world";
+export const SITE_URL = "https://www.sheaf.vercel.app";
 
 export const MAINNET_RPC =
   process.env.NEXT_PUBLIC_MAINNET_RPC ?? "https://api.mainnet-beta.solana.com";
@@ -24,8 +24,8 @@ export const WRITE_RPC =
     ? "https://api.devnet.solana.com"
     : "http://127.0.0.1:8899");
 
-export const TESSERA_PROGRAM_ID =
-  process.env.NEXT_PUBLIC_TESSERA_PROGRAM_ID ??
+export const SHEAF_PROGRAM_ID =
+  process.env.NEXT_PUBLIC_SHEAF_PROGRAM_ID ??
   "F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ";
 
 /** Where a signature can be looked up, for the cluster it was signed on. */
@@ -38,7 +38,7 @@ export function explorerAddress(address: string, mainnet = false): string {
   return `https://explorer.solana.com/address/${address}?cluster=${WRITE_CLUSTER === "localnet" ? "custom" : WRITE_CLUSTER}`;
 }
 
-/** A share of a Tessera basket is always six decimals. Matches the program. */
+/** A share of a Sheaf basket is always six decimals. Matches the program. */
 export const SHARE_DECIMALS = 6;
 export const ONE_SHARE = 1_000_000;
 /** The program's hard ceiling on components per basket. Also the palette size. */

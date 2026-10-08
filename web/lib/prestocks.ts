@@ -6,7 +6,7 @@
  * nobody can package a themed basket of them without an entity. Unlike every
  * xStock, several of these mints also carry `TransferFeeConfig` — a fee taken
  * out of every transfer at the token-program level, which a naive in-kind
- * recipe would silently under-back against. Tessera's mint path grosses up
+ * recipe would silently under-back against. Sheaf's mint path grosses up
  * for it; see `gross_for_transfer_fee` in the program.
  *
  * Mint addresses and live fee bps read from https://prestocks.com/api/prestocks

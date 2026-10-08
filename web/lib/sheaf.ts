@@ -1,11 +1,11 @@
 /**
- * The Tessera program, from the browser.
+ * The Sheaf program, from the browser.
  *
  * Anchor's client is a dependency of the workspace but not of this file, and that
  * is deliberate. Reading a basket needs no provider and no wallet, and encoding
  * three instructions by hand is a hundred lines against several hundred kilobytes
  * of runtime in the bundle. The discriminators and the field order below are
- * copied from target/idl/tessera.json, which the program itself emits; if the
+ * copied from target/idl/sheaf.json, which the program itself emits; if the
  * program's layout changes, that file changes and so must this one.
  */
 
@@ -16,9 +16,9 @@ import {
   TransactionInstruction,
   type AccountMeta,
 } from "@solana/web3.js";
-import { TESSERA_PROGRAM_ID, ONE_SHARE, SHARE_DECIMALS, WRITE_RPC } from "./config";
+import { SHEAF_PROGRAM_ID, ONE_SHARE, SHARE_DECIMALS, WRITE_RPC } from "./config";
 
-export const PROGRAM_ID = new PublicKey(TESSERA_PROGRAM_ID);
+export const PROGRAM_ID = new PublicKey(SHEAF_PROGRAM_ID);
 
 export const TOKEN_2022_PROGRAM_ID = new PublicKey(
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",

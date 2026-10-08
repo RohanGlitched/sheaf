@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Write web/lib/history.snapshot.json: a year of daily closes for every listed
- * ticker Tessera composes, plus the benchmark.
+ * ticker Sheaf composes, plus the benchmark.
  *
  * The track record on every basket page is computed from this history. The
  * site reads it live from Yahoo Finance's chart endpoint and falls back to this

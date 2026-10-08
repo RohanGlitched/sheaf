@@ -10,7 +10,7 @@ export function MosaicSkeleton({ height, label }: { height: number; label: strin
       role="status"
       aria-label={label}
       style={{ height }}
-      className="grid grid-cols-[2fr_1.3fr_1fr] grid-rows-[1.4fr_1fr] gap-1 border border-rule bg-ground p-1"
+      className="grid grid-cols-[2fr_1.3fr_1fr] grid-rows-[1.4fr_1fr] gap-1 border border-line bg-surface p-1"
     >
       <Bar className="row-span-2 h-full" />
       <Bar className="h-full" />
@@ -29,7 +29,7 @@ export function CardSkeletons({ count = 3 }: { count?: number }) {
       className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3"
     >
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="border border-rule bg-ground">
+        <div key={i} className="border border-line bg-surface">
           <div className="flex justify-between gap-4 px-5 pt-5">
             <div className="flex-1">
               <Bar className="h-5 w-2/3" />
@@ -40,7 +40,7 @@ export function CardSkeletons({ count = 3 }: { count?: number }) {
           <div className="mt-4 px-5">
             <Bar className="h-[132px]" />
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-rule px-5 py-4">
+          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4">
             <Bar className="h-7" />
             <Bar className="h-7" />
             <Bar className="h-7" />

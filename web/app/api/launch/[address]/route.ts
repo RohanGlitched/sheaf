@@ -1,6 +1,6 @@
 import { SITE_URL } from "@/lib/config";
 import { launchName, launchSymbol } from "@/lib/dbc";
-import { fetchBasketAt } from "@/lib/tessera";
+import { fetchBasketAt } from "@/lib/sheaf";
 
 /** Token metadata for a basket's launch token, which points its mint's URI here. */
 export async function GET(_request: Request, { params }: { params: Promise<{ address: string }> }) {
@@ -13,7 +13,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ add
     {
       name: launchName(basket.name),
       symbol: launchSymbol(basket.symbol),
-      description: `Launch token for ${basket.name} (${basket.symbol}), a Tessera basket of ${basket.components.length} tokenised equities. A separate token on a Meteora bonding curve, not a redemption right into the basket.`,
+      description: `Launch token for ${basket.name} (${basket.symbol}), a Sheaf basket of ${basket.components.length} tokenised equities. A separate token on a Meteora bonding curve, not a redemption right into the basket.`,
       image: `${page}/opengraph-image`,
       external_url: page,
     },

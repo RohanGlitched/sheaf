@@ -23,16 +23,16 @@ export function Figure({
       : tone === "loss"
         ? "var(--color-loss)"
         : tone === "gold"
-          ? "var(--color-gold)"
-          : "var(--color-ivory)";
+          ? "var(--color-bind)"
+          : "var(--color-ink)";
   return (
-    <div className="bg-ground p-5">
-      <dt className="text-xs text-ivory-faint">{label}</dt>
+    <div className="bg-surface p-5">
+      <dt className="text-xs text-ink-3">{label}</dt>
       <dd>
         <span className="tnum display mt-1.5 block text-xl" style={{ color }}>
           <Ticker value={value} />
         </span>
-        <span className="mt-1 block text-xs leading-relaxed text-ivory-faint">
+        <span className="mt-1 block text-xs leading-relaxed text-ink-3">
           {note}
         </span>
       </dd>

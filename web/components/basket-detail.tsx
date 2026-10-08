@@ -14,7 +14,7 @@ import { FillCostPanel } from "./fill-cost";
 import { TrackRecord } from "./track-record";
 import { BasketHistory } from "./ledger";
 import { PublicKey } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, ONE_SHARE, tokenAccount } from "@/lib/tessera";
+import { TOKEN_2022_PROGRAM_ID, ONE_SHARE, tokenAccount } from "@/lib/sheaf";
 import {
   buildMintShares,
   buildRedeemShares,
@@ -36,7 +36,7 @@ import {
   timeAgo,
   count,
 } from "@/lib/format";
-import type { Basket } from "@/lib/tessera";
+import type { Basket } from "@/lib/sheaf";
 import { Ticker } from "./ticker";
 import { BasketSkeleton } from "./skeletons";
 
@@ -57,7 +57,7 @@ export function BasketDetail({ address, initial }: { address: string; initial: B
   const { basket, state, error, reload } = useBasket(address, initial);
 
   useEffect(() => {
-    if (basket) document.title = `${basket.name} (${basket.symbol}) · Tessera`;
+    if (basket) document.title = `${basket.name} (${basket.symbol}) · Sheaf`;
   }, [basket]);
 
   if (state === "loading") {
@@ -67,14 +67,14 @@ export function BasketDetail({ address, initial }: { address: string; initial: B
   if (state === "missing" || !basket) {
     return (
       <div className="py-32 text-center">
-        <h1 className="display text-title text-ivory">No basket here.</h1>
-        <p className="mx-auto mt-4 max-w-[48ch] text-base leading-relaxed text-ivory-dim">
-          Nothing at this address belongs to the Tessera program. It may be on a
+        <h1 className="display text-title text-ink">No basket here.</h1>
+        <p className="mx-auto mt-4 max-w-[48ch] text-base leading-relaxed text-ink-2">
+          Nothing at this address belongs to the Sheaf program. It may be on a
           different cluster, or the address may be a typo.
         </p>
         <Link
           href="/explore"
-          className="mt-8 inline-block border border-rule px-5 py-3 text-sm text-ivory-dim transition-colors hover:border-rule-bright hover:text-ivory"
+          className="mt-8 inline-block border border-line px-5 py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
         >
           See the baskets that do exist
         </Link>
@@ -145,16 +145,16 @@ function Loaded({
       <div>
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
-            <h1 className="display text-hero leading-[0.95] text-ivory">
+            <h1 className="display text-hero leading-[0.95] text-ink">
               {basket.name}
             </h1>
-            <p className="tnum mt-3 text-sm text-ivory-faint">
+            <p className="tnum mt-3 text-sm text-ink-3">
               {basket.symbol} · created {timeAgo(basket.createdAt)} by{" "}
               <a
                 href={explorerAddress(basket.creator)}
                 target="_blank"
                 rel="noreferrer"
-                className="underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+                className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
               >
                 {shortAddress(basket.creator)}
               </a>
@@ -163,8 +163,8 @@ function Loaded({
           {/* Right-aligned beside the name, but once it wraps under the name on a
               narrow screen a right rag would leave it floating, so it aligns left. */}
           <div className="text-left sm:text-right">
-            <p className="text-xs text-ivory-faint">One share</p>
-            <p className="tnum display mt-1 text-title leading-none text-ivory">
+            <p className="text-xs text-ink-3">One share</p>
+            <p className="tnum display mt-1 text-title leading-none text-ink">
               <Ticker value={money(valuation.nav)} />
             </p>
             <p
@@ -172,7 +172,7 @@ function Loaded({
               style={{
                 color:
                   valuation.change24h == null
-                    ? "var(--color-ivory-faint)"
+                    ? "var(--color-ink-3)"
                     : valuation.change24h > 0
                       ? "var(--color-gain)"
                       : "var(--color-loss)",
@@ -183,7 +183,7 @@ function Loaded({
           </div>
         </div>
 
-        <p className="mt-8 max-w-[62ch] text-base leading-relaxed text-ivory-dim">
+        <p className="mt-8 max-w-[62ch] text-base leading-relaxed text-ink-2">
           One {basket.symbol} share is a claim on{" "}
           {basket.components.length === 1
             ? "one holding"
@@ -196,7 +196,7 @@ function Loaded({
           <BasketMosaic tiles={tiles} height={260} />
         </div>
 
-        <dl className="mt-6 grid grid-cols-2 gap-px bg-rule sm:grid-cols-4">
+        <dl className="mt-6 grid grid-cols-2 gap-px bg-line sm:grid-cols-4">
           {/* The hero already prints the price of one share, so this slot carries
               the size of the whole thing instead. */}
           <Figure
@@ -254,7 +254,7 @@ function Loaded({
         </dl>
 
         {valuation.unpriced.length > 0 && (
-          <p className="mt-5 border-l-2 border-gold pl-3 text-sm leading-relaxed text-ivory-dim">
+          <p className="mt-5 border-l-2 border-bind pl-3 text-sm leading-relaxed text-ink-2">
             No price for {valuation.unpriced.join(", ")}, so the value of a share
             is left blank rather than computed from part of the basket.
           </p>
@@ -296,21 +296,21 @@ function Loaded({
 
       <FillCostPanel components={valuation.components} nav={valuation.nav} />
 
-      <div className="mt-16 flex flex-wrap items-baseline justify-between gap-5 border-t border-rule pt-7 text-sm">
-        <p className="max-w-[62ch] leading-relaxed text-ivory-dim">
+      <div className="mt-16 flex flex-wrap items-baseline justify-between gap-5 border-t border-line pt-7 text-sm">
+        <p className="max-w-[62ch] leading-relaxed text-ink-2">
           Prices come from Solana mainnet, balances from the program itself. The
           arithmetic behind both is written out in full.
         </p>
         <div className="flex gap-7">
           <Link
             href="/method"
-            className="underline decoration-rule-bright underline-offset-4 transition-colors hover:text-ivory"
+            className="underline decoration-line-strong underline-offset-4 transition-colors hover:text-ink"
           >
             How it works
           </Link>
           <Link
             href="/explore"
-            className="underline decoration-rule-bright underline-offset-4 transition-colors hover:text-ivory"
+            className="underline decoration-line-strong underline-offset-4 transition-colors hover:text-ink"
           >
             Every basket
           </Link>
@@ -331,8 +331,8 @@ function Composition({
 }) {
   return (
     <section>
-      <h2 className="display text-title text-ivory">The recipe</h2>
-      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ivory-dim">
+      <h2 className="display text-title text-ink">The recipe</h2>
+      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
         These numbers were written once, when the basket was created, and cannot be
         changed. The weight on the right drifts as prices move; nothing rebalances
         it, because rebalancing would mean somebody deciding to trade your holdings.
@@ -341,10 +341,10 @@ function Composition({
       {/* The market price of one component is the least useful column here — the
           value it produces is right beside it — so a narrow screen drops that and
           the company name rather than scrolling sideways. */}
-      <div className="mt-7 min-w-0 overflow-x-auto border border-rule">
+      <div className="mt-7 min-w-0 overflow-x-auto border border-line">
         <table className="w-full border-collapse text-sm sm:min-w-[34rem]">
           <thead>
-            <tr className="border-b border-rule text-left text-xs text-ivory-faint">
+            <tr className="border-b border-line text-left text-xs text-ink-3">
               <th className="px-3 py-3 font-normal sm:px-4">Holding</th>
               <th className="px-3 py-3 text-right font-normal sm:px-4">
                 Per share
@@ -358,7 +358,7 @@ function Composition({
           </thead>
           <tbody>
             {valuation.components.map((c) => (
-              <tr key={c.mint} className="border-b border-rule/60 last:border-0">
+              <tr key={c.mint} className="border-b border-line/60 last:border-0">
                 <td className="px-3 py-3 sm:px-4">
                   <div className="flex items-center gap-2.5 sm:gap-3">
                     <span
@@ -367,29 +367,29 @@ function Composition({
                       style={{ background: slotColor(c.slot) }}
                     />
                     <span>
-                      <span className="text-ivory">{c.base}</span>
+                      <span className="text-ink">{c.base}</span>
                       {PRESTOCK_SYMBOLS.has(c.symbol) && (
-                        <span className="ml-2 text-xs text-ivory-faint">
+                        <span className="ml-2 text-xs text-ink-3">
                           PreStocks
                         </span>
                       )}
-                      <span className="ml-2 hidden text-xs text-ivory-faint sm:inline">
+                      <span className="ml-2 hidden text-xs text-ink-3 sm:inline">
                         {c.company}
                       </span>
                     </span>
                   </div>
                 </td>
-                <td className="tnum px-3 py-3 text-right text-ivory-dim sm:px-4">
+                <td className="tnum px-3 py-3 text-right text-ink-2 sm:px-4">
                   {quantity(c.tokensPerShare, 6)}
                 </td>
-                <td className="tnum hidden px-4 py-3 text-right text-ivory-dim sm:table-cell">
+                <td className="tnum hidden px-4 py-3 text-right text-ink-2 sm:table-cell">
                   {money(c.quote?.price)}
                 </td>
-                <td className="tnum px-3 py-3 text-right text-ivory sm:px-4">
+                <td className="tnum px-3 py-3 text-right text-ink sm:px-4">
                   {money(c.value)}
                 </td>
                 <td className="tnum px-3 py-3 text-right sm:px-4">
-                  <span className="text-ivory-dim">
+                  <span className="text-ink-2">
                     {percent(
                       (c.actualWeightBps ?? c.targetWeightBps) / 100,
                       1,
@@ -397,7 +397,7 @@ function Composition({
                   </span>
                   {c.actualWeightBps != null &&
                     Math.abs(c.actualWeightBps - c.targetWeightBps) > 5 && (
-                      <span className="block text-xs text-ivory-faint">
+                      <span className="block text-xs text-ink-3">
                         set {percent(c.targetWeightBps / 100, 1)}
                       </span>
                     )}
@@ -408,13 +408,13 @@ function Composition({
         </table>
       </div>
 
-      <p className="tnum mt-4 text-xs leading-relaxed text-ivory-faint">
+      <p className="tnum mt-4 text-xs leading-relaxed text-ink-3">
         Share mint{" "}
         <a
           href={explorerAddress(basket.shareMint)}
           target="_blank"
           rel="noreferrer"
-          className="underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
         >
           {shortAddress(basket.shareMint, 6, 6)}
         </a>{" "}
@@ -423,7 +423,7 @@ function Composition({
           href={explorerAddress(basket.address)}
           target="_blank"
           rel="noreferrer"
-          className="underline decoration-rule-bright underline-offset-4 hover:text-ivory-dim"
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
         >
           {shortAddress(basket.address, 6, 6)}
         </a>{" "}
@@ -444,8 +444,8 @@ function Backing({
 }) {
   return (
     <section>
-      <h2 className="display text-title text-ivory">Is it actually backed?</h2>
-      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ivory-dim">
+      <h2 className="display text-title text-ink">Is it actually backed?</h2>
+      <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
         Held is what the vault contains right now. Owed is what every outstanding
         share can claim. Deposits round up and redemptions round down, so held can
         only ever be at or above owed, and the difference is rounding dust that
@@ -453,9 +453,9 @@ function Backing({
       </p>
 
       {!onChain ? (
-        <p className="mt-7 text-sm text-ivory-faint">Reading the vault…</p>
+        <p className="mt-7 text-sm text-ink-3">Reading the vault…</p>
       ) : onChain.supply === 0n ? (
-        <p className="mt-7 border border-dashed border-rule-bright/60 px-6 py-8 text-sm leading-relaxed text-ivory-dim">
+        <p className="mt-7 border border-dashed border-line-strong/60 px-6 py-8 text-sm leading-relaxed text-ink-2">
           No shares exist yet, so the vault is empty and there is nothing to back.
           Create the first share and this table fills in.
         </p>
@@ -478,10 +478,10 @@ function Backing({
               : "A vault is short. Do not create more shares."}
           </div>
 
-          <div className="mt-5 min-w-0 overflow-x-auto border border-rule">
+          <div className="mt-5 min-w-0 overflow-x-auto border border-line">
             <table className="w-full border-collapse text-sm sm:min-w-[26rem]">
               <thead>
-                <tr className="border-b border-rule text-left text-xs text-ivory-faint">
+                <tr className="border-b border-line text-left text-xs text-ink-3">
                   <th className="px-3 py-3 font-normal sm:px-4">Holding</th>
                   <th className="px-3 py-3 text-right font-normal sm:px-4">Held</th>
                   <th className="px-3 py-3 text-right font-normal sm:px-4">Owed</th>
@@ -499,20 +499,20 @@ function Backing({
                   return (
                     <tr
                       key={vault.mint}
-                      className="border-b border-rule/60 last:border-0"
+                      className="border-b border-line/60 last:border-0"
                     >
-                      <td className="px-3 py-3 text-ivory sm:px-4">
+                      <td className="px-3 py-3 text-ink sm:px-4">
                         {label.replace(/x$/, "")}
                         {PRESTOCK_SYMBOLS.has(label) && (
-                          <span className="ml-2 text-xs text-ivory-faint">
+                          <span className="ml-2 text-xs text-ink-3">
                             PreStocks
                           </span>
                         )}
                       </td>
-                      <td className="tnum px-3 py-3 text-right text-ivory-dim sm:px-4">
+                      <td className="tnum px-3 py-3 text-right text-ink-2 sm:px-4">
                         <Ticker value={quantity(Number(vault.held) / 10 ** decimals, 6)} />
                       </td>
-                      <td className="tnum px-3 py-3 text-right text-ivory-dim sm:px-4">
+                      <td className="tnum px-3 py-3 text-right text-ink-2 sm:px-4">
                         <Ticker value={quantity(Number(vault.owed) / 10 ** decimals, 6)} />
                       </td>
                       <td className="tnum px-3 py-3 text-right sm:px-4">
@@ -520,8 +520,8 @@ function Backing({
                           style={{
                             color:
                               surplus > 0n
-                                ? "var(--color-gold)"
-                                : "var(--color-ivory-faint)",
+                                ? "var(--color-bind)"
+                                : "var(--color-ink-3)",
                           }}
                         >
                           {surplus === 0n
@@ -573,11 +573,11 @@ function Proof({ basket }: { basket: Basket }) {
   };
 
   return (
-    <details className="mt-7 border border-rule">
-      <summary className="cursor-pointer px-4 py-3 text-sm text-ivory-dim marker:text-gold hover:text-ivory">
+    <details className="mt-7 border border-line">
+      <summary className="cursor-pointer px-4 py-3 text-sm text-ink-2 marker:text-bind hover:text-ink">
         Check it without this page
       </summary>
-      <div className="space-y-4 border-t border-rule px-4 py-4 text-sm leading-relaxed text-ivory-dim">
+      <div className="space-y-4 border-t border-line px-4 py-4 text-sm leading-relaxed text-ink-2">
         <p>
           Two kinds of read, both against the public RPC, no key. First, how many
           shares exist:
@@ -586,15 +586,15 @@ function Proof({ basket }: { basket: Basket }) {
         <p>Then what each vault holds:</p>
         {vaults.map((v) => (
           <div key={v.address}>
-            <p className="tnum mb-1.5 text-xs text-ivory-faint">
+            <p className="tnum mb-1.5 text-xs text-ink-3">
               {v.label} · vault {shortAddress(v.address, 6, 6)} · recipe {v.units} raw units per share
             </p>
             <Command id={v.address} text={rpcCall("getTokenAccountBalance", v.address)} copied={copied} onCopy={copy} />
           </div>
         ))}
         <p>
-          For every vault, <span className="tnum text-ivory">amount</span> must be at
-          least <span className="tnum text-ivory">units per share × supply ÷ 1,000,000</span>,
+          For every vault, <span className="tnum text-ink">amount</span> must be at
+          least <span className="tnum text-ink">units per share × supply ÷ 1,000,000</span>,
           both in raw units. If that holds, every share is backed. The program cannot
           make it false: deposits round up, redemptions round down, and no instruction
           moves anything out of a vault except a redemption.
@@ -617,13 +617,13 @@ function Command({
 }) {
   return (
     <div className="relative">
-      <pre className="overflow-x-auto border border-rule bg-ground-deep px-3 py-2.5 text-[11px] leading-relaxed text-ivory-dim">
+      <pre className="overflow-x-auto border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
         <code>{text}</code>
       </pre>
       <button
         type="button"
         onClick={() => onCopy(id, text)}
-        className="absolute right-2 top-2 border border-rule bg-ground px-2 py-0.5 text-[11px] text-ivory-faint transition-colors hover:border-gold hover:text-ivory"
+        className="absolute right-2 top-2 border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-3 transition-colors hover:border-bind hover:text-ink"
       >
         {copied === id ? "Copied" : "Copy"}
       </button>
@@ -734,7 +734,7 @@ function TradePanel({
   }
 
   return (
-    <div className="border border-rule bg-ground-raised">
+    <div className="border border-line bg-raised">
       <div className="grid grid-cols-2">
         {(["create", "redeem"] as Mode[]).map((tab) => (
           <button
@@ -748,11 +748,11 @@ function TradePanel({
             aria-pressed={mode === tab}
             className="border-b px-4 py-4 text-sm transition-colors"
             style={{
-              borderColor: mode === tab ? "var(--color-gold)" : "var(--color-rule)",
+              borderColor: mode === tab ? "var(--color-bind)" : "var(--color-line)",
               color:
-                mode === tab ? "var(--color-ivory)" : "var(--color-ivory-faint)",
+                mode === tab ? "var(--color-ink)" : "var(--color-ink-3)",
               background:
-                mode === tab ? "var(--color-ground-high)" : "transparent",
+                mode === tab ? "var(--color-sunk)" : "transparent",
             }}
           >
             {tab === "create" ? "Create shares" : "Redeem shares"}
@@ -762,7 +762,7 @@ function TradePanel({
 
       <div className="p-6">
         <label className="block">
-          <span className="text-xs text-ivory-faint">
+          <span className="text-xs text-ink-3">
             {mode === "create" ? "Shares to create" : "Shares to redeem"}
           </span>
           <div className="mt-2 flex items-center gap-2">
@@ -772,7 +772,7 @@ function TradePanel({
               step="0.000001"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
-              className="tnum display w-full border border-rule bg-ground px-3 py-3 text-xl text-ivory outline-none focus-visible:border-gold"
+              className="tnum display w-full border border-line bg-surface px-3 py-3 text-xl text-ink outline-none focus-visible:border-bind"
             />
             {mode === "redeem" && shareBalance > 0n && (
               <button
@@ -780,7 +780,7 @@ function TradePanel({
                 onClick={() =>
                   setAmount((Number(shareBalance) / ONE_SHARE).toString())
                 }
-                className="shrink-0 border border-rule px-3 py-3 text-xs text-ivory-dim transition-colors hover:border-rule-bright hover:text-ivory"
+                className="shrink-0 border border-line px-3 py-3 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
               >
                 All
               </button>
@@ -788,7 +788,7 @@ function TradePanel({
           </div>
         </label>
 
-        <p className="tnum mt-2 text-xs text-ivory-faint">
+        <p className="tnum mt-2 text-xs text-ink-3">
           {connected
             ? `You hold ${quantity(Number(shareBalance) / ONE_SHARE, 6)} ${basket.symbol}`
             : `${basket.symbol} shares`}
@@ -797,8 +797,8 @@ function TradePanel({
             : ""}
         </p>
 
-        <div className="mt-6 border-t border-rule pt-5">
-          <p className="text-xs text-ivory-faint">
+        <div className="mt-6 border-t border-line pt-5">
+          <p className="text-xs text-ink-3">
             {mode === "create"
               ? "You hand the vault"
               : "The vault hands you back"}
@@ -811,11 +811,11 @@ function TradePanel({
                   key={row.mint}
                   className="tnum flex items-baseline justify-between gap-3 text-sm"
                 >
-                  <span className="text-ivory-dim">
+                  <span className="text-ink-2">
                     {row.symbol.replace(/x$/, "")}
                     {mode === "create" && row.grossedUp && (
                       <span
-                        className="ml-1.5 text-xs text-ivory-faint"
+                        className="ml-1.5 text-xs text-ink-3"
                         title="PreStocks charges a transfer fee; the program grosses up the deposit so the vault still nets the recipe amount."
                       >
                         +fee
@@ -823,7 +823,7 @@ function TradePanel({
                     )}
                   </span>
                   <span className="flex items-baseline gap-2">
-                    <span className="text-ivory">
+                    <span className="text-ink">
                       {quantity(Number(value) / 10 ** row.decimals, 6)}
                     </span>
                     {mode === "create" && connected && (
@@ -832,7 +832,7 @@ function TradePanel({
                         style={{
                           color: row.short
                             ? "var(--color-loss)"
-                            : "var(--color-ivory-faint)",
+                            : "var(--color-ink-3)",
                         }}
                       >
                         have {quantity(Number(row.have) / 10 ** row.decimals, 4)}
@@ -846,7 +846,7 @@ function TradePanel({
         </div>
 
         {mode === "create" && basket.creatorFeeBps > 0 && (
-          <p className="tnum mt-5 border-t border-rule pt-5 text-xs leading-relaxed text-ivory-faint">
+          <p className="tnum mt-5 border-t border-line pt-5 text-xs leading-relaxed text-ink-3">
             You receive {quantity(Number(netShares) / ONE_SHARE, 6)}{" "}
             {basket.symbol}. The creator receives{" "}
             {quantity(Number(feeShares) / ONE_SHARE, 6)}, which is{" "}
@@ -856,8 +856,8 @@ function TradePanel({
         )}
 
         {mode === "create" && shortSymbols.length > 0 && (
-          <div className="mt-5 border border-rule bg-ground p-4">
-            <p className="text-sm leading-relaxed text-ivory-dim">
+          <div className="mt-5 border border-line bg-surface p-4">
+            <p className="text-sm leading-relaxed text-ink-2">
               Short on {shortSymbols.map((s) => s.replace(/x$/, "")).join(", ")}.
             </p>
             <div className="mt-3">
@@ -889,7 +889,7 @@ function TradePanel({
           type="button"
           disabled={blocked || busy}
           onClick={submit}
-          className="mt-6 w-full border border-gold bg-gold px-5 py-3.5 text-sm text-ground-deep transition-colors hover:bg-[#c79a2e] disabled:cursor-not-allowed disabled:border-rule disabled:bg-transparent disabled:text-ivory-faint"
+          className="mt-6 w-full border border-bind bg-bind px-5 py-3.5 text-sm text-page transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-3"
         >
           {busy
             ? /* A basket with many components needs a second signature, so say
@@ -928,7 +928,7 @@ function TradePanel({
           </p>
         )}
 
-        <p className="mt-5 text-xs leading-relaxed text-ivory-faint">
+        <p className="mt-5 text-xs leading-relaxed text-ink-3">
           {mode === "create"
             ? "In kind, so no price is quoted and no oracle is trusted. Amounts round up in the vault's favour."
             : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favour."}
