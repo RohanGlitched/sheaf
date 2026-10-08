@@ -82,23 +82,23 @@ export function sheafLayout(stalks: Stalk[]) {
 }
 
 /** The grains of one ear: seven seeds alternating either side of the stalk's tip. */
-export function earSeeds(x: number, y: number, ux: number, uy: number) {
+export function earSeeds(x: number, y: number, ux: number, uy: number, k = 1) {
   const px = -uy;
   const py = ux;
   const a = deg(Math.atan2(uy, ux)) + 90;
-  return Array.from({ length: 7 }, (_, k) => {
-    const side = k % 2 === 0 ? 1 : -1;
-    const along = 6.4 * k + 4;
-    return { cx: x - ux * along + px * 3.4 * side, cy: y - uy * along + py * 3.4 * side, rot: a + side * 22 };
+  return Array.from({ length: 7 }, (_, i) => {
+    const side = i % 2 === 0 ? 1 : -1;
+    const along = (6.4 * i + 4) * k;
+    return { cx: x - ux * along + px * 3.4 * k * side, cy: y - uy * along + py * 3.4 * k * side, rot: a + side * 22, rx: 3.5 * k, ry: 7.2 * k };
   });
 }
 
-function Ear({ x, y, ux, uy, color }: { x: number; y: number; ux: number; uy: number; color: string }) {
+function Ear({ x, y, ux, uy, color, k = 1 }: { x: number; y: number; ux: number; uy: number; color: string; k?: number }) {
   const px = -uy;
   const py = ux;
   const a = deg(Math.atan2(uy, ux)) + 90;
-  const seeds = earSeeds(x, y, ux, uy).map((g, k) => (
-    <ellipse key={k} cx={g.cx} cy={g.cy} rx={3.5} ry={7.2} transform={`rotate(${g.rot} ${g.cx} ${g.cy})`} fill={color} />
+  const seeds = earSeeds(x, y, ux, uy, k).map((g, i) => (
+    <ellipse key={i} cx={g.cx} cy={g.cy} rx={g.rx} ry={g.ry} transform={`rotate(${g.rot} ${g.cx} ${g.cy})`} fill={color} />
   ));
   return (
     <g>
@@ -133,11 +133,30 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
   const placed = sheafLayout(stalks);
   const n = placed.length;
   const bandW = 34 + Math.min(n, 8) * 9;
-  const strokeW = labels ? 3.2 : 4.2;
+  // Small marks (cards, avatars) need heavier strokes to survive the scale-down.
+  const strokeW = labels ? 3.6 : 7;
+  const earK = labels ? 1.05 : 1.45;
+
+  // Without labels the mark is cropped to its own stalks, so a small sheaf fills
+  // its box instead of floating in the margin the labels would have used.
+  let box = `0 0 ${W} ${H}`;
+  if (!labels && n > 0) {
+    const xs = placed.flatMap((p) => [p.tip.x, p.foot.x, CX]);
+    const ys = placed.flatMap((p) => [p.tip.y, p.foot.y]);
+    const pad = 34;
+    const x0 = Math.min(...xs, CX - 50) - pad;
+    const x1 = Math.max(...xs, CX + 50) + pad;
+    const y0 = Math.min(...ys) - pad;
+    const y1 = Math.max(...ys) + 12;
+    const side = Math.max(x1 - x0, y1 - y0);
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    box = `${cx - side / 2} ${cy - side / 2} ${side} ${side}`;
+  }
 
   return (
     <svg
-      viewBox={`0 0 ${W} ${H}`}
+      viewBox={box}
       className={className}
       role={title ? "img" : undefined}
       aria-label={title}
@@ -163,7 +182,7 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
               strokeWidth={strokeW}
               strokeLinecap="round"
             />
-            <Ear x={tip.x} y={tip.y} ux={ux} uy={uy} color={s.color} />
+            <Ear x={tip.x} y={tip.y} ux={ux} uy={uy} color={s.color} k={earK} />
           </g>
         );
       })}

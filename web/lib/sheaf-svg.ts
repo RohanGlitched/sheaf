@@ -11,10 +11,10 @@ export function sheafDataUri(stalks: Stalk[], band = "#3438c9"): string {
   const parts: string[] = [];
   for (const { s, tip, foot, ctrl, ux, uy } of placed) {
     parts.push(
-      `<path d="M ${foot.x} ${foot.y} L ${CX} ${CY} Q ${ctrl.x} ${ctrl.y} ${tip.x} ${tip.y}" fill="none" stroke="${s.color}" stroke-opacity="0.78" stroke-width="4.2" stroke-linecap="round"/>`,
+      `<path d="M ${foot.x} ${foot.y} L ${CX} ${CY} Q ${ctrl.x} ${ctrl.y} ${tip.x} ${tip.y}" fill="none" stroke="${s.color}" stroke-opacity="0.78" stroke-width="6" stroke-linecap="round"/>`,
     );
-    for (const g of earSeeds(tip.x, tip.y, ux, uy)) {
-      parts.push(`<ellipse cx="${g.cx}" cy="${g.cy}" rx="3.5" ry="7.2" transform="rotate(${g.rot} ${g.cx} ${g.cy})" fill="${s.color}"/>`);
+    for (const g of earSeeds(tip.x, tip.y, ux, uy, 1.3)) {
+      parts.push(`<ellipse cx="${g.cx}" cy="${g.cy}" rx="${g.rx}" ry="${g.ry}" transform="rotate(${g.rot} ${g.cx} ${g.cy})" fill="${s.color}"/>`);
     }
   }
   const bandW = 34 + Math.min(placed.length, 8) * 9;
