@@ -490,7 +490,7 @@ export function explainError(error: unknown, context?: { action?: "cancel" }): s
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
 
   if (/User rejected|rejected the request|declined/i.test(raw)) {
-    return "You cancelled the transaction.";
+    return "You canceled the transaction.";
   }
 
   // The RPC itself refused or rate-limited a call, e.g. `403 : {"jsonrpc":"2.0",…}`.

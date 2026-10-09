@@ -13,9 +13,10 @@ import { SITE_URL } from "./config";
 import preset from "./meteora-preset.json";
 
 /**
- * Sheaf's "NAV shelf" curve, the preset every new launch is opened with. The
- * numbers live in `meteora-preset.json` so anyone can reuse them (see
- * docs/meteora.md); this module turns them into a DBC config.
+ * Sheaf's NAV-anchored curve (preset `sheaf-nav-shelf-v2`), the one every new
+ * launch is opened with. The numbers live in `meteora-preset.json` so anyone
+ * can reuse them (see docs/meteora.md); this module turns them into a DBC
+ * config.
  *
  * The curve opens at half the basket's NAV and graduates at five times it.
  * Four segments, as market-cap breakpoints relative to the open
@@ -33,8 +34,16 @@ import preset from "./meteora-preset.json";
  */
 export const OPEN_MULTIPLE = preset.openMultipleOfNav;
 export const GRADUATION_MULTIPLE = preset.graduationMultipleOfNav;
-/** Share of curve trading fees that goes to the basket's creator; the rest to Sheaf. */
+/**
+ * The creator's share of curve fees after Meteora's cut, as the config stores
+ * it (50). The DBC program first keeps 20% of every fee for Meteora, so the
+ * creator and Sheaf's treasury each end up with 40% of what a trader pays.
+ */
 export const CREATOR_FEE_SHARE = preset.fees.creatorTradingFeePercentage;
+/** Percent of every fee a trader pays that reaches the creator, and Sheaf's treasury. */
+export const CREATOR_FEE_PERCENT = preset.feeSplit.creatorPercentOfEveryCurveFee;
+export const TREASURY_FEE_PERCENT = preset.feeSplit.treasuryPercentOfEveryCurveFee;
+export const METEORA_FEE_PERCENT = preset.feeSplit.meteoraProtocolPercent;
 export const LAUNCH_SHAPE = { caps: preset.curve.capMultiplesOfOpen, weights: preset.curve.liquidityWeights };
 /** The anti-snipe opening fee, in seconds: it starts high and decays to the base fee. */
 export const LAUNCH_FEE = preset.fees.antiSnipe;
@@ -49,17 +58,34 @@ export async function solUsd(): Promise<number> {
 }
 
 /**
+ * The token URI a launch is minted with. The token is immutable, so the NAV,
+ * SOL price, time and preset it opened on become a permanent on-chain record
+ * that anyone can check "opened at half of NAV" against.
+ */
+export function launchUri(basket: string, navSol: number, solUsd: number | null, at = new Date()): string {
+  const query = new URLSearchParams({
+    nav: navSol.toPrecision(6),
+    ...(solUsd != null && { sol: solUsd.toFixed(2) }),
+    t: String(Math.floor(at.getTime() / 1000)),
+    preset: preset.id,
+  });
+  return `${SITE_URL}/api/launch/${basket}?${query}`;
+}
+
+/**
  * The one transaction that opens a basket's launch: a DBC config sized off the
  * basket's NAV and the pool on it. Partially signed by the derived config and
  * mint keys of the first free slot; the creator's wallet pays and signs last.
+ * Pass the SOL price the NAV was converted at, so the token records it.
  */
 export async function buildLaunch(params: {
   connection: Connection;
   creator: PublicKey;
   basket: { address: string; name: string; symbol: string };
   navSol: number;
+  solUsd?: number | null;
 }): Promise<Transaction> {
-  const { connection, creator, basket, navSol } = params;
+  const { connection, creator, basket, navSol, solUsd = null } = params;
   const {
     DynamicBondingCurveClient,
     buildCurveWithCustomSqrtPrices,
@@ -172,7 +198,7 @@ export async function buildLaunch(params: {
     preCreatePoolParam: {
       name: launchName(basket.name),
       symbol: launchSymbol(basket.symbol),
-      uri: `${SITE_URL}/api/launch/${basket.address}`,
+      uri: launchUri(basket.address, navSol, solUsd),
       poolCreator: creator,
       baseMint: mint.publicKey,
     },

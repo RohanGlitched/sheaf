@@ -6,6 +6,7 @@ import { buildLaunch, solUsd } from "@/lib/launch";
 import { findLaunch } from "@/lib/dbc";
 import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint } from "@/lib/mirror";
+import preset from "@/lib/meteora-preset.json";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
       creator: keeper.publicKey,
       basket: { address: basket.address, name: basket.name, symbol: basket.symbol },
       navSol: nav / sol,
+      solUsd: sol,
     });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Could not build the launch." }, { status: 409 });
@@ -59,6 +61,7 @@ export async function POST(req: Request) {
     basket: basket.address,
     navUsd: nav,
     solUsd: sol,
+    preset: preset.id,
     signature: sig,
     pubkey: new PublicKey(keeper.publicKey).toBase58(),
     pool: launch?.info.pool ?? null,

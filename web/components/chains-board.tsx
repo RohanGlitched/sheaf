@@ -9,6 +9,8 @@ import { readHyperCorePrices } from "@/lib/hypercore";
 import { money, plural, quantity } from "@/lib/format";
 import { slotColor } from "@/lib/palette";
 import { SheafMark } from "./sheaf-mark";
+import { useBaskets } from "@/lib/use-baskets";
+import { splitTestBaskets } from "@/lib/hidden";
 
 const ABI = parseAbi([
   "function totalSupply() view returns (uint256)",
@@ -60,12 +62,15 @@ function useChainReads(d: Deployment | undefined) {
 
 const link = "underline decoration-line-strong underline-offset-4 hover:text-ink";
 
+/** The Solana side, filled from the program: the baskets anyone can open, each with its recipe as a sheaf. */
 function SolanaCard() {
+  const { baskets } = useBaskets();
+  const shown = baskets ? splitTestBaskets(baskets).shown : null;
   return (
-    <li className="flex flex-col rounded-[var(--radius-panel)] border border-ink bg-surface p-6 lg:col-span-2">
+    <li className="flex flex-col rounded-[var(--radius-panel)] border border-line bg-surface p-6 lg:col-span-2">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="display text-2xl text-ink">Solana</h3>
-        <span className="rounded-full bg-ink px-2.5 py-0.5 text-xs text-page">Home</span>
+        <span className="flex items-center gap-1.5 rounded-full bg-bind-wash px-2.5 py-0.5 text-xs text-bind">Devnet · home</span>
       </div>
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink">
         xStocks and PreStocks, the program, the launch markets, dollar orders and monthly plans.
@@ -74,6 +79,37 @@ function SolanaCard() {
         Baskets hold xStocks and PreStocks, priced from mainnet, created and redeemed on devnet against mirror mints with the same decimals and
         dividend multiplier. Every plan, order and fill is decoded on the ledger.
       </p>
+      <p className="mt-4 text-xs text-ink-3">
+        {shown ? `${shown.length} ${plural(shown.length, "basket")}, our own test baskets left out` : "Reading the program…"} · paid in test dollars
+      </p>
+      <ul className="-mx-2 mt-2 grid sm:grid-cols-2">
+        {(shown ?? []).slice(0, 4).map((b) => (
+          <li key={b.address}>
+            <Link
+              href={`/basket/${b.address}`}
+              className="group flex items-center gap-3 rounded-[var(--radius-control)] px-2 py-2 transition-colors hover:bg-raised"
+            >
+              <span className="size-9 shrink-0">
+                <SheafMark
+                  stalks={b.components.map((c, i) => ({ key: c.mint, weight: c.weightBps / 10_000, color: slotColor(i) }))}
+                  className="h-full w-full"
+                />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-ink">
+                  {b.name} <span className="text-ink-3">{b.symbol}</span>
+                </span>
+                <span className="block truncate text-xs text-ink-3">
+                  {b.components.length} {plural(b.components.length, "holding")}
+                </span>
+              </span>
+              <span aria-hidden className="text-sm text-ink-3 transition-transform group-hover:translate-x-0.5 group-hover:text-bind">
+                →
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
       <div className="mt-auto flex flex-wrap gap-3 pt-6 text-sm">
         <Link href="/explore" className="rounded-[var(--radius-control)] bg-bind px-4 py-2 font-medium text-white hover:bg-bind-deep">
           Browse Solana baskets
@@ -126,7 +162,7 @@ function FeatureCard({ chain }: { chain: ChainCard }) {
         <h3 className="display text-2xl text-ink">{chain.name}</h3>
         <span className="flex items-center gap-1.5 text-xs text-gain">
           <span className="live-dot size-1.5 rounded-full bg-gain" aria-hidden />
-          Live on testnet
+          Testnet
         </span>
       </div>
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink">{chain.native}</p>
@@ -155,7 +191,7 @@ function FeatureCard({ chain }: { chain: ChainCard }) {
           Factory
         </a>
         <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={link}>
-          Cash desk
+          Dollar desk
         </a>
       </div>
     </li>
@@ -171,7 +207,7 @@ function PortableCard({ chain }: { chain: ChainCard }) {
         <h3 className="display text-xl text-ink">{chain.name}</h3>
         <span className="flex items-center gap-1.5 text-xs text-gain">
           <span className="live-dot size-1.5 rounded-full bg-gain" aria-hidden />
-          Live
+          Testnet
         </span>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-ink-2">{chain.why}</p>
@@ -188,7 +224,7 @@ function PortableCard({ chain }: { chain: ChainCard }) {
           Factory
         </a>
         <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={link}>
-          Cash desk
+          Dollar desk
         </a>
       </div>
     </li>
@@ -240,9 +276,9 @@ export function ChainsBoard() {
   return (
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h2 className="display text-title text-ink">Live</h2>
+        <h2 className="display text-title text-ink">Running now</h2>
         <p className="text-sm text-ink-3">
-          {1 + feature.length + portable.length} chains · every figure read from the chain when you open it
+          Solana devnet and {feature.length + portable.length} EVM testnets · every figure read from the chain when you open it
         </p>
       </div>
       <ul className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">

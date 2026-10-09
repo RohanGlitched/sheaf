@@ -112,3 +112,86 @@ export async function send(tx, signers, label) {
 }
 
 export const sol = (lamports) => Number(lamports) / 1e9;
+
+/**
+ * The same terms check as `checkTerms` in web/lib/dbc.ts, on raw PoolConfig
+ * bytes: all graduated LP permanently locked and split 50/50, an immutable
+ * Token-2022 token, curve fees in SOL split 50/50 after Meteora's 20%, a
+ * migration fee of at most 1% and none to the creator, no vesting supply, the
+ * preset's volatility fee, and a curve and fee schedule that are v1 or v2.
+ * Returns { preset, reason }. Keep the two in step.
+ */
+const PRESET = JSON.parse(fs.readFileSync(path.join(ROOT, "web", "lib", "meteora-preset.json"), "utf8"));
+const presetTerms = (activation, fee, periodLength, migratedFeeBps, migratedFeeMode, caps, weights) => ({
+  activation,
+  cliff: BigInt(fee.startingFeeBps) * 100_000n,
+  first: fee.numberOfPeriod,
+  second: BigInt(periodLength),
+  third: BigInt(fee.reductionFactor),
+  migratedFeeBps,
+  migratedFeeMode,
+  caps: caps.slice(1),
+  weights: weights.map((w) => w / weights[0]),
+});
+const PRESET_TERMS = {
+  v2: presetTerms(
+    1,
+    PRESET.fees.antiSnipe,
+    PRESET.fees.antiSnipe.totalDurationSeconds / PRESET.fees.antiSnipe.numberOfPeriod,
+    PRESET.migration.dammV2.startingFeeBps,
+    4,
+    PRESET.curve.capMultiplesOfOpen,
+    PRESET.curve.liquidityWeights,
+  ),
+  v1: presetTerms(
+    0,
+    PRESET.previous.antiSnipe,
+    PRESET.previous.antiSnipe.totalDurationSlots / PRESET.previous.antiSnipe.numberOfPeriod,
+    PRESET.previous.migratedPoolFeeBps,
+    0,
+    PRESET.previous.capMultiplesOfOpen,
+    PRESET.previous.liquidityWeights,
+  ),
+};
+const near = (a, b) => Math.abs(a - b) <= Math.abs(b) * 0.002;
+const u64le = (d, at) => d.readBigUInt64LE(at);
+const u128le = (d, at) => u64le(d, at) | (u64le(d, at + 8) << 64n);
+
+export function launchTerms(c) {
+  const no = (reason) => ({ preset: null, reason });
+  const unlocked = c[240] + c[242] + c[185] + c[201];
+  if (unlocked > 0) return no(`${unlocked}% of its graduated liquidity is not permanently locked and can be withdrawn after graduation.`);
+  if (c[239] !== 50 || c[241] !== 50) return no("Its locked liquidity is not split evenly between the creator and Sheaf's treasury.");
+  if (c[246] !== 1) return no("Its token is not immutable: someone keeps an update or a mint authority.");
+  if (c[237] !== 1) return no("Its token is not Token-2022.");
+  if (c[232] !== 0) return no("Its curve fees are not collected in SOL.");
+  if (c[245] !== PRESET.fees.creatorTradingFeePercentage) {
+    return no(`It gives the creator ${c[245]}% of curve fees after Meteora's share, not ${PRESET.fees.creatorTradingFeePercentage}%.`);
+  }
+  if (c[243] !== 6 || c[247] > PRESET.migration.migrationFeePercentage || c[248] !== 0) {
+    return no("Its migration fee is not Sheaf's: at most 1% of the raise, none of it to the creator.");
+  }
+  if (u64le(c, 296) !== 0n || u64le(c, 328) !== 0n) return no("It reserves supply for vesting outside the curve.");
+  if (c[136] !== 1 || c.readUInt32LE(144) !== 14_460_000 || c.readUInt32LE(148) !== 956) return no("Its volatility fee is not the preset's.");
+  const start = Number(u128le(c, 392));
+  const caps = [];
+  const liquidity = [];
+  for (let i = 0; i < 20; i++) {
+    const sp = u128le(c, 408 + i * 32);
+    if (sp === 0n) break;
+    caps.push((Number(sp) / start) ** 2);
+    liquidity.push(Number(u128le(c, 424 + i * 32)));
+  }
+  const migration = (Number(u128le(c, 280)) / start) ** 2;
+  for (const id of ["v2", "v1"]) {
+    const t = PRESET_TERMS[id];
+    if (c[234] !== t.activation) continue;
+    if (u64le(c, 104) !== t.cliff || c.readUInt16LE(128) !== t.first || u64le(c, 112) !== t.second || u64le(c, 120) !== t.third || c[130] !== 1) continue;
+    if (c.readUInt16LE(362) !== t.migratedFeeBps || c[364] !== t.migratedFeeMode) continue;
+    if (caps.length !== t.caps.length || !caps.every((v, i) => near(v, t.caps[i]))) continue;
+    if (!near(migration, t.caps[t.caps.length - 1])) continue;
+    if (!liquidity.every((l, i) => near(l / liquidity[0], t.weights[i]))) continue;
+    return { preset: id, reason: null };
+  }
+  return no("Its curve or fee schedule is not one of Sheaf's published presets.");
+}

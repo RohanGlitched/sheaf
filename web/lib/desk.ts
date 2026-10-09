@@ -268,11 +268,36 @@ export function planBounds(cash: bigint, refE9: bigint, bandBps: number): { star
   };
 }
 
-/** The creator fee on `shares`, as mint_shares charges it (floored). */
+/** A single fee on `shares`, floored. With no protocol fee this is exactly the creator fee mint_shares charges. */
 export const creatorFeeOn = (shares: bigint, feeBps: number) => (shares * BigInt(feeBps)) / 10_000n;
 
-/** The smallest gross share count whose creator fee leaves exactly `net`: what a filler must deliver components for. */
-export function grossSharesForNet(net: bigint, feeBps: number): bigint {
+/**
+ * The (creator, protocol) fee shares on `shares` created, exactly as the
+ * program's `fee_split`: the pair is floored once at `creatorBps +
+ * protocolBps`, the protocol takes `floor(shares × protocolBps / 10^4)`, and
+ * the creator the rest. The protocol's share is accrued in the basket and
+ * minted to the treasury later; the depositor receives `shares − creator −
+ * protocol`. Baskets created before the protocol fee have `protocolBps = 0`.
+ */
+export function feeSplit(shares: bigint, creatorBps: number, protocolBps = 0): { creator: bigint; protocol: bigint } {
+  const total = creatorFeeOn(shares, creatorBps + protocolBps);
+  const protocol = creatorFeeOn(shares, protocolBps);
+  return { creator: total - protocol, protocol };
+}
+
+/** What a depositor receives for `shares` created: net of both fees. */
+export const netSharesFor = (shares: bigint, creatorBps: number, protocolBps = 0) => {
+  const { creator, protocol } = feeSplit(shares, creatorBps, protocolBps);
+  return shares - creator - protocol;
+};
+
+/**
+ * The smallest gross share count whose fees leave exactly `net`: what a filler
+ * must deliver components for. Pass the basket's `protocolFeeBps` as well as
+ * its creator fee (the pair is what the program charges a fill).
+ */
+export function grossSharesForNet(net: bigint, creatorBps: number, protocolBps = 0): bigint {
+  const feeBps = creatorBps + protocolBps;
   const netOf = (g: bigint) => g - creatorFeeOn(g, feeBps);
   let gross = (net * 10_000n + BigInt(10_000 - feeBps) - 1n) / BigInt(10_000 - feeBps);
   for (let i = 0; i < 3; i++) {

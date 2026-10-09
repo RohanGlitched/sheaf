@@ -34,7 +34,7 @@ type Preset = { id: string; label: string; hint: string; symbols: string[] };
  * Starting points, not products.
  *
  * A blank canvas is the fastest way to lose somebody on a page like this, so there
- * are three recognisable baskets to open from. Each one is a normal basket after
+ * are three recognizable baskets to open from. Each one is a normal basket after
  * the first click: every ticker and every weight can be changed.
  */
 const PRESETS: Preset[] = [
@@ -374,7 +374,7 @@ export function Composer() {
       {
         n: "2",
         title: "Open a launch market",
-        body: "Put a Meteora bonding curve in front of the basket, priced off its own NAV. You earn half its trading fees.",
+        body: "Put a Meteora bonding curve in front of the basket, priced off its own NAV. You earn 40% of its trading fees.",
         href: `/basket/${done.basket}#launch`,
         cta: "Open the launch market",
       },

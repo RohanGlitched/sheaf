@@ -126,6 +126,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // Claim the slot before the first network call, so parallel requests cannot all
+  // pass the checks above; give it back if nothing is sent.
+  const wallet = owner.toBase58();
+  const claimedAt = Date.now();
+  lastClaim.set(wallet, claimedAt);
+  fromIp.push(claimedAt);
+  const release = () => {
+    if (lastClaim.get(wallet) === claimedAt) {
+      if (previous) lastClaim.set(wallet, previous);
+      else lastClaim.delete(wallet);
+    }
+    const list = claimsByIp.get(ip) ?? [];
+    const at = list.lastIndexOf(claimedAt);
+    if (at >= 0) list.splice(at, 1);
+  };
+
   const connection = new Connection(WRITE_RPC, "confirmed");
 
   // Only accounts that do not exist yet cost the house rent, and only those are
@@ -143,6 +159,7 @@ export async function POST(request: Request) {
     existing = infos.map((info) => info != null);
     houseLamports = lamports;
   } catch {
+    release();
     return Response.json(
       { error: "The faucet could not reach the cluster. Try again in a moment." },
       { status: 502 },
@@ -153,6 +170,7 @@ export async function POST(request: Request) {
     .map((entry, n) => ({ entry, ata: atas[n], exists: existing[n] }))
     .filter((x) => x.exists || canOpenAccounts);
   if (!claimable.length) {
+    release();
     return Response.json(
       {
         error:
@@ -195,8 +213,6 @@ export async function POST(request: Request) {
     const signature = await sendAndConfirmTransaction(connection, tx, [keypair], {
       commitment: "confirmed",
     });
-    lastClaim.set(owner.toBase58(), Date.now());
-    fromIp.push(Date.now());
     return Response.json({
       signature,
       cluster: WRITE_CLUSTER,
@@ -210,6 +226,7 @@ export async function POST(request: Request) {
       err instanceof Error && /insufficient|0x1\b/.test(err.message)
         ? "The faucet is out of SOL on this cluster."
         : "The faucet transaction failed. Try again in a moment.";
+    release();
     return Response.json({ error: message }, { status: 502 });
   }
 }

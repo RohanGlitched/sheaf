@@ -3,7 +3,7 @@
  * Meteora DBC. For each launch listed by /api/launches (which only lists pools
  * that pass the official check), the treasury key claims what it is owed:
  *
- *   claimPartnerTradingFee      the partner half of curve fees, any time
+ *   claimPartnerTradingFee      the treasury's 40% of every curve fee (Meteora keeps 20%), any time
  *   partnerWithdrawMigrationFee the 1% migration fee, after graduation
  *   partnerWithdrawSurplus      SOL raised past the threshold, after graduation
  *   withdrawLeftover            the 1% leftover supply, after graduation

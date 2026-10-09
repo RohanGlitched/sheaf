@@ -10,7 +10,8 @@ import {
   explorerTx,
 } from "@/lib/config";
 import { PlanSheaf } from "@/components/plan-sheaf";
-import { FEATURED_DBC } from "@/lib/dbc";
+import { FEATURED_DBC, PRESET_URL } from "@/lib/dbc";
+import { FeeTable } from "@/components/business-case";
 import { fetchBasketAt, type Basket } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
 import { slotColor } from "@/lib/palette";
@@ -21,7 +22,7 @@ import preset from "@/lib/meteora-preset.json";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Six steps from a list of companies to a token you can hold, buy with dollars, buy every month and trade before it exists. Each one has already happened on devnet and links to the transaction that proves it.",
+    "Six steps from a list of companies to a token you can hold, buy with dollars, buy every month, trade before it exists and bet on, each linked to the transaction, account or data that proves it.",
 };
 
 export const revalidate = 300;
@@ -42,16 +43,20 @@ const SETTLED_FEE = preset.fees.antiSnipe.endingFeeBps / 100;
 const FEE_MINUTES = preset.fees.antiSnipe.totalDurationSeconds / 60;
 const FIRST_OPEN_FEE = preset.previous.antiSnipe.startingFeeBps / 100;
 
+/** The Big Five: the basket whose question /predict leads with. */
+const PREDICT_EXAMPLE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+
 const EXAMPLE_MINT_TX =
   "4ej9mpPfVwzWeSDg5Ftf8pDxbmMWhPsYBv7CjhpYGX3WRMm6kWRF9Mxt9WptgW23qzH7rfMsiKNLr4Wyz92DHHeA";
 
+/** The same six steps, in the same words, as the home page's lifecycle. */
 const STAGES = [
   { id: "recipe", title: "Write the recipe" },
   { id: "create", title: "Create shares in kind" },
-  { id: "hold", title: "Hold one token" },
   { id: "dollars", title: "Or buy with dollars" },
   { id: "plans", title: "Then every month" },
-  { id: "market", title: "Open a launch market" },
+  { id: "market", title: "Trade it before it exists" },
+  { id: "predict", title: "Bet on it" },
 ];
 
 /** Plainly, what the program cannot promise. */
@@ -70,7 +75,7 @@ const RISKS = [
   },
   {
     title: "The program is not audited",
-    body: "The program and the EVM contracts have their own test suites, but nobody outside has reviewed them. The upgrade authority is a deploy wallet on devnet. Before it holds real tokens, it moves to a multisig and is then burned, after an audit.",
+    body: "The program and the EVM contracts have their own test suites, but nobody outside has reviewed them. The upgrade key is a deploy wallet on devnet. It moves to a multisig before mainnet, so new issuers can be added to the allowlist; it will never be used to move funds.",
   },
   {
     title: "A basket of stocks may be a fund",
@@ -290,6 +295,27 @@ function PlanVisual() {
   );
 }
 
+function PredictVisual() {
+  const rows: [string, string][] = [
+    ["Question", "Will The Big Five (BIG5) beat SPY this week?"],
+    ["Yes if", "one share, valued from its vault at the close, rose more than SPY"],
+    ["Settles from", "/api/nav/FFGg…EfJ, every input listed"],
+    ["Market", "Panta, a USDC bonding curve on Solana (sandbox today)"],
+  ];
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-raised">
+      <dl className="divide-y divide-line text-sm">
+        {rows.map(([term, value]) => (
+          <div key={term} className="grid gap-1 px-6 py-3 sm:grid-cols-[9rem_1fr] sm:gap-4">
+            <dt className="text-ink-3">{term}</dt>
+            <dd className="text-ink">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function RecipeVisual({ basket }: { basket: Basket }) {
   return (
     <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-raised">
@@ -430,10 +456,11 @@ export default async function MethodPage() {
       <header className="max-w-[62ch]">
         <h1 className="display text-hero leading-[0.95] text-ink">How it works</h1>
         <p className="mt-6 text-lg leading-[1.65] text-ink-2">
-          Six steps take a list of companies to a token you can hold, buy with
-          dollars, buy every month and trade before it exists. Each one has
-          already happened on {WRITE_CLUSTER} and links to the transaction or
-          account that proves it. The running example is{" "}
+          Six steps, the same six as on the home page, take a list of companies
+          to a token you can hold, buy with dollars, buy every month, trade before
+          it exists and bet on. The first five have already happened on{" "}
+          {WRITE_CLUSTER} and link to the transaction or account that proves
+          them; the sixth runs against Panta&rsquo;s sandbox. The running example is{" "}
           <Link
             href={`/basket/${EXAMPLE}`}
             className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
@@ -503,7 +530,12 @@ export default async function MethodPage() {
           title="Create shares in kind"
           on="Token-2022 vault · mint_shares, redeem_shares"
           proof={{ label: "A creation with a PreStocks fee grossed up", href: explorerTx(EXAMPLE_MINT_TX) }}
-          visual={<CreateVisual basket={basket} />}
+          visual={
+            <div className="space-y-4">
+              <CreateVisual basket={basket} />
+              <HoldVisual basket={basket} />
+            </div>
+          }
         >
           <p>
             To create a share you hand the vault exactly what the recipe names. To
@@ -515,40 +547,23 @@ export default async function MethodPage() {
             fee live and grosses the deposit up, so the vault always nets the full
             recipe.
           </p>
-        </Stage>
-
-        <Stage
-          n={3}
-          id="hold"
-          title="Hold one token"
-          on="Any Solana wallet"
-          proof={
-            basket
-              ? { label: "The share mint on Explorer", href: explorerAddress(basket.shareMint) }
-              : undefined
-          }
-          visual={<HoldVisual basket={basket} />}
-        >
           <p>
-            Several positions become one. The share sends, sits in a wallet and can be
-            sold like any token, and{" "}
+            What you hold is one token. It sends, sits in any Solana wallet and can
+            be sold like any token, and{" "}
             <Link
               href="/portfolio"
               className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
             >
               Portfolio
             </Link>{" "}
-            looks through it to the companies underneath.
-          </p>
-          <p>
-            xStocks pay dividends by raising a multiplier on the mint rather than
-            sending tokens. The recipe is in raw units, so the vault keeps every
-            dividend for the people holding shares.
+            looks through it to the companies underneath. xStocks pay dividends by
+            raising a multiplier on the mint, and the recipe is in raw units, so the
+            vault keeps every dividend for the people holding shares.
           </p>
         </Stage>
 
         <Stage
-          n={4}
+          n={3}
           id="dollars"
           title="Or buy with dollars"
           on="Dollar order"
@@ -563,12 +578,12 @@ export default async function MethodPage() {
             Anyone can fill it by delivering the stocks the recipe names at the current count. The vault
             receives them exactly as in a creation, the buyer receives the shares, and the filler takes the
             dollars. Fillers compete on timing, so the price is the market&apos;s and no oracle is read. If
-            nobody fills in time, the order can be cancelled and the dollars go back to the buyer.
+            nobody fills in time, the order can be canceled and the dollars go back to the buyer.
           </p>
         </Stage>
 
         <Stage
-          n={5}
+          n={4}
           id="plans"
           title="Then every month"
           on="Monthly plan"
@@ -585,9 +600,9 @@ export default async function MethodPage() {
           </p>
         </Stage>
         <Stage
-          n={6}
+          n={5}
           id="market"
-          title="Open a launch market"
+          title="Trade it before it exists"
           on="Launch market"
           proof={{ label: "The pool on Explorer", href: explorerAddress(LAUNCH_EXAMPLE_POOL) }}
           visual={<BasketLaunch basket={LAUNCH_EXAMPLE} navUsd={null} />}
@@ -616,21 +631,53 @@ export default async function MethodPage() {
             keep it.
           </p>
           <p>
-            The shape is ours. Four segments, weighted so the curve opens on a
-            shelf: the first fifth of the SOL raised buys about a third of the
+            The shape is ours. Four segments, weighted so the opening price rises
+            slowly: the first fifth of the SOL raised buys about a third of the
             supply, not half of it, so early buyers are not racing each other. A
-            basket is not a meme. The whole curve is published as a reusable
-            preset in the repository.
+            basket is not a meme. The whole curve is published as a{" "}
+            <a href={PRESET_URL} target="_blank" rel="noreferrer" className="text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
+              reusable preset
+            </a>{" "}
+            in the repository.
           </p>
           <p>
             The basket&rsquo;s creator opens it from the basket page in one
-            signature and earns half of the curve&rsquo;s trading fees; Sheaf
-            earns the other half. The pool&rsquo;s address is derived from the
+            signature and earns 40% of the curve&rsquo;s trading fees; Sheaf
+            earns 40% and Meteora keeps 20%. The pool&rsquo;s address is derived from the
             basket&rsquo;s, so anyone can find it without an indexer, and a pool
             only counts as the basket&rsquo;s launch if the basket&rsquo;s creator
             opened it. When the curve fills, anyone can move it into the permanent
             pool from the same page, and the same card keeps buying and selling
             there instead of on the curve.
+          </p>
+        </Stage>
+
+        <Stage
+          n={6}
+          id="predict"
+          title="Bet on it"
+          on="Prediction market · Panta"
+          proof={{ label: "The number a market settles from", href: `/api/nav/${PREDICT_EXAMPLE}` }}
+          visual={<PredictVisual />}
+        >
+          <p>
+            Every basket carries one question: will it beat SPY this week? A
+            share&rsquo;s value is its recipe at public prices, and the vault
+            behind it is an account anyone can read, so the answer can be worked
+            out from the chain with nobody&rsquo;s say-so.
+          </p>
+          <p>
+            Panta runs the market, a USDC bonding curve on Solana. Sheaf publishes
+            the settling number at <code className="text-sm">/api/nav/&lt;basket&gt;</code>,
+            with every input and the calls to check it. Today it runs against
+            Panta&rsquo;s sandbox, so nothing is opened on mainnet;{" "}
+            <Link
+              href="/predict"
+              className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
+            >
+              every question
+            </Link>{" "}
+            is on one page.
           </p>
         </Stage>
 
@@ -649,6 +696,23 @@ export default async function MethodPage() {
           ))}
         </ul>
       </section>
+
+      <section id="business" className="scroll-mt-24 border-t border-line py-16">
+        <div className="max-w-[60ch]">
+          <h2 className="display text-title text-ink">Who pays, and for what</h2>
+          <p className="mt-4 text-base leading-relaxed text-ink-2">
+            Every fee is fixed for a basket when it is created. Holding and redeeming are free.{" "}
+            <Link href="/business" className="text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
+              The full business case
+            </Link>{" "}
+            has the costs beside the alternatives and the numbers so far.
+          </p>
+        </div>
+        <div className="mt-8">
+          <FeeTable />
+        </div>
+      </section>
+
 
       <section id="compare" className="scroll-mt-24 border-t border-line py-16">
         <div className="max-w-[60ch]">

@@ -15,5 +15,16 @@
       "signature": "3FdswP7jGShqdzic17P4V65Ga3VNsRpSYB3gVH7WP9bECiRa6tKVoL5iXkpqghKgRGCRBiAJRbCCP4yABttvuk54",
       "note": "0.01 SOL buy 98 seconds after the open paid a 15.43% fee: the anti-snipe schedule counting in seconds (25% at 0 s, 1% at 600 s)."
     }
+  },
+  "rogueTerms": {
+    "slot": 2,
+    "creator": "B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L",
+    "pool": "6vcMztC7j2oSREJ8cQ2gZEHq9THaNuDtfnv6ESwLJQHD",
+    "signature": "2r73HUpR8p6nLJjZ2N6tQqJwcWSZcFZ94WXoyF3Ppz9sXREzpyyuQYjE7ZVCzrWCU5AL17NGQXDKt69ybNj8saxo",
+    "costSol": 0.01457936,
+    "rogueTerm": "creator_liquidity_percentage = 50 (unlocked), creator_permanent_locked_liquidity_percentage = 0",
+    "reason": "50% of its graduated liquidity is not permanently locked and can be withdrawn after graduation.",
+    "note": "Opened by the basket's own creator (the house key) on the v2 curve and fees, with one rogue term: half the graduated LP withdrawable. The creator check passes; checkLaunch rejects it on its terms.",
+    "at": "2026-10-09T10:05:36.040Z"
   }
 }

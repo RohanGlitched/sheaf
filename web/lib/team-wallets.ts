@@ -52,6 +52,7 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "62TkyrtDt6xrTCMbZz8ZpPm3QdLdFukMzd8aNgzCd7tM", role: "test", label: "Test wallet, plan run" },
   { address: "GGe5rqTbKQ6RUXVqgmPdmSMZkFTBu83Ercfmb5a9G1Sd", role: "test", label: "Test wallet, QA round 2" },
   { address: "wNfb2abuRv5ky6z3APRDYBhDEWrJ3iRHStSNcnejfa7", role: "test", label: "Test wallet, QA round 2 (created QA3KRA)" },
+  { address: "cQKhoauPParjVawD5zTGFqtGLhi3FHp8g8Qn8H1PtcA", role: "test", label: "Test wallet, QA round 2 (funded by the house faucet, bought BIG5A)" },
   // UI tests of plans and dollar orders, 9 October.
   { address: "G6qHDvZq6KsMQkzTXnB5LhUJZDDhY3PS7RZDNwLHx19", role: "test", label: "Test wallet, UI test" },
   { address: "42pje9iqjHDd9et1mXvEmetTfnDAX3dbspJApCRLAmyB", role: "test", label: "Test wallet, UI test" },
@@ -61,6 +62,13 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "7XEGELR2W8Yivk3bNPkHkfozP3HAAR2R6c1zgU35q5F8", role: "test", label: "Test wallet, UI test" },
   { address: "GaaTVK8doUGxqDawVayKJvtvKz5uD5xCShNrnS8CcCJG", role: "test", label: "Test wallet, UI test" },
 
+  // Judge round 3 QA against the live site, 9 October (.judge/qa3/wallets.txt).
+  { address: "HSHma7qF67f6qD3GP4sAnHoqM53fFi91qSTvZRg34LDd", role: "test", label: "Test wallet, QA round 3 (created QAZG1N)" },
+  { address: "Fo41veTfXL8dqU4ixLeVcQ3D8yvxFx2XhzGhgCvHNMeb", role: "test", label: "Test wallet, QA round 3" },
+  { address: "8rLCuBxm5Fa3Z13WkxtuuUmYj3zxP9m3sRzwbdGczzNg", role: "test", label: "Test wallet, QA round 3 (created QAWSC1)" },
+  { address: "8Sz2tn75aqKSNLuVcgN58Z5XSmCXKk9DjZ1rSwnfE3QK", role: "test", label: "Test wallet, QA round 3" },
+  { address: "3k6be2LEt7L5XC1sDaYe1YQmYuJFTcF4jQujkjjaJEkX", role: "test", label: "Test wallet, QA round 3" },
+
   // ------------------------------------------------------------------- EVM
   {
     address: "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
@@ -69,6 +77,14 @@ export const TEAM_WALLETS: TeamWallet[] = [
   },
   { address: "0xF948aE3A26341324196ae18381f5B8d01fA79874", role: "test", label: "EVM test wallet, QA round 2" },
   { address: "0x2FD70697FDbC7a9788fbc36a631CDd06834BF38e", role: "test", label: "EVM test wallet, chain walkthroughs" },
+  { address: "0x7B854D62B06ac29C32b56ee36a12f5e823262248", role: "test", label: "EVM test wallet, QA round 3 (Arbitrum Sepolia)" },
+  // Tempo plan accounts from the "Run it in this browser" SIP, each made in a test run.
+  { address: "0xEae83b650726a9bfb600FFF74c3AeD54a54805b8", role: "test", label: "Tempo test plan account, QA round 3" },
+  { address: "0xDF9e887bbA6A569845D0cD1ddA91461Bb60321e1", role: "test", label: "Tempo test plan account, QA round 2" },
+  { address: "0x71975d3923B467963c675e981641722e92675239", role: "test", label: "Tempo test plan account, chain walkthrough" },
+  // Placed seconds after our own Tempo SIP test runs, with the same amount and nonce; counted as ours rather than as outside buyers.
+  { address: "0xcDb524B789146A872f4D019e7B2145ef2e2B9ec0", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
+  { address: "0x3F3219F8F577772a90367a864153AD1f3BAb180b", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
 ];
 
 /** Base58 is case-sensitive; only hex EVM addresses are folded to one case. */

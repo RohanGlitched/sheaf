@@ -12,16 +12,17 @@ import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
 import { explorerAddress } from "@/lib/config";
 import { fromCashRaw } from "@/lib/use-cash";
-import { count, money, shortAddress } from "@/lib/format";
+import { count, money, shortAddress, timeAgo } from "@/lib/format";
 import { useMarket } from "./market-provider";
 import { PlanSheaf } from "./plan-sheaf";
 import { planTerms } from "./plan-form";
 import { ConnectButton } from "./connect-button";
-import { teamTag } from "@/lib/team-wallets";
+import { teamTag, teamWallet } from "@/lib/team-wallets";
 
 /**
- * Plans opened by our own test wallets (before the hardening release, and by UI
- * tests since). Only their owners can close them, so everyone else never sees them.
+ * Five broken test plans: two from before the hardening release and three from
+ * UI tests whose throwaway keys are gone, so nobody can ever close them. Only
+ * their owners see them. Every other plan is shown, our own ones tagged.
  */
 const HIDDEN_TEST_PLANS = new Set([
   "AfdM1DvJnN4TquHS7py5eZBzHFi5eTwy4Sn5VUKgz8sG",
@@ -30,11 +31,20 @@ const HIDDEN_TEST_PLANS = new Set([
   "AsqCRKYCvqzDhFPRRBWYRJwfGA5PB7R2JTr7e63sGS62",
   "2DMVZNc3eUsDbU9s15UDfYEkpnkdWoBpStt9tWpGFztc",
 ]);
-const hiddenPlan = (p: { address: string; owner: string }) =>
-  HIDDEN_TEST_PLANS.has(p.address) || teamTag(p.owner) === "test wallet";
 
-/** A plan whose reference sits further than this from today's fair rate is offered a re-centre. */
-const RECENTRE_DRIFT = 0.02;
+/** How long the keeper leaves a buyer's own expired order for them to return, before returning it itself. */
+const REFUND_GRACE_SECS = 10 * 60;
+
+/** The pill beside a plan the team opened: the house's live demo, or one of our test wallets. */
+function ownerPill(owner: string): string | null {
+  const w = teamWallet(owner);
+  if (!w || teamTag(owner) == null) return null;
+  return w.role === "house" ? "Sheaf demo" : w.role === "test" ? "our test" : "Sheaf";
+}
+const isHouse = (address: string) => teamWallet(address)?.role === "house";
+
+/** A plan whose reference sits further than this from today's fair rate is offered a re-center. */
+const RECENTER_DRIFT = 0.02;
 
 /** The demo cadence's auction, short enough that one run has closed before the next is due. */
 const DEMO_AUCTION_SECS = 240;
@@ -67,7 +77,7 @@ function PlanCard({
   onRun,
   onClose,
   onRefund,
-  onRecentre,
+  onRecenter,
   busy,
   note,
 }: {
@@ -83,7 +93,7 @@ function PlanCard({
   onRun: (p: Plan) => void;
   onClose: (p: Plan) => void;
   onRefund: (p: Plan, o: Order) => void;
-  onRecentre: (p: Plan, fair: number) => void;
+  onRecenter: (p: Plan, fair: number) => void;
   busy: boolean;
   note: Note | null;
 }) {
@@ -92,7 +102,10 @@ function PlanCard({
   // The reference is shares per dollar, times 1e9; as a price, one share costs 1e9 / ref dollars.
   const refPrice = plan.refSharesPerCashE9 > 0n ? 1e9 / Number(plan.refSharesPerCashE9) : null;
   const drift = fairPrice != null && refPrice != null ? refPrice / fairPrice - 1 : null;
-  const offCentre = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && Math.abs(drift) > RECENTRE_DRIFT;
+  const offCenter = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && Math.abs(drift) > RECENTER_DRIFT;
+  const pill = ownerPill(plan.owner);
+  // An expired order the house paid rent for goes back on the keeper's next pass; anyone else's after the grace.
+  const returnsIn = expired && !isHouse(expired.rentPayer) ? expired.endTs + REFUND_GRACE_SECS - now : 0;
   return (
     <li className="flex gap-4 rounded-[var(--radius-panel)] border border-line bg-surface p-4 sm:gap-5 sm:p-5">
       <div className="size-20 shrink-0 sm:size-28">
@@ -100,9 +113,19 @@ function PlanCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <Link href={`/basket/${plan.basket}`} className="display text-xl text-ink hover:underline">
-            {basketName}
-          </Link>
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <Link href={`/basket/${plan.basket}`} className="display text-xl text-ink hover:underline">
+              {basketName}
+            </Link>
+            {pill && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] leading-none ${pill === "Sheaf demo" ? "bg-bind-wash text-bind" : "bg-sunk text-ink-3"}`}
+                title={pill === "Sheaf demo" ? "The house's own demo plan, run by the keeper on its schedule" : "Opened by one of the team's test wallets"}
+              >
+                {pill}
+              </span>
+            )}
+          </span>
           <span className="tnum text-sm text-ink-2">
             {money(fromCashRaw(plan.cashPerRun))} {every(plan.periodSecs)}
           </span>
@@ -110,12 +133,15 @@ function PlanCard({
         <p className="tnum mt-1 text-sm text-ink-3">
           {plan.fills} of {plan.runsTotal} filled from {plural(ran, "run")}
           {plan.runsLeft === 0
-            ? " · finished"
+            ? pending
+              ? " · last run filling"
+              : " · finished"
             : due
               ? " · next run is due now"
               : pending && now >= plan.nextRunTs
                 ? " · next run once this order closes"
                 : ` · next run ${until(plan.nextRunTs, now)}`}
+          {plan.fills > 0 && plan.lastFillTs > 0 && ` · last filled ${timeAgo(plan.lastFillTs)}`}
         </p>
         {pending && (
           <p className="mt-2 text-sm text-ink-2">
@@ -125,14 +151,17 @@ function PlanCard({
         )}
         {expired && (
           <p className="mt-2 text-sm text-ink-2">
-            A {money(fromCashRaw(expired.cashAmount))} order ended unfilled. Anyone can return the dollars to the plan owner; the keeper does on
-            its next pass.
+            A {money(fromCashRaw(expired.cashAmount))} order ended unfilled. Anyone can press Return to send the dollars back to the plan
+            owner now;{" "}
+            {returnsIn > 0
+              ? `otherwise the keeper returns them in about ${Math.max(1, Math.ceil(returnsIn / 60))} min.`
+              : "otherwise the keeper returns them on its next pass."}
           </p>
         )}
-        {offCentre && refPrice != null && fairPrice != null && (
+        {offCenter && refPrice != null && fairPrice != null && (
           <p className="mt-2 text-sm text-ink-2">
             Its reference price, {money(refPrice)} a share, is {Math.abs(drift! * 100).toFixed(1)}% {drift! > 0 ? "above" : "below"} today&apos;s
-            fair price of {money(fairPrice)}. Re-centre it so the next run starts from today&apos;s price.
+            fair price of {money(fairPrice)}. Re-center it so the next run starts from today&apos;s price.
           </p>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
@@ -146,9 +175,9 @@ function PlanCard({
               {mine ? "Run it now" : "Run it for them"}
             </button>
           )}
-          {offCentre && fairPrice != null && (
-            <button type="button" onClick={() => onRecentre(plan, fairPrice)} disabled={busy} className="rounded-[var(--radius-control)] border border-bind px-3.5 py-2 text-bind hover:bg-bind-wash disabled:opacity-60">
-              Re-centre
+          {offCenter && fairPrice != null && (
+            <button type="button" onClick={() => onRecenter(plan, fairPrice)} disabled={busy} className="rounded-[var(--radius-control)] border border-bind px-3.5 py-2 text-bind hover:bg-bind-wash disabled:opacity-60">
+              Re-center
             </button>
           )}
           {mine && (
@@ -271,17 +300,24 @@ export function PlansBoard() {
   const pendingFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs >= now);
   const expiredFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs < now);
   const me = publicKey?.toBase58();
-  const visible = (plans ?? []).filter((p) => !hiddenPlan(p) || p.owner === me);
-  const live = visible.filter((p) => !p.legacy);
+  const visible = (plans ?? []).filter((p) => !HIDDEN_TEST_PLANS.has(p.address) || p.owner === me);
+  // The house's running demo first, so a sheaf visibly grows at the top; then running plans; finished ones last.
+  const rank = (p: Plan) => (p.runsLeft > 0 ? (isHouse(p.owner) ? 0 : 1) : 2);
+  const live = visible.filter((p) => !p.legacy).sort((a, b) => rank(a) - rank(b) || b.createdAt - a.createdAt);
   const mine = live.filter((p) => p.owner === me);
   const others = live.filter((p) => p.owner !== me);
   const mineLegacy = visible.filter((p) => p.legacy && p.owner === me);
   const othersLegacy = visible.filter((p) => p.legacy && p.owner !== me);
   const due = live.filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
-  const running = live.filter((p) => p.runsLeft > 0);
-  const fills = live.reduce((n, p) => n + p.fills, 0);
-  // Every fill spends exactly one run's dollars, so this is what plans have actually put in.
-  const invested = live.reduce((sum, p) => sum + fromCashRaw(p.cashPerRun) * p.fills, 0);
+  // Every figure is split into the team's own plans and everyone else's, so nothing of ours reads as traction.
+  const tally = (list: Plan[]) => ({
+    running: list.filter((p) => p.runsLeft > 0).length,
+    fills: list.reduce((n, p) => n + p.fills, 0),
+    // Every fill spends exactly one run's dollars, so this is what plans have actually put in.
+    invested: list.reduce((sum, p) => sum + fromCashRaw(p.cashPerRun) * p.fills, 0),
+  });
+  const ours = tally(live.filter((p) => ownerPill(p.owner) != null));
+  const outside = tally(live.filter((p) => ownerPill(p.owner) == null));
   const nameOf = (p: Plan) => byBasket.get(p.basket)?.name ?? shortAddress(p.basket);
 
   async function act(plan: Plan, build: () => Transaction, done: string, explainAs?: { action?: "cancel" }) {
@@ -321,7 +357,7 @@ export function PlansBoard() {
     }
     await act(p, () => new Transaction().add(cancelOrderIx({ caller: publicKey!, order: o })), "Returned. The dollars went back to the plan owner.", { action: "cancel" });
   }
-  const recentre = (p: Plan, fair: number) => {
+  const recenter = (p: Plan, fair: number) => {
     const terms = planTerms(fair);
     return act(
       p,
@@ -338,7 +374,7 @@ export function PlansBoard() {
             maxRef: terms.maxRef,
           }),
         ),
-      `Re-centred on today's fair price of ${money(fair)} a share. The next run starts from there.`,
+      `Re-centered on today's fair price of ${money(fair)} a share. The next run starts from there.`,
     );
   };
 
@@ -358,27 +394,34 @@ export function PlansBoard() {
         onRun={run}
         onClose={close}
         onRefund={refund}
-        onRecentre={recentre}
+        onRecenter={recenter}
         busy={busy}
         note={note?.plan === p.address ? note : null}
       />
     );
   };
 
+  const split = (o: number | string, x: number | string) => (
+    <>
+      <span className="block">{o} ours</span>
+      <span className="block">{x} from outside wallets</span>
+    </>
+  );
   const stats = [
-    { label: "Plans running", value: plans == null ? "—" : count(running.length) },
-    { label: "Runs filled", value: plans == null ? "—" : count(fills) },
-    { label: "Put in by plans", value: plans == null ? "—" : money(invested) },
-    { label: "Due right now", value: plans == null ? "—" : count(due.length) },
+    { label: "Plans running", value: count(ours.running + outside.running), note: split(ours.running, outside.running) },
+    { label: "Runs filled", value: count(ours.fills + outside.fills), note: split(ours.fills, outside.fills) },
+    { label: "Dollars put in by plans", value: money(ours.invested + outside.invested), note: split(money(ours.invested), money(outside.invested)) },
+    { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
   ];
 
   return (
     <div>
-      <dl className="mb-14 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-4">
+      <dl className="mb-14 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="bg-surface px-4 py-4 sm:px-5">
             <dt className="text-xs text-ink-3">{s.label}</dt>
-            <dd className="display tnum mt-1 text-2xl text-ink">{s.value}</dd>
+            <dd className="display tnum mt-1 text-2xl text-ink">{plans == null ? "—" : s.value}</dd>
+            <dd className="tnum mt-1 text-xs text-ink-3">{plans == null ? "reading the chain" : s.note}</dd>
           </div>
         ))}
       </dl>
@@ -397,7 +440,7 @@ export function PlansBoard() {
               <div className="mt-6 rounded-[var(--radius-panel)] border border-dashed border-line-strong p-8">
                 <p className="text-ink">No plans yet.</p>
                 <p className="mt-2 max-w-[44ch] text-sm leading-relaxed text-ink-2">
-                  Open any basket and choose Monthly. Start with &ldquo;every 5 minutes&rdquo; to watch a few runs land today.
+                  Open any basket and choose the Monthly plan tab. Start with &ldquo;every 5 minutes&rdquo; to watch a few runs land today.
                 </p>
                 <Link href="/explore" className="mt-5 inline-flex rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white hover:bg-bind-deep">
                   Choose a basket
@@ -426,6 +469,15 @@ export function PlansBoard() {
             <p className="mt-6 text-sm text-ink-3">Nobody else has a plan running yet.</p>
           ) : (
             <ul className="mt-6 space-y-4">{others.slice(0, 12).map((p) => card(p, false))}</ul>
+          )}
+          {plans != null && outside.running + outside.fills === 0 && (
+            <p className="mt-4 text-sm text-ink-3">
+              No outside wallet has opened a plan yet. Be the first:{" "}
+              <Link href="/explore" className="text-bind underline decoration-bind/40 underline-offset-4">
+                choose a basket
+              </Link>
+              , then the Monthly plan tab.
+            </p>
           )}
           {plans != null && <LegacyPlans plans={othersLegacy} mine={false} nameOf={nameOf} onClose={close} busy={busy} notes={note} />}
         </section>

@@ -54,7 +54,7 @@ export default function ChainsPage() {
           stocks around the clock. Everywhere else the same contracts are portable, deployed and working, waiting for an issuer.
         </p>
         <p className="mt-4 text-sm text-ink-3">
-          {DEPLOYED.length + 1} chains live. Connect any EVM wallet on a basket page to get test tokens, create shares in kind, redeem them, or
+          Running on Solana devnet and {DEPLOYED.length} EVM testnets, none on mainnet yet. Connect any EVM wallet on a basket page to get test tokens, create shares in kind, redeem them, or
           buy with dollars on the desk.
         </p>
       </section>
@@ -101,7 +101,7 @@ export default function ChainsPage() {
             <h2 className="display mt-2 text-title text-ink">A monthly plan is an access key</h2>
             <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
               One passkey signature grants a keeper 25 AlphaUSD every 30 days, callable only on AlphaUSD.approve to the desk and
-              CreationDesk.placeOrder. The keeper places the month&apos;s instalment; ask for more and the chain answers SpendingLimitExceeded,
+              CreationDesk.placeOrder. The keeper places the month&apos;s installment; ask for more and the chain answers SpendingLimitExceeded,
               call anything else and it answers CallNotAllowed. No allowance, no custody, and gas paid in a dollar.
             </p>
             <Link
@@ -126,7 +126,7 @@ export default function ChainsPage() {
               <tr className="border-b border-line text-left text-xs text-ink-3">
                 <th className="px-4 py-3 font-normal">Chain</th>
                 <th className="px-4 py-3 font-normal">Factory</th>
-                <th className="px-4 py-3 font-normal">Cash desk</th>
+                <th className="px-4 py-3 font-normal">Dollar desk</th>
                 <th className="px-4 py-3 font-normal">Stocks</th>
                 <th className="px-4 py-3 font-normal">Verified</th>
                 <th className="px-4 py-3 font-normal">Smoke test</th>

@@ -50,7 +50,9 @@ import {
   tokenMetadataInitializeWithRentTransfer,
   getScaledUiAmountConfig,
   createInitializeTransferFeeConfigInstruction,
+  createInitializeAccount3Instruction,
   getTransferFeeAmount,
+  ACCOUNT_SIZE,
 } from "@solana/spl-token";
 import { assert } from "chai";
 import type { Sheaf } from "../target/types/sheaf";
@@ -243,6 +245,24 @@ describe("sheaf", () => {
   let shareMint: PublicKey;
   const SYMBOL = "MAG3";
   const FEE_BPS = 30;
+  /** PROTOCOL_FEE_BPS: every basket created by this program carries it. */
+  const PROTOCOL_BPS = 10;
+  const TREASURY = new PublicKey("9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF");
+
+  /** (creator, protocol) fee shares on `shares` created, as fee_split computes them. */
+  function feeSplit(shares: bigint, creatorBps = FEE_BPS, protocolBps = PROTOCOL_BPS): [bigint, bigint] {
+    const total = (shares * BigInt(creatorBps + protocolBps)) / 10_000n;
+    const protocol = (shares * BigInt(protocolBps)) / 10_000n;
+    return [total - protocol, protocol];
+  }
+
+  /** Protocol-fee shares a basket has accrued and not yet minted. */
+  const accruedOf = async (b: PublicKey) =>
+    BigInt((await program.account.basket.fetch(b, "processed")).protocolFeeAccrued.toString());
+
+  /** What the vault must back: every share in circulation plus the accrued protocol fee. */
+  const owedShares = async (b: PublicKey, mint: PublicKey) =>
+    (await getMint(provider.connection, mint, "processed", TOKEN_2022_PROGRAM_ID)).supply + (await accruedOf(b));
 
   before(async () => {
     // Three mock xStocks. The third starts with a multiplier already above 1,
@@ -293,6 +313,8 @@ describe("sheaf", () => {
     assert.equal(account.symbol, SYMBOL);
     assert.equal(account.componentCount, 3);
     assert.equal(account.creatorFeeBps, FEE_BPS);
+    assert.equal(account.protocolFeeBps, PROTOCOL_BPS, "the protocol fee is written in at creation");
+    assert.equal(account.protocolFeeAccrued.toString(), "0");
     assert.equal(account.shareMint.toBase58(), shareMint.toBase58());
     for (let i = 0; i < 3; i++) {
       assert.equal(account.components[i].mint.toBase58(), components[i].toBase58());
@@ -470,17 +492,21 @@ describe("sheaf", () => {
       );
     }
 
-    const fee = (BigInt(shares.toString()) * BigInt(FEE_BPS)) / 10_000n;
+    // 2.5 shares: 0.30% creator (7,500) and 0.10% protocol (2,500).
+    const [fee, protocol] = feeSplit(BigInt(shares.toString()));
+    assert.equal(fee.toString(), "7500");
+    assert.equal(protocol.toString(), "2500");
     assert.equal(
       (await rawBalance(holderShareAta)).toString(),
-      (BigInt(shares.toString()) - fee).toString(),
-      "holder shares are net of the fee",
+      (BigInt(shares.toString()) - fee - protocol).toString(),
+      "holder shares are net of both fees",
     );
     assert.equal(
       (await rawBalance(creatorShareAta)).toString(),
       fee.toString(),
       "creator receives the fee in shares",
     );
+    assert.equal((await accruedOf(basket)).toString(), protocol.toString(), "the protocol's share is accrued, not minted");
   });
 
   it("keeps the vault fully backing every outstanding share", async () => {
@@ -490,14 +516,15 @@ describe("sheaf", () => {
       undefined,
       TOKEN_2022_PROGRAM_ID,
     );
+    const outstanding = mintInfo.supply + (await accruedOf(basket));
     for (let i = 0; i < components.length; i++) {
       const held = await rawBalance(vaultFor(basket, components[i]));
       const owed =
-        (BigInt(unitsPerShare[i].toString()) * mintInfo.supply) /
+        (BigInt(unitsPerShare[i].toString()) * outstanding) /
         BigInt(ONE_SHARE);
       assert.isTrue(
         held >= owed,
-        `component ${i}: vault holds ${held}, shares claim ${owed}`,
+        `component ${i}: vault holds ${held}, shares and accrued fee claim ${owed}`,
       );
     }
   });
@@ -642,9 +669,11 @@ describe("sheaf", () => {
         lamports,
         programId: TOKEN_2022_PROGRAM_ID,
       }),
+      // No fee-config authority: a component's fee may be set only by its
+      // issuer (or nobody), never by the basket creator.
       createInitializeTransferFeeConfigInstruction(
         mint.publicKey,
-        payer.publicKey,
+        null,
         payer.publicKey,
         feeBps,
         BigInt("18446744073709551615"), // uncapped, same as a live PreStocks mint
@@ -756,9 +785,7 @@ describe("sheaf", () => {
       return seed / 2 ** 32;
     };
     const backed = async (label: string) => {
-      const supply = (
-        await getMint(provider.connection, shareMint, undefined, TOKEN_2022_PROGRAM_ID)
-      ).supply;
+      const supply = await owedShares(basket, shareMint);
       for (let i = 0; i < components.length; i++) {
         const held = await rawBalance(vaultFor(basket, components[i]));
         const owed =
@@ -818,13 +845,100 @@ describe("sheaf", () => {
       undefined,
       TOKEN_2022_PROGRAM_ID,
     );
+    const outstanding = mintInfo.supply + (await accruedOf(basket));
     for (let i = 0; i < components.length; i++) {
       const held = await rawBalance(vaultFor(basket, components[i]));
       const owed =
-        (BigInt(unitsPerShare[i].toString()) * mintInfo.supply) /
+        (BigInt(unitsPerShare[i].toString()) * outstanding) /
         BigInt(ONE_SHARE);
       assert.isTrue(held >= owed, `component ${i} still covered`);
     }
+  });
+
+  // ------------------------------------------------------------ protocol fee
+
+  describe("protocol fee", () => {
+    const treasuryShares = () =>
+      getAssociatedTokenAddressSync(shareMint, TREASURY, true, TOKEN_2022_PROGRAM_ID);
+    const claim = (to = treasuryShares(), treasury = TREASURY, b = basket, mint = shareMint) =>
+      program.methods
+        .claimProtocolFee()
+        .accountsPartial({
+          basket: b,
+          shareMint: mint,
+          treasury,
+          treasuryShareAccount: to,
+          shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .rpc();
+    const expectFail = async (p: Promise<unknown>, code: string) => {
+      try {
+        await p;
+      } catch (err: any) {
+        assert.include(`${err}\n${(err.logs ?? []).join("\n")}`, code);
+        return;
+      }
+      assert.fail(`expected ${code}`);
+    };
+
+    it("takes nothing below 1,000 raw share units, and accrues exactly 0.10% above", async () => {
+      const mintOf = (shares: bigint) =>
+        program.methods
+          .mintShares(new anchor.BN(shares.toString()))
+          .accountsPartial({
+            basket,
+            shareMint,
+            depositor: holder.publicKey,
+            depositorShareAccount: holderShareAta,
+            creatorShareAccount: creatorShareAta,
+            shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+            componentTokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .remainingAccounts(mintRemaining())
+          .signers([holder])
+          .rpc();
+      for (const shares of [999n, 1_000n, 1_234_567n]) {
+        const [fee, protocol] = feeSplit(shares);
+        const before = { accrued: await accruedOf(basket), holder: await rawBalance(holderShareAta), creator: await rawBalance(creatorShareAta) };
+        await mintOf(shares);
+        assert.equal(((await accruedOf(basket)) - before.accrued).toString(), protocol.toString(), `accrued on ${shares}`);
+        assert.equal(((await rawBalance(holderShareAta)) - before.holder).toString(), (shares - fee - protocol).toString());
+        assert.equal(((await rawBalance(creatorShareAta)) - before.creator).toString(), fee.toString());
+      }
+      assert.deepEqual(feeSplit(999n).map(String), ["3", "0"], "0.999 of a raw unit floors to nothing for the protocol");
+      assert.deepEqual(feeSplit(1_234_567n).map(String), ["3704", "1234"], "one rounding for the pair: the creator keeps the slack (its own floor is 3,703)");
+    });
+
+    it("mints the accrued fee to the treasury's share account, once, and stays fully backed", async () => {
+      const accrued = await accruedOf(basket);
+      assert.isTrue(accrued > 0n);
+      const supplyBefore = (await getMint(provider.connection, shareMint, "processed", TOKEN_2022_PROGRAM_ID)).supply;
+      const owedBefore = await owedShares(basket, shareMint);
+
+      // Only the treasury's own associated account can receive it.
+      await expectFail(claim(creatorShareAta), "account: treasury_share_account");
+      await expectFail(claim(getAssociatedTokenAddressSync(shareMint, holder.publicKey, true, TOKEN_2022_PROGRAM_ID), holder.publicKey), "TreasuryMismatch");
+
+      await sendAndConfirmTransaction(
+        provider.connection,
+        new Transaction().add(
+          createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, treasuryShares(), TREASURY, shareMint, TOKEN_2022_PROGRAM_ID),
+        ),
+        [payer],
+      );
+      // Permissionless: the payer here is neither creator, holder nor treasury.
+      await claim();
+      assert.equal((await rawBalance(treasuryShares())).toString(), accrued.toString());
+      assert.equal((await accruedOf(basket)).toString(), "0");
+      const supplyAfter = (await getMint(provider.connection, shareMint, "processed", TOKEN_2022_PROGRAM_ID)).supply;
+      assert.equal((supplyAfter - supplyBefore).toString(), accrued.toString(), "supply grew by exactly the accrued fee");
+      assert.equal((await owedShares(basket, shareMint)).toString(), owedBefore.toString(), "what the vault must back is unchanged");
+      for (let i = 0; i < components.length; i++) {
+        const held = await rawBalance(vaultFor(basket, components[i]));
+        assert.isTrue(held >= (BigInt(unitsPerShare[i].toString()) * supplyAfter) / BigInt(ONE_SHARE), `component ${i} backs the claimed fee`);
+      }
+      await expectFail(claim(), "NothingToClaim");
+    });
   });
 
   // ================================================================ cash desk
@@ -974,7 +1088,8 @@ describe("sheaf", () => {
     /** Independent of the program: walk up until the creator fee leaves `net`. */
     function grossFor(net: bigint): bigint {
       let g = net;
-      while (g - (g * BigInt(FEE_BPS)) / 10_000n < net) g++;
+      const net_of = (x: bigint) => x - feeSplit(x)[0] - feeSplit(x)[1];
+      while (net_of(g) < net) g++;
       return g;
     }
 
@@ -1143,6 +1258,7 @@ describe("sheaf", () => {
         vaults: await Promise.all(components.map((m) => rawBalance(vaultFor(basket, m)))),
         owner: await rawBalance(shareAtaOf(owner)),
         creator: await rawBalance(creatorShareAta),
+        accrued: await accruedOf(basket),
       };
     }
 
@@ -1162,15 +1278,13 @@ describe("sheaf", () => {
         );
       }
       assert.equal((after.owner - before.owner).toString(), received.toString(), "buyer received");
+      const [fee, protocol] = feeSplit(gross);
+      assert.equal((after.creator - before.creator).toString(), fee.toString(), "creator fee shares");
+      assert.equal((after.accrued - before.accrued).toString(), protocol.toString(), "protocol fee accrued");
       assert.equal(
-        (after.creator - before.creator).toString(),
-        (gross - received).toString(),
-        "creator fee shares",
-      );
-      assert.equal(
-        (gross * BigInt(FEE_BPS)) / 10_000n,
+        fee + protocol,
         gross - received,
-        "the fee is exactly mint_shares' fee on the gross delivered",
+        "the fees are exactly mint_shares' fees on the gross delivered",
       );
     }
 
@@ -1366,6 +1480,27 @@ describe("sheaf", () => {
       await expectError(
         cancel(expiredOrder, { by: stranger, refundTo: strangerCash }),
         "ConstraintTokenOwner",
+      );
+      // A side account the stranger opened in the buyer's name is the buyer's,
+      // but not where any client looks: a third party's refund must use the ATA.
+      const side = Keypair.generate();
+      await sendAndConfirmTransaction(
+        provider.connection,
+        new Transaction().add(
+          SystemProgram.createAccount({
+            fromPubkey: stranger.publicKey,
+            newAccountPubkey: side.publicKey,
+            space: ACCOUNT_SIZE,
+            lamports: await provider.connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE),
+            programId: TOKEN_PROGRAM_ID,
+          }),
+          createInitializeAccount3Instruction(side.publicKey, cashMint, buyer.publicKey, TOKEN_PROGRAM_ID),
+        ),
+        [stranger, side],
+      );
+      await expectError(
+        cancel(expiredOrder, { by: stranger, refundTo: side.publicKey }),
+        "RefundNotToBuyerAta",
       );
       const cashBefore = await balance(buyerCash);
       const rent =
@@ -1760,11 +1895,18 @@ describe("sheaf", () => {
           freeze?: boolean;
         };
         /**
-         * The write cluster's stand-in stock issuer (in KNOWN_ISSUERS outside
-         * a mainnet build). Only its public key is needed: these extensions
-         * take their authority as a plain key at initialisation.
+         * A real issuer in KNOWN_ISSUERS (PreStocks), so these tests pass on
+         * the default build as well as the devnet one. Only its public key is
+         * needed: these extensions take their authority as a plain key at
+         * initialisation.
          */
-        const STAND_IN_ISSUER = new PublicKey("B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L");
+        const KNOWN_ISSUER = new PublicKey("WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc");
+        /**
+         * The basket creator's own key, as the authority of a power it should
+         * not be able to bring in. A fresh key rather than the test wallet:
+         * on a devnet build the deploy wallet is itself a stand-in issuer.
+         */
+        const CREATOR_KEY = Keypair.generate().publicKey;
         /** The issuer powers every real xStock carries, held by `who`. */
         const issuerPowers = (who: PublicKey): Ext[] => [
           {
@@ -1980,15 +2122,16 @@ describe("sheaf", () => {
           }
           // Issuer powers held by the basket creator (or anyone but a known
           // stock issuer): a permanent delegate, a pause switch, a hook
-          // authority that could later set a hook program, a freeze authority.
-          for (const power of issuerPowers(payer.publicKey)) {
+          // authority that could later set a hook program, a transfer-fee
+          // authority that could raise the fee, a freeze authority.
+          for (const power of [...issuerPowers(CREATOR_KEY), feeUnder(CREATOR_KEY)]) {
             const mint = await mintWith([power], 8, payer.publicKey);
             await expectError(
               createBasketWith(symbol, share, [components[0], mint]),
               "ComponentIssuerAuthority",
             );
           }
-          const creatorFreezes = await mintWith([EXT.openByDefault], 8, payer.publicKey, payer.publicKey);
+          const creatorFreezes = await mintWith([EXT.openByDefault], 8, payer.publicKey, CREATOR_KEY);
           await expectError(
             createBasketWith(symbol, share, [components[0], creatorFreezes]),
             "ComponentIssuerAuthority",
@@ -2002,10 +2145,10 @@ describe("sheaf", () => {
           // TransferFee, an "initialised" default state) is fine, and so are
           // the issuer powers when a known issuer holds every one of them.
           const issued = await mintWith(
-            [...issuerPowers(STAND_IN_ISSUER), EXT.openByDefault],
+            [...issuerPowers(KNOWN_ISSUER), EXT.openByDefault],
             8,
             payer.publicKey,
-            STAND_IN_ISSUER,
+            KNOWN_ISSUER,
           );
           await createBasketWith(symbol, share, [components[0], components[2], issued]);
         });
@@ -2050,7 +2193,7 @@ describe("sheaf", () => {
           // A fee authority could raise the fee to 100% after the order is
           // placed and take the filler's payout; a hook authority could set a
           // hook program and brick the order.
-          for (const bad of [feeUnder(payer.publicKey), issuerPowers(payer.publicKey)[2]]) {
+          for (const bad of [feeUnder(CREATOR_KEY), issuerPowers(CREATOR_KEY)[2]]) {
             const { mint, ata } = await hostileCash([bad], hodler.publicKey);
             await expectError(order(mint, ata), "CashMintAuthority");
             await expectError(
@@ -2059,7 +2202,7 @@ describe("sheaf", () => {
             );
           }
           // Nobody, or a known issuer, holding those powers is fine.
-          for (const ok of [feeUnder(null), feeUnder(STAND_IN_ISSUER), issuerPowers(STAND_IN_ISSUER)[2]]) {
+          for (const ok of [feeUnder(null), feeUnder(KNOWN_ISSUER), issuerPowers(KNOWN_ISSUER)[2]]) {
             const { mint, ata } = await hostileCash([ok], hodler.publicKey);
             const placed = await order(mint, ata);
             await cancel(placed.order, {
@@ -2179,6 +2322,30 @@ describe("sheaf", () => {
           const refund = { by: hodler, owner: hodler.publicKey, refundTo: hodlerCash };
           await cancel(order, { ...refund, rentPayer: cranker.publicKey });
           await cancel(mine.order, refund);
+          await closePlan(p, hodler, () => hodlerCash);
+        });
+
+        it("does not let an order placed before a re-centre undo it when it fills", async () => {
+          const id = 64;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, {}, hodler, () => hodlerCash);
+          const { order } = await runPlan(p, 6401, () => hodlerCash);
+          const placedAt = (await program.account.order.fetch(order)).createdAt.toNumber();
+          await waitUntil(placedAt + 1);
+          await program.methods
+            .updatePlan(bn(5_000_000n), 1_000, bn(60), bn(4_500_000n), bn(6_000_000n))
+            .accountsPartial({ owner: hodler.publicKey, plan: p })
+            .signers([hodler])
+            .rpc();
+          const updated = await program.account.plan.fetch(p);
+          assert.isAbove(updated.createdAt.toNumber(), placedAt, "the update starts a new terms epoch");
+
+          const sig = await fill(order, { owner: hodler.publicKey, rentPayer: cranker.publicKey, plan: p });
+          const ev = await eventOf(sig, "OrderFilled");
+          assert.isNull(ev.planRefSharesPerCashE9, "the pre-update order did not move the reference");
+          const after = await program.account.plan.fetch(p);
+          assert.equal(after.refSharesPerCashE9.toString(), "5000000", "the owner's re-centre stands");
+          assert.equal(after.fills, 0);
           await closePlan(p, hodler, () => hodlerCash);
         });
 

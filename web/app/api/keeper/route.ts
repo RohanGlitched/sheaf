@@ -1,4 +1,5 @@
 import { runKeeper } from "@/lib/keeper-server";
+import { beat } from "@/lib/server-heartbeat";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,6 +22,7 @@ async function handle() {
   running = runKeeper();
   try {
     const report = await running;
+    beat("keeper", report);
     return Response.json(report, { headers: { "cache-control": "no-store" } });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });

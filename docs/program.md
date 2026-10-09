@@ -10,9 +10,12 @@ plans on top of them.
 | Deployed | first deploy: devnet slot 508915971, tx `Af2eUxjUzrcYVRxuZMt3DdfKdv3w3PhZEpqxr4oD6bX6LvVac6YLhAc1wHxjwgHSK6ECh68uaPDmn93ya6qfdHG` |
 | Hardening upgrade | devnet slot 509084920, tx `2ia49PHW3qtstt4LM1EocsYtKH6zVPd4NCcdZH7tsVtZkfsrF1eHvTzS1J8WW8p9wihgh872ZTxb4hrmczxKHt1b`; 517,800-byte program; upgrade authority `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` (a single key: the program is upgradeable) |
 | Real-issuer upgrade | devnet slot 509118619, tx `4BWEZTsENAXhe9GtFtX5uSN2x6teejqs8ya4z9w8dMj3wu5WLej9sA7BFQTvJDio2dCajeii5r8FN8P6udPpiGX7`; 515,664-byte build in the same 517,800-byte program account (no extend); on-chain IDL upgraded. Accepts real xStocks and PreStocks under their issuers (`KNOWN_ISSUERS`), refuses issuer powers held by anyone else, gates cash transfer-fee and hook authorities, refuses legacy SPL Token share mints. No account layout changed; existing baskets, orders and plans decode and work unchanged |
+| Protocol-fee upgrade | devnet slot 509146643, tx `VLvor95XugCfKvLxwZXHpbZCBWhbMbSc74R36UrKe5vnb3p1MjtG3XaraXPaVCYU9SwBUn3dgrh9TWucXrnPCes`; `devnet` build, 532,128 bytes (program account auto-extended from 517,800), sha256 `f9ccc2eb…5933ba`; on-chain IDL upgraded. Adds the fixed 0.10% protocol creation fee and `claim_protocol_fee`, gates a component's transfer-fee authority, makes the default build mainnet-safe, sends third-party refunds only to the buyer's ATA, makes `update_plan` a new terms epoch, embeds security.txt. `Basket` gained two fields inside its existing headroom; no account changed size, and all 8 live baskets (fee 0), 7 plans and 2 legacy plans decode; simulated mints succeed on old and new baskets |
 | Source | `programs/sheaf/src/lib.rs` |
 | IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`; on chain at `Brx9QqE7Hzh9ReaoNvk9BMSM5Ci1U2C6qx6qukciugBS`, `anchor idl fetch`) |
-| Tests | `tests/sheaf.ts` and `tests/mainnet-clone.ts` (integration, `anchor test`; the second runs against real mainnet xStock and PreStocks mints), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`) |
+| Tests | `tests/sheaf.ts`, `tests/mainnet-clone.ts` (against real mainnet xStock and PreStocks mints) and `tests/tx-size.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`, and again with `--features devnet`) |
+| Builds | The default build knows only the real stock issuers and is the mainnet-safe one. The devnet deployment is `anchor build -- --features devnet`, which adds the write cluster's stand-in issuer keys (§3) |
+| security.txt | embedded with `solana-security-txt`; contact: GitHub issues at https://github.com/RohanGlitched/sheaf/issues (`solana-verify`/explorers read it from the program binary) |
 
 The program never reads a price. Baskets are minted and redeemed in kind, so
 the vault can never back a share by less than its recipe. The desk turns cash
@@ -30,6 +33,14 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
   one whole share. Up to 8 components, all on one token program.
 - **Creator fee**: `creator_fee_bps <= 100` (1%), taken in newly minted shares,
   never out of the vault, so backing per share is unchanged by it.
+- **Protocol fee**: `protocol_fee_bps = PROTOCOL_FEE_BPS = 10` (0.10%) of the
+  shares each deposit creates, written into every basket at `create_basket`
+  and never changeable: there is no instruction that writes it, and no
+  admin key. Like the creator fee it comes out of the shares created, never
+  out of the vault. It is accrued in the basket (`protocol_fee_accrued`) and
+  minted by the permissionless `claim_protocol_fee` to the treasury
+  `9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF`. Redemption is free.
+  Baskets created before the fee existed read 0 and never charge it.
 - **Cash**: any SPL Token or Token-2022 mint that cannot seize, freeze or
   block an escrow (§8). USDC qualifies. A mint with a permanent delegate,
   such as PYUSD, does not.
@@ -55,7 +66,13 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
 
 `creator, share_mint, token_program, name (<=32), symbol (<=10), creator_fee_bps,
 component_count, components[8] {mint, units_per_share, weight_bps, decimals},
-created_at, mint_count, redeem_count, bump`.
+created_at, mint_count, redeem_count, bump, protocol_fee_bps, protocol_fee_accrued`.
+
+The last two fields were appended into the account's 64-byte headroom, so
+the account size (630 bytes) is unchanged. A basket created before them has
+zeros there and reads `protocol_fee_bps = 0`, `protocol_fee_accrued = 0`: it
+never charges a protocol fee (tested on a byte-exact old-layout fixture).
+Old clients that stop decoding at `bump` are unaffected.
 
 ### `Order`
 
@@ -127,8 +144,7 @@ holders' shares:
 
 **Components.** Each must be owned by `component_token_program` and decode as
 a real mint. Always accepted: `MetadataPointer`, `TokenMetadata`, group
-pointer and member, `ScaledUiAmount` (display only), `TransferFeeConfig` (a
-deposit grosses up for it, and a fee can never stop a transfer), and
+pointer and member, `ScaledUiAmount` (display only), and
 `DefaultAccountState` when the default is *initialised*.
 
 **Issuer powers** are accepted only when every authority on them is empty or
@@ -138,6 +154,7 @@ a lever over the vault:
 | Power | Authority checked | What it could do to a basket |
 |---|---|---|
 | Freeze authority | the mint's freeze authority | freeze the vault, blocking every redemption |
+| `TransferFeeConfig` | the fee-config authority | raise the fee until every deposit overflows or pays double (and harvest the difference); a deposit grosses up for the fee in force |
 | `PermanentDelegate` | the delegate | move or burn vault balances |
 | `Pausable` | the pause authority | block every transfer, so every redemption |
 | `ConfidentialTransferMint`, `ConfidentialTransferFeeConfig` | the config authority | reconfigure confidential transfers |
@@ -150,7 +167,14 @@ Every real xStock and PreStock carries all of these, held by its issuer:
 | `5aMNNLQJwAEeoemTEMkv5NVjqKwvvefRYCQ5Z67HFvEq` (Backed, xStocks) | permanent delegate, confidential-transfer, transfer-hook and metadata authority on every xStock |
 | `JDq14BWvqCRFNu1krb12bcRpbGtJZ1FLEakMw6FdxJNs` (Backed, xStocks) | pause and freeze authority on every xStock |
 | `WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc` (PreStocks) | every authority on every PreStocks mint |
-| `B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L` (write cluster only) | the stand-in issuer that mints the devnet mirrors and the test dollar; left out of a build with the `mainnet` feature |
+| `B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L` (`devnet` build only) | the stand-in issuer that mints the devnet mirrors and the test dollar |
+| `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` (`devnet` build only) | the devnet deploy key: transfer-fee authority of the PreStocks mirrors, and already the devnet upgrade authority, so trusting it there adds nothing |
+
+The default build contains only the three mainnet keys; forgetting a flag can
+never yield a mainnet program that trusts a server key. The list is
+compile-time: if an issuer rotates a key, new deposits into the affected
+baskets stop until an upgrade (redemptions never re-check it). On mainnet a
+multisig-governed config account would replace the constant.
 
 The mainnet keys were read with `getAccountInfo` (jsonParsed) from all 20
 xStocks and 8 PreStocks the app lists (`web/lib/universe.ts`,
@@ -175,9 +199,24 @@ extension it doesn't know, so on a mint that lists `Pausable` or
 
 The depositor transfers, per component,
 `ceil(units_per_share × shares / 10^6)`, grossed up for any `TransferFeeConfig`
-so the vault nets exactly that. They receive `shares − fee`, and the creator
-receives `fee = floor(shares × creator_fee_bps / 10^4)`, into an account the
-basket creator owns.
+so the vault nets exactly that. The fees come out of the `shares` created
+(`fee_split`):
+
+```
+total    = floor(shares × (creator_fee_bps + protocol_fee_bps) / 10^4)
+protocol = floor(shares × protocol_fee_bps / 10^4)
+creator  = total − protocol          (>= floor(shares × creator_fee_bps / 10^4), at most 1 more)
+```
+
+The depositor receives `shares − total`, the creator `creator` (into an
+account the basket creator owns), and `protocol` is added to
+`basket.protocol_fee_accrued` (event `ProtocolFeeAccrued`). Flooring the pair
+once keeps the depositor's net monotone in `shares`, so the desk's gross-up
+stays exact. With `protocol_fee_bps = 0` this is the creator fee alone, as
+before. Example: 1 share at 0.25% + 0.10% gives the depositor 996,500 raw
+units, the creator 2,500 and the treasury 1,000; below 1,000 raw units the
+protocol takes nothing. The vault received the recipe for all `shares`, so
+it backs `supply + protocol_fee_accrued`.
 `remaining_accounts` = `[component_mint, depositor_token_account, basket_vault_ata]` per component.
 
 Every issuance (here and in `fill_order`) re-checks the share mint's
@@ -245,10 +284,10 @@ Steps:
    really be there. For orders placed after this release the cash policy
    already makes a short escrow impossible; the check guards anything older.
 2. `received = required_shares(now)` (§4).
-3. `gross = gross_shares_for_net(received, creator_fee_bps)` (§5), `fee = gross − received`.
+3. `gross = gross_shares_for_net(received, creator_fee_bps + protocol_fee_bps)` (§5), split by `fee_split` into the creator's and the protocol's shares, which sum to `gross − received`.
 4. `deposit_components(gross)`: the same function `mint_shares` uses, so the
    rounding, transfer-fee gross-up, component-mint and vault checks are identical.
-5. Mint `received` to the buyer's share ATA and `fee` to the creator.
+5. Mint `received` to the buyer's share ATA and the creator's fee to the creator; accrue the protocol's fee.
 6. Only then is the cash released: the whole escrow balance goes to the filler,
    any withheld Token-2022 fee is harvested to the mint, the escrow is closed,
    and the order is closed. Both rents go to `rent_payer`.
@@ -286,7 +325,10 @@ The filler delivers components for `gross` shares, and the creator fee is exactl
 `caller == buyer` may cancel at any time. Anyone may cancel once `now > end_ts`.
 The windows don't overlap: a fill is valid while `now <= end_ts`, and a
 stranger's cancel only when `now > end_ts`. The refund always goes to an account
-the buyer owns. Emits `OrderCancelled { expired }`.
+the buyer owns, and when anyone but the buyer cancels it must be the buyer's
+**associated** cash account (`RefundNotToBuyerAta`), so a third party can't
+steer it into a side account it opened in the buyer's name that no client
+reads. Emits `OrderCancelled { expired }`.
 
 ### `open_plan(plan_id, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9)`
 
@@ -330,7 +372,27 @@ un-sticks a plan the market has moved away from (no filler will touch an
 auction that is entirely out of the market, so its reference would never
 move on its own), or tightens a plan after a fill they didn't like. The
 schedule, remaining runs and allowance are untouched. Orders already
-placed keep their own terms. Emits `PlanUpdated`.
+placed keep their own terms. It also sets `plan.created_at = now`, a new
+terms epoch: `fill_order` updates a plan's reference only from orders created
+at or after `created_at`, so an order placed before the re-centre still
+fills but can't write the old market's rate over the owner's update (tested).
+The plan's opening time stays in its `PlanOpened` event. Emits `PlanUpdated`.
+
+### `claim_protocol_fee()`
+
+| Account | Constraint |
+|---|---|
+| `basket` | mut |
+| `share_mint` | = `basket.share_mint` |
+| `treasury` | = `TREASURY` (`TreasuryMismatch`) |
+| `treasury_share_account` | the treasury's associated share account (create it first; idempotent) |
+| `share_token_program` | |
+
+Permissionless. Mints `basket.protocol_fee_accrued` shares to the
+treasury's share account, signed by the basket PDA, after the same share-mint
+check every issuance makes, and zeroes the counter (`NothingToClaim` when it
+is already 0). The shares were backed when they were created, so the vault
+still backs every share in circulation. Emits `ProtocolFeeClaimed`.
 
 ### `run_plan(nonce)`
 
@@ -467,9 +529,10 @@ and ends exactly at the floor.
 
 ---
 
-## 5. Creator-fee gross-up
+## 5. Fee gross-up
 
-`gross_shares_for_net(net, bps)` returns the smallest `g` with
+`gross_shares_for_net(net, bps)`, with `bps` = creator plus protocol fee,
+returns the smallest `g` with
 `g − floor(g × bps / 10^4) >= net`. Because the net of `g` grows by 0 or 1 per
 unit of `g`, that `g` nets **exactly** `net`. The program starts at
 `ceil(net × 10^4 / (10^4 − bps))`, which can overshoot by at most 2 because the
@@ -494,6 +557,11 @@ shares. A unit test checks exactness and minimality for every `net` in
 | `PlanUpdated` | plan, owner, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanRun` | plan, order, run (1-based), cash, start_shares, end_shares, start_ts, end_ts, ref_shares_per_cash_e9, runs_left, next_run_ts |
 | `PlanClosed` | plan, owner, runs_done, runs_left, revoked. Emitted by `close_plan` and `close_legacy_plan` |
+| `BasketFeeTerms` | basket, creator_fee_bps, protocol_fee_bps, treasury. Emitted by `create_basket` |
+| `ProtocolFeeAccrued` | basket, shares, accrued (running total). Emitted by `mint_shares` and `fill_order` when the protocol's share is non-zero |
+| `ProtocolFeeClaimed` | basket, treasury_share_account, shares. Emitted by `claim_protocol_fee` |
+
+`SharesMinted` is unchanged (`shares_issued` is the depositor's net, `creator_fee_shares` the creator's), so historical events still decode. Supply is `Σ(shares_issued + creator_fee_shares) − Σ shares_burned + Σ ProtocolFeeClaimed.shares`.
 
 Events are emitted with `emit!` (program logs). `emit_cpi!` would make them
 robust to log truncation and visible to CPI callers, but it adds two accounts
@@ -559,6 +627,9 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6048 | ComponentIssuerAuthority | a component's freeze authority, permanent delegate, pause, confidential-transfer or program-less hook authority is held by someone outside `KNOWN_ISSUERS` |
 | 6049 | CashMintAuthority | a cash mint's transfer-fee config authority, or the authority of its program-less transfer hook, is held by someone outside `KNOWN_ISSUERS` |
 | 6050 | ShareMintNotToken2022 | share mint is a legacy SPL Token mint |
+| 6051 | NothingToClaim | `claim_protocol_fee` on a basket with nothing accrued |
+| 6052 | TreasuryMismatch | `claim_protocol_fee` with a treasury other than `TREASURY` |
+| 6053 | RefundNotToBuyerAta | a third party's refund aimed at a buyer-owned account that isn't the buyer's associated cash account |
 
 Anchor's own constraint errors also apply: `ConstraintTokenOwner` (a refund to a
 non-buyer account), `ConstraintAssociated` (shares to a non-canonical account),
@@ -607,10 +678,12 @@ order is placed:
 
 Metadata, confidential-transfer configs, interest or scaled display, and a
 close authority (a mint can't close while escrow holds supply) can't touch
-an escrow and are allowed. A plain freeze authority (USDC
-has one) is the issuer's power over every holder and is accepted as a stated
-trust assumption. `fill_order` independently requires
-`escrow.amount >= order.cash_amount`.
+an escrow and are allowed. The base freeze authority is **not** checked:
+it is the cash issuer's (Circle holds one on USDC) and can freeze any
+holder's account, an escrow or a filler's cash account included. That is the
+trust every holder of that cash already has; fillers should fill only
+against cash mints they allowlist (`scripts/filler.mjs --cash-mint`).
+`fill_order` independently requires `escrow.amount >= order.cash_amount`.
 
 **Order escrow** (authority: order PDA). It moves only by the order PDA's
 signature, in exactly two ways:
@@ -701,9 +774,21 @@ valid fill fail.
   User orders and plan orders have separate PDA namespaces, so a cranker can't
   squat a nonce the owner is about to use. Within a namespace, a collision
   just means choosing another nonce.
-- **Transaction size.** `fill_order` takes 15 named accounts plus 3 per
-  component. Baskets of more than about 5 components need an address lookup
-  table to fit in one transaction.
+- **Transaction size.** Measured by `tests/tx-size.ts` (v0, no lookup table,
+  one signature, a compute-budget instruction, fresh keys per account; the
+  packet limit is 1,232 bytes):
+
+  | bytes | 6 components | 7 | 8 |
+  |---|---|---|---|
+  | `mint_shares` | 988 | 1,087 | 1,186 |
+  | `redeem_shares` | 955 | 1,054 | 1,153 |
+  | `fill_order` (user order) | 1,212 | 1,311 | 1,410 |
+  | `fill_order` (plan order) | 1,244 | 1,343 | 1,442 |
+  | plan fill without the compute-budget instruction | 1,204 | 1,303 | 1,402 |
+
+  Minting and redeeming fit at 8. Desk fills fit up to 6 components (a plan
+  order's fill at 6 only without the compute-budget instruction); fills of
+  7 and 8 need an address lookup table holding the basket's mints and vaults.
 - **Clock.** Auctions use `Clock::unix_timestamp`, which is the cluster's
   stake-weighted time and can drift by a few seconds. Windows should be minutes.
 - **Compute.** A 3-component fill with a creator fee uses roughly 55k to 70k CU
@@ -714,14 +799,29 @@ valid fill fail.
 
 ## 9. Tests
 
-`anchor test` runs 59 integration tests: 7 against real mainnet mints
-(`tests/mainnet-clone.ts`), 11 basket tests, 28 desk and plan tests, and 13
-hardening tests. `cargo test -p sheaf --lib` runs 10 unit tests: the auction
-line, the gross-up, the plan bounds and floor, the three extension policies
-(built from synthetic TLV images: every issuer power under nobody, under each
-known issuer and under a stranger, a freeze authority, malformed lengths and
-unknown types), the transfer-fee schedule read by number, the issuer keys
-themselves, and the size of the plan layout.
+`anchor test` runs 67 integration tests: 8 against real mainnet mints
+(`tests/mainnet-clone.ts`), 11 basket tests, 2 protocol-fee tests, 28 desk and
+plan tests, 14 hardening tests and 4 transaction-size measurements
+(`tests/tx-size.ts`). `cargo test -p sheaf --lib` runs 12 unit tests, on both
+the default and the `devnet` build: the auction line, the gross-up, the fee
+split (every `g < 50,000` at five fee pairs, and the two-fee gross-up for
+every `net` in `1..20,000`), the plan bounds and floor, the three extension
+policies (built from synthetic TLV images: every issuer power under nobody,
+under each known issuer and under a stranger, a transfer-fee authority, a
+freeze authority, malformed lengths and unknown types), the transfer-fee
+schedule read by number, the issuer keys and treasury themselves (the
+default build trusts no stand-in), the Basket fee fields fitting the
+headroom and reading 0 on an old account, and the size of the plan layout.
+
+**Protocol fee.** Every desk fill and mint checks the buyer's or depositor's
+shares, the creator's fee and the protocol's accrual exactly (`feeSplit`
+mirrors `fee_split`); every backing check, including the 40-round property
+test, requires the vault to cover `supply + protocol_fee_accrued`. A
+dedicated test pins the rounding at 999, 1,000 and 1,234,567 raw units, and
+another claims the accrual: only the treasury's associated account can
+receive it, supply grows by exactly the accrual, what the vault must back is
+unchanged, and a second claim fails with `NothingToClaim`. An old-layout
+basket fixture mints with no protocol fee and has nothing to claim.
 
 **Against real mints.** `tests/fixtures/build.mjs` reads TSLAx
 (`XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB`), NVDAx
@@ -797,6 +897,11 @@ The rest of the integration suite covers:
   - An order from a closed plan doesn't touch the plan reopened under the
     same id.
   - `close_legacy_plan` refuses a current-layout plan.
+  - A component whose transfer-fee authority is the creator is refused.
+  - A stranger's refund of an expired order into a side account it opened
+    in the buyer's name is refused (`RefundNotToBuyerAta`).
+  - An order placed before `update_plan` fills afterwards without moving the
+    re-centred reference.
 
 `EscrowShort` can't be reached through the program any more: the cash
 policy refuses every mint that could drain an escrow. It protects orders

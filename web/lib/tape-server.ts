@@ -8,9 +8,11 @@ import {
   solamiKey,
   upstreamStats,
   type SlotRace,
-  type UpstreamStats,
   type Via,
 } from "./solami";
+
+const INSTANCE = Math.random().toString(36).slice(2, 8);
+const SINCE = Date.now();
 
 /**
  * The tape: trades in tokenized stocks on Solana mainnet, as they land.
@@ -24,11 +26,11 @@ import {
  * can poll every few seconds while the server stays inside Solami's free limit
  * of five requests a second.
  *
- * Calls go out one at a time, about 240 ms apart. A normal poll is getSlot,
- * getSignaturesForAddress x2, getTransaction x<=6 (up to three that just
- * landed, up to three from the backfill while the tape is short) and
+ * Calls go out one at a time, 500 ms apart. A normal poll is getSlot,
+ * getSignaturesForAddress x2, getTransaction x<=5 (up to three that just
+ * landed, up to two from the backfill while the tape is short) and
  * getBlockTime x<=1. An instance's first poll is the backfill: the last 20
- * signatures on every watched mint (ten calls), then the newest eight decoded;
+ * signatures on every watched mint (ten calls), then the newest four decoded;
  * the rest wait in a queue that later polls work through. Once a minute a poll
  * also runs the Solami-vs-public comparison (see raceSlot in lib/solami.ts).
  */
@@ -67,6 +69,15 @@ export type Print = {
    * or on the first look at a mint: real, but history.
    */
   live: boolean;
+  /**
+   * Jupiter's USD price for this stock token (per UI token) when the server
+   * read the trade, and when that price was fetched (unix seconds). For a live
+   * row that is within a minute or two of the trade; for a backfilled row it
+   * can be later, so the page only compares a fill with it when the two are
+   * close in time.
+   */
+  refPrice: number | null;
+  refAt: number | null;
 };
 
 export type Comparison = {
@@ -74,8 +85,12 @@ export type Comparison = {
   slot: SlotRace | null;
   /** Running totals of the paired getTransaction check on a signature that just landed. */
   freshTx: { tried: number; solami: number; public: number };
-  /** Every call this instance has sent to each upstream, and how it ended. */
-  upstreams: Record<Via, UpstreamStats>;
+  /**
+   * Every tape and market call this instance sent to each upstream, and how it
+   * ended, plus how many reads Solami answered. The comparison's own calls are
+   * not in here.
+   */
+  upstreams: ReturnType<typeof upstreamStats>;
 };
 
 export type Tape = {
@@ -86,6 +101,8 @@ export type Tape = {
   fallback: string | null;
   /** True when this is the last good tape, returned because a fresh poll failed. */
   stale: boolean;
+  /** True on a cold instance's first answer, while its backfill is still running: no rows yet, nothing is wrong. */
+  warming?: boolean;
   prints: Print[];
   polledAt: number;
   /** Mints the tape watches, so the page can say what it is reading. */
@@ -93,7 +110,17 @@ export type Tape = {
   /** Backfilled signatures still waiting to be decoded. */
   backlog: number;
   proof: {
-    /** Round trip of this poll's getSlot, in ms, against `via`. */
+    /**
+     * Which server instance answered (random per instance) and when it started
+     * (ms). Counters are per instance, so the page keeps one set per instance
+     * instead of letting a younger instance's totals replace an older one's.
+     */
+    instance: string;
+    since: number;
+    /**
+     * Round trip of this poll's getSlot, in ms, against `via`. Null on an
+     * instance's first call, which includes opening the TLS connection.
+     */
     rpcMs: number | null;
     /** Solami against the public RPC, measured the same way on both. */
     compare: Comparison;
@@ -166,6 +193,8 @@ const freshTx = { tried: 0, solami: 0, public: 0 };
 const RACE_EVERY_MS = 60_000;
 /** Prints kept in the answer; the page shows up to 40 after merging polls. */
 const DEPTH = 60;
+/** Upstreams this instance has already called once (so the connection is open). */
+const warmed = new Set<Via>();
 const BACKLOG_MAX = 80;
 
 const round = (x: number, digits: number) => Number(x.toFixed(digits));
@@ -193,7 +222,9 @@ async function prices(): Promise<Map<string, number>> {
   return refPrices?.usd ?? new Map();
 }
 
-type Decoded = Omit<Print, "time" | "timeSource" | "seenAt" | "live"> & { blockTime: number | null };
+type Decoded = Omit<Print, "time" | "timeSource" | "seenAt" | "live" | "refPrice" | "refAt"> & {
+  blockTime: number | null;
+};
 
 function decode(tx: RawTx, signature: string, ref: Map<string, number>): Decoded | null {
   const sol = ref.get(WSOL) ?? null;
@@ -325,7 +356,9 @@ async function poll(): Promise<Tape> {
   try {
     const out = await call<number>("getSlot", [{ commitment: "confirmed" }]);
     slot = out.result;
-    rpcMs = out.ms;
+    // The first call on an instance pays for the TLS handshake; it is not the RPC's speed.
+    rpcMs = warmed.has(out.via) ? out.ms : null;
+    warmed.add(out.via);
     slotAt = Date.now();
   } catch {
     // A missed getSlot is not worth an empty tape: keep the last slot and go on.
@@ -369,7 +402,7 @@ async function poll(): Promise<Tape> {
   const unseen = (s: Signature) => !s.err && !seen.has(s.signature);
   const candidates = all.filter(unseen).sort((a, b) => b.slot - a.slot);
   const now0 = candidates.filter((s) => live.has(s.signature) || cold);
-  const fresh = now0.slice(0, cold ? 8 : 3);
+  const fresh = now0.slice(0, cold ? 4 : 3);
   // What this poll cannot decode waits in the backlog, newest first.
   const taken = new Set(fresh.map((s) => s.signature));
   const queued = new Set(backlog.map((s) => s.signature));
@@ -379,7 +412,7 @@ async function poll(): Promise<Tape> {
     .slice(0, BACKLOG_MAX);
   // While the tape is short, each poll also works a few signatures off the backlog.
   const shown = [...seen.values()].filter(Boolean).length;
-  const extra = cold || shown >= 30 ? [] : backlog.splice(0, shown < 12 ? 3 : 2);
+  const extra = cold || shown >= 30 ? [] : backlog.splice(0, shown < 12 ? 2 : 1);
   const work = [...fresh, ...extra];
 
   const ref = work.length ? await prices() : (refPrices?.usd ?? new Map<string, number>());
@@ -430,6 +463,8 @@ async function poll(): Promise<Tape> {
       time: exact ?? estimate(rest.slot),
       timeSource: exact ? "chain" : "slot",
       seenAt: now,
+      refPrice: ref.get(mintOf(rest.symbol)) ?? null,
+      refAt: ref.has(mintOf(rest.symbol)) && refPrices ? Math.round(refPrices.at / 1000) : null,
     });
   }
 
@@ -441,15 +476,15 @@ async function poll(): Promise<Tape> {
   }
 
   // Once a minute (never on the backfill poll, which a visitor is waiting on),
-  // the comparison the page shows: the same getSlot sent to both upstreams at
-  // the same instant, five times over warm sockets, and one getTransaction on
-  // both for the newest signature this poll read, if it landed in the last
-  // ~30 s. Solami's half of it is seven paced calls.
+  // the comparison: the same getSlot sent to both upstreams at the same
+  // instant, three times after a warm-up pair, and one getTransaction on both
+  // for the newest signature this poll read, if it landed in the last ~30 s.
+  // Solami's half of it is five paced calls a minute.
   if (!cold && solamiKey() && (!slotRace || now - slotRace.at > RACE_EVERY_MS)) {
-    const race = await raceSlot(5);
+    const race = await raceSlot(3);
     if (race) {
       slotRace = race;
-      calls += 12;
+      calls += (race.samples + 1) * 2;
     }
     const newest = all.filter((s) => !s.err).sort((a, b) => b.slot - a.slot)[0];
     if (newest && slot - newest.slot < 75) {
@@ -477,6 +512,8 @@ async function poll(): Promise<Tape> {
     watching: STOCKS.map((s) => s.base),
     backlog: backlog.length,
     proof: {
+      instance: INSTANCE,
+      since: SINCE,
       rpcMs,
       compare: { slot: slotRace, freshTx: { ...freshTx }, upstreams: upstreamStats() },
       calls,
@@ -509,15 +546,42 @@ function refresh(): Promise<Tape> {
  * `background` runs the behind-the-response poll. The route passes Next's
  * `after()`, which keeps a serverless function alive until the poll finishes
  * instead of freezing it the moment the response is sent.
+ *
+ * A cold instance's backfill is about fifteen paced calls (eight seconds or
+ * so). The caller waits up to four; past that it gets an empty tape marked
+ * `warming` (the page keeps its earlier-trades seed on screen) and the
+ * backfill finishes in the background for the next request.
  */
 export async function readTape(background?: (task: () => Promise<unknown>) => void): Promise<Tape> {
   const age = cache ? Date.now() - cache.polledAt : Infinity;
   if (cache && age < 3_000) return cache;
+  const later = (task: () => Promise<unknown>) => (background ? background(task) : void task());
   if (cache && age < 30_000) {
-    const task = () => refresh().catch(() => {});
-    if (background) background(task);
-    else void task();
+    later(() => refresh().catch(() => {}));
     return cache;
   }
-  return refresh();
+  if (cache) return refresh();
+  const poll = refresh();
+  const first = await Promise.race([poll, new Promise<null>((r) => setTimeout(() => r(null), 4_000))]);
+  if (first) return first;
+  later(() => poll.catch(() => {}));
+  return {
+    slot: 0,
+    via: solamiKey() ? "solami" : "public",
+    fallback: null,
+    stale: false,
+    warming: true,
+    prints: [],
+    polledAt: Date.now(),
+    watching: STOCKS.map((s) => s.base),
+    backlog: 0,
+    proof: {
+      instance: INSTANCE,
+      since: SINCE,
+      rpcMs: null,
+      compare: { slot: slotRace, freshTx: { ...freshTx }, upstreams: upstreamStats() },
+      calls: 0,
+      pollMs: 0,
+    },
+  };
 }

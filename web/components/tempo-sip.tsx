@@ -5,7 +5,7 @@ import { createClient, http, publicActions, type Address, type Hex } from "viem"
 import { tempoModerato } from "viem/chains";
 import { Account, Actions, P256, WebAuthnP256 } from "viem/tempo";
 import type { Deployment } from "@/lib/chains";
-import { BASKET_ABI, ERC20_ABI, TEMPO_PATH_USD, TEMPO_SIP, fromRaw } from "@/lib/evm";
+import { BASKET_ABI, ERC20_ABI, TEMPO_PATH_USD, TEMPO_SIP, explainEvmError, fromRaw } from "@/lib/evm";
 import { quantity, shortAddress } from "@/lib/format";
 
 /**
@@ -19,7 +19,9 @@ import { quantity, shortAddress } from "@/lib/format";
  *
  * Two halves: the run recorded by evm/scripts/tempo-sip.mjs, with its
  * transactions and a live read of that key's remaining budget; and the same thing
- * run in this browser, with a passkey as the investor and the house as keeper.
+ * run in this browser, with the visitor as the investor (a passkey, or a key made
+ * in the browser) and the house key as keeper. The house plays opposite roles in
+ * the two halves, and the copy says so.
  */
 
 const chain = tempoModerato.extend({ feeToken: TEMPO_PATH_USD });
@@ -86,12 +88,12 @@ function Recorded({ d }: { d: Deployment }) {
   if (!sip) return null;
   const rows: { label: string; detail: string; hash?: string; refused?: string }[] = [
     {
-      label: "Investor signs one key authorization",
+      label: "The investor (here, the house) signs one key authorization",
       detail: `Keeper ${shortAddress(sip.keeperKey, 6, 4)} may spend ${sip.limitPerPeriod} per 30 days, scoped to approve(desk) and placeOrder.`,
       hash: sip.authorizeTx,
     },
     {
-      label: "Keeper places the month's instalment",
+      label: "Keeper places the month's installment",
       detail: `approve + placeOrder in one atomic Tempo transaction: 1 MAG8 at 10.10 AlphaUSD, order #${sip.orderId}, then filled in kind.`,
       hash: sip.instalmentTx,
     },
@@ -152,7 +154,8 @@ function Recorded({ d }: { d: Deployment }) {
       </div>
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
         Read from Tempo&apos;s AccountKeychain precompile (<span className="tnum">getRemainingLimitWithPeriod</span>) for investor{" "}
-        {shortAddress(d.deployer ?? "", 6, 4)} and that keeper key.
+        {shortAddress(d.deployer ?? "", 6, 4)}, the house, which invested in this recording, and keeper key{" "}
+        {shortAddress(sip.keeperKey, 6, 4)}.
       </p>
     </div>
   );
@@ -177,6 +180,28 @@ function accountFrom(root: StoredRoot) {
 }
 
 type LogLine = { label: string; ok: boolean; hash?: string; note?: string };
+
+/** One plain sentence for whatever a passkey prompt, the chain or our routes threw back. */
+function explainSip(err: unknown): string {
+  const e = err as { name?: string; message?: string };
+  if (e?.name === "NotAllowedError" || /NotAllowedError|timed out or was not allowed/i.test(e?.message ?? "")) {
+    return "The passkey prompt was closed or timed out. Try again, or use a throwaway key in this browser.";
+  }
+  const text = explainEvmError(err);
+  // Never show a raw RPC body.
+  return text.replace(/\s*[:\-]?\s*[{[].*$/s, "").slice(0, 200) || "That step failed. Try again in a moment.";
+}
+
+/** What the visitor is about to do, shown before they start so the panel says what it is for. */
+const STEPS = [
+  { n: 1, label: "Make your Tempo account", note: "A passkey, or a throwaway key kept in this browser" },
+  { n: 2, label: "Fund it from Tempo's faucet", note: "pathUSD for fees, AlphaUSD to invest" },
+  { n: 3, label: "Sign the plan, once", note: `${fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD per 30 days, two calls only` },
+  { n: 4, label: "The keeper places this month's installment", note: "approve and placeOrder in one transaction, filled in kind" },
+  { n: 5, label: "The keeper tries to overspend", note: "The chain refuses: SpendingLimitExceeded" },
+  { n: 6, label: "The keeper calls outside the scope", note: "The chain refuses: CallNotAllowed" },
+  { n: 7, label: "Revoke the plan", note: "One signature, and the keeper can spend nothing" },
+];
 
 function LiveSip({ d }: { d: Deployment }) {
   const [root, setRoot] = useState<StoredRoot | null>(null);
@@ -220,8 +245,7 @@ function LiveSip({ d }: { d: Deployment }) {
       await fn();
       await refresh().catch(() => undefined);
     } catch (err) {
-      const e = err as { shortMessage?: string; message?: string; details?: string };
-      setError((e.details || e.shortMessage || e.message || "failed").split("\n")[0].slice(0, 200));
+      setError(explainSip(err));
     } finally {
       setBusy(null);
     }
@@ -254,7 +278,7 @@ function LiveSip({ d }: { d: Deployment }) {
         body: JSON.stringify({ network: d.network, address: account!.address }),
       });
       const json = (await res.json()) as { txs?: { hash: string }[]; error?: string };
-      if (!res.ok) throw new Error(json.error ?? "faucet failed");
+      if (!res.ok) throw new Error(json.error ?? "Tempo's faucet did not answer. Try again in a moment.");
       await new Promise((r) => setTimeout(r, 1500));
       push({ label: "Funded from Tempo's faucet (pathUSD for fees, AlphaUSD to invest)", ok: true, hash: json.txs?.[1]?.hash ?? json.txs?.[0]?.hash });
     });
@@ -277,6 +301,7 @@ function LiveSip({ d }: { d: Deployment }) {
       push({ label: `Plan signed once: ${fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD per 30 days, two calls only`, ok: true, hash: res.receipt.transactionHash });
     });
 
+  // "instalment" is the keeper route's action name; the visitor reads "installment".
   const keeper = (action: "instalment" | "overspend" | "outOfScope") =>
     step(action, async () => {
       const res = await fetch("/api/evm-keeper", {
@@ -292,12 +317,12 @@ function LiveSip({ d }: { d: Deployment }) {
         fill?: { status: string; hash?: string; reason?: string };
         error?: string;
       };
-      if (!res.ok) throw new Error(json.error ?? "keeper failed");
+      if (!res.ok) throw new Error(json.error ?? "The keeper did not answer. Try again in a moment.");
       const label =
         action === "instalment"
           ? json.ok
-            ? `Keeper placed this month's ${fromRaw(TEMPO_SIP.instalment, 6)} AlphaUSD instalment, order #${json.orderId}`
-            : "Keeper tried this month's instalment"
+            ? `Keeper placed this month's ${fromRaw(TEMPO_SIP.instalment, 6)} AlphaUSD installment, order #${json.orderId}`
+            : "Keeper tried this month's installment"
           : action === "overspend"
             ? `Keeper asked for ${fromRaw(TEMPO_SIP.overspend, 6)} AlphaUSD more`
             : "Keeper tried AlphaUSD.transfer, outside the scope";
@@ -335,7 +360,7 @@ function LiveSip({ d }: { d: Deployment }) {
   const revoked = !!budget?.revoked;
 
   return (
-    <div className="rounded-[var(--radius-panel)] border border-ink bg-surface p-6">
+    <div className="rounded-[var(--radius-panel)] border border-line-strong bg-surface p-6">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-base text-ink">Run it in this browser</h3>
         {root && (
@@ -345,11 +370,31 @@ function LiveSip({ d }: { d: Deployment }) {
         )}
       </div>
       <p className="mt-1 text-xs leading-relaxed text-ink-3">
-        You are the investor, with a passkey as your Tempo account. The house key {shortAddress(house, 6, 4)} is the keeper. Free testnet dollars
-        only.
+        You are the investor,{" "}
+        {root?.kind === "passkey"
+          ? "with a passkey as your Tempo account"
+          : root?.kind === "local"
+            ? "with a key made in this browser as your Tempo account"
+            : "with a passkey or a key made in this browser as your Tempo account"}
+        . The house key {shortAddress(house, 6, 4)} is the keeper: in the recorded run the house was the investor; in yours it is the
+        keeper. Free testnet dollars only.
       </p>
 
       {!root ? (
+        <>
+          <ol className="mt-5 space-y-3 border-b border-line pb-5" aria-label="What you will do">
+            {STEPS.map((s) => (
+              <li key={s.n} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-3 text-sm">
+                <span aria-hidden className="mt-0.5 grid size-5 place-items-center rounded-full border border-line-strong text-[10px] text-ink-3">
+                  {s.n}
+                </span>
+                <span className="min-w-0">
+                  <span className={s.n === 1 ? "text-ink" : "text-ink-3"}>{s.label}</span>
+                  <span className="block text-xs text-ink-3">{s.note}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
         <div className="mt-5 space-y-2">
           <button
             type="button"
@@ -368,6 +413,7 @@ function LiveSip({ d }: { d: Deployment }) {
             No passkey here? Use a throwaway key in this browser
           </button>
         </div>
+        </>
       ) : (
         <>
           <dl className="tnum mt-5 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -379,7 +425,7 @@ function LiveSip({ d }: { d: Deployment }) {
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <SipButton n={2} label="Fund from Tempo's faucet" done={funded} busy={busy === "fund"} disabled={!!busy} onClick={fund} />
             <SipButton n={3} label="Sign the plan, once" done={authorized || revoked} busy={busy === "authorize"} disabled={!!busy || !funded || authorized || revoked} onClick={authorize} />
-            <SipButton n={4} label="Keeper: this month's instalment" busy={busy === "instalment"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("instalment")} />
+            <SipButton n={4} label="Keeper: this month's installment" busy={busy === "instalment"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("instalment")} />
             <SipButton n={5} label="Keeper: try to overspend" busy={busy === "overspend"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("overspend")} />
             <SipButton n={6} label="Keeper: call outside the scope" busy={busy === "outOfScope"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("outOfScope")} />
             <SipButton n={7} label="Revoke the plan" done={revoked} busy={busy === "revoke"} disabled={!!busy || !authorized} onClick={revoke} quiet />

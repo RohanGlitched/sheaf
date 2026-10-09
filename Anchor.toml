@@ -14,6 +14,11 @@ sheaf = "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz"
 [registry]
 url = "https://api.apr.dev"
 
+# The default build knows only the real stock issuers (mainnet-safe). The devnet
+# deployment adds the write cluster's stand-in issuer keys:
+#   anchor build -- --features devnet
+# `anchor test` runs the default build; the suite passes on both.
+
 [provider]
 cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
@@ -55,3 +60,12 @@ filename = "tests/fixtures/legacy-plan.json"
 [[test.validator.account]]
 address = "8bt3HAKTjXFFbxbqHmQdFBKZePT9StUafAGycFdygjgQ"
 filename = "tests/fixtures/short-order.json"
+
+# A Basket from before the protocol fee (zero tail) and its share mint.
+[[test.validator.account]]
+address = "Fr4kNYmthH94hQ1k9nqwKVHp7mQNrDvaYuU5CubCfyKJ"
+filename = "tests/fixtures/old-basket.json"
+
+[[test.validator.account]]
+address = "DWNhVoLpJJ3BoWRuEfbN4n6sVDpsvSeW4PWkifiGJ593"
+filename = "tests/fixtures/old-share-mint.json"

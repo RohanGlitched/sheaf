@@ -11,9 +11,10 @@ export function SiteFooter() {
           <div className="max-w-sm">
             <Mark className="size-5 text-ink-2" />
             <p className="mt-4 text-sm leading-relaxed text-ink-2">
-              Sheaf composes tokenized equities into one token, backed share for
-              share in a vault anyone can read. Prices and dividend multipliers come
-              from Solana mainnet. Creating and redeeming shares settle on {WRITE_CLUSTER}.
+              Sheaf binds tokenized stocks into one token, backed share for share
+              in a vault anyone can read. Solana baskets settle on {WRITE_CLUSTER},
+              priced from Solana mainnet. EVM baskets settle on each chain&rsquo;s
+              testnet, priced from Robinhood&rsquo;s stock token quotes.
             </p>
           </div>
 
@@ -22,10 +23,13 @@ export function SiteFooter() {
               Create a basket
             </Link>
             <Link href="/explore" className="text-ink-2 hover:text-ink">
-              Explore baskets
+              Explore
             </Link>
             <Link href="/plans" className="text-ink-2 hover:text-ink">
-              Monthly plans
+              Plans
+            </Link>
+            <Link href="/predict" className="text-ink-2 hover:text-ink">
+              Predict
             </Link>
             <Link href="/chains" className="text-ink-2 hover:text-ink">
               Chains
@@ -38,6 +42,9 @@ export function SiteFooter() {
             </Link>
             <Link href="/method" className="text-ink-2 hover:text-ink">
               How it works
+            </Link>
+            <Link href="/business" className="text-ink-2 hover:text-ink">
+              Business
             </Link>
             <a
               href="https://github.com/RohanGlitched/sheaf"
@@ -60,8 +67,9 @@ export function SiteFooter() {
 
         <p className="mt-10 border-t border-line pt-6 text-xs leading-relaxed text-ink-3">
           Not investment advice, and not an offer to sell anything. xStocks are
-          issued by Backed Finance and PreStocks by PreStocks; Sheaf neither
-          issues nor custodies them beyond the program vault a basket writes to.
+          issued by Backed Finance, PreStocks by PreStocks and Robinhood&rsquo;s
+          stock tokens by Robinhood; Sheaf neither issues nor custodies them
+          beyond the vault a basket writes to. Nothing here runs on mainnet yet.
         </p>
       </div>
     </footer>

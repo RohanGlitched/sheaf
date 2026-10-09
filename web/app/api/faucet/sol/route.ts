@@ -15,7 +15,7 @@ import { clientIp, faucetKeypair } from "@/lib/faucet-server";
  * 0.04 SOL, most of it rent. Only for wallets that are nearly empty, so it
  * covers a first visit rather than funding anyone's testing.
  */
-const GRANT = 0.08 * LAMPORTS_PER_SOL;
+const GRANT = 0.05 * LAMPORTS_PER_SOL;
 const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
 /**
  * Keep enough back that the token faucet can still open token accounts (it stops
@@ -44,7 +44,11 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "That does not look like a Solana address." }, { status: 400 });
   }
-  if (granted.has(owner.toBase58())) {
+  if (!PublicKey.isOnCurve(owner.toBytes())) {
+    return Response.json({ error: "That address can't receive test SOL: it is not a wallet." }, { status: 400 });
+  }
+  const wallet = owner.toBase58();
+  if (granted.has(wallet)) {
     return Response.json({ error: "This wallet has already had its test SOL." }, { status: 429 });
   }
 
@@ -57,16 +61,39 @@ export async function POST(request: Request) {
       { status: 429 },
     );
   }
+  // Claim the slot before the first await, so parallel requests cannot all pass
+  // the checks above; give it back if nothing is sent.
+  granted.add(wallet);
+  grantsByIp.set(ip, [...recent, now]);
+  const release = () => {
+    granted.delete(wallet);
+    const list = grantsByIp.get(ip) ?? [];
+    const at = list.lastIndexOf(now);
+    if (at >= 0) list.splice(at, 1);
+  };
 
   const connection = new Connection(WRITE_RPC, "confirmed");
-  const [balance, reserve] = await Promise.all([
-    connection.getBalance(owner),
-    connection.getBalance(keypair.publicKey),
-  ]);
+  let balance: number;
+  let reserve: number;
+  let account: Awaited<ReturnType<Connection["getAccountInfo"]>>;
+  try {
+    [account, reserve] = await Promise.all([connection.getAccountInfo(owner), connection.getBalance(keypair.publicKey)]);
+    balance = account?.lamports ?? 0;
+  } catch {
+    release();
+    return Response.json({ error: "The faucet could not reach the cluster. Try again in a moment." }, { status: 502 });
+  }
+  // A wallet is a system account (or not yet an account at all); a program or a data account is not.
+  if (account && (account.executable || !account.owner.equals(SystemProgram.programId))) {
+    release();
+    return Response.json({ error: "That address can't receive test SOL: it is not a wallet." }, { status: 400 });
+  }
   if (balance >= ONLY_BELOW) {
+    release();
     return Response.json({ error: "This wallet already has enough SOL to try Sheaf." }, { status: 400 });
   }
   if (reserve - GRANT < RESERVE) {
+    release();
     return Response.json(
       { error: "The faucet is running low. faucet.solana.com hands out devnet SOL too." },
       { status: 503 },
@@ -82,10 +109,9 @@ export async function POST(request: Request) {
       [keypair],
       { commitment: "confirmed" },
     );
-    granted.add(owner.toBase58());
-    grantsByIp.set(ip, [...recent, now]);
     return Response.json({ signature, sol: GRANT / LAMPORTS_PER_SOL });
   } catch {
+    release();
     return Response.json({ error: "The transfer failed. Try again in a moment." }, { status: 502 });
   }
 }

@@ -14,7 +14,7 @@ import { count, money } from "@/lib/format";
 import { useHistory } from "@/lib/use-history";
 import { trackRecord } from "@/lib/track";
 import { CardSkeletons } from "./skeletons";
-import { isTestBasket } from "@/lib/hidden";
+import { isTestBasket, splitTestBaskets } from "@/lib/hidden";
 import { useLedger, walletCounts } from "./ledger";
 
 /**
@@ -82,7 +82,8 @@ export function Explorer() {
   const [showTests, setShowTests] = useState(false);
   const { ledger, decoding } = useLedger();
   const traction = useMemo(() => (ledger ? walletCounts(ledger.entries) : null), [ledger]);
-  const testCount = useMemo(() => (baskets ?? []).filter(isTestBasket).length, [baskets]);
+  const split = useMemo(() => splitTestBaskets(baskets ?? []), [baskets]);
+  const testCount = split.tests;
 
   const rows = useMemo(() => {
     if (!baskets) return [];
@@ -141,11 +142,11 @@ export function Explorer() {
   // outstanding. Adding up one share of each would be a number with no meaning.
   const heldInVaults = useMemo(() => {
     if (!baskets || !supplies) return null;
-    return baskets.reduce(
+    return split.shown.reduce(
       (sum, b) => sum + (valueBasket(b, snapshot).nav ?? 0) * (supplies.get(b.shareMint) ?? 0),
       0,
     );
-  }, [baskets, snapshot, supplies]);
+  }, [baskets, split, snapshot, supplies]);
 
   return (
     <div>
@@ -165,8 +166,9 @@ export function Explorer() {
             <div>
               <dt className="text-xs text-ink-3">Baskets</dt>
               <dd className="display mt-1 text-xl text-ink">
-                {count(baskets.length)}
+                {count(split.shown.length)}
               </dd>
+              {testCount > 0 && <dd className="mt-0.5 text-xs text-ink-3">+{count(testCount)} of our tests</dd>}
             </div>
             <div>
               <dt className="text-xs text-ink-3">Held in vaults</dt>
@@ -273,7 +275,7 @@ export function Explorer() {
       {baskets && baskets.length > 0 && rows.length === 0 && (
         <p className="mt-12 text-sm leading-relaxed text-ink-2">
           Nothing matches “{query.trim()}”. Clear the search to see all{" "}
-          {count(baskets.length)}.
+          {count(showTests ? baskets.length : split.shown.length)}.
         </p>
       )}
 

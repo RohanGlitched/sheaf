@@ -56,7 +56,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: Unit tests (default build, and the devnet build with its stand-in issuers)
+        run: |
+          cargo test -p sheaf --lib
+          cargo test -p sheaf --lib --features devnet
       - name: Test
+        # The default build: it knows only the real stock issuers (mainnet-safe).
+        # The devnet deployment is built with `anchor build -- --features devnet`.
         run: |
           solana-keygen new --no-bip39-passphrase --silent -o ~/.config/solana/id.json
           anchor keys sync

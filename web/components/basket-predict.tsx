@@ -79,7 +79,7 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
   const { publicKey, signTransaction } = useWallet();
   const { connection } = useConnection();
   const me = publicKey?.toBase58() ?? null;
-  const question = `Will ${name} (${symbol}) beat SPY this week?`;
+  const question = `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
   const [mode, setMode] = useState<PantaMode | null>(null);
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -460,9 +460,9 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
         <p className="text-sm text-bind">Prediction market</p>
         <h2 className="display mt-2 text-title max-w-[18ch] text-ink">{question}</h2>
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
-          A basket has a value anyone can read from its vault, so a bet on it can be settled without
-          trusting anyone&apos;s price. Sheaf writes the question and the rule. Panta runs the market on
-          Solana, priced on a bonding curve and paid in USDC.
+          A basket&apos;s recipe and vault are public accounts, so a bet on it settles from a number
+          anyone can recompute, using public closes and prices. Sheaf writes the question and the rule.
+          Panta runs the market on Solana, priced on a bonding curve and paid in USDC.
         </p>
         <PoweredByPanta className="mt-6" />
         {mode === "sandbox" && (
@@ -499,10 +499,10 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
           <p className="text-xs text-ink-3">The question</p>
           <p className="mt-1.5 text-lg text-ink">{question}</p>
           <p className="mt-3 text-sm leading-relaxed text-ink-2">
-            Resolves YES if one {symbol} share, valued from its vault at the close, rose more than SPY
-            over the same week. The value is published as JSON at{" "}
-            <code className="text-xs">/api/nav/{short(basket, 4, 4)}</code>, which is the market&apos;s
-            first source of truth.
+            Resolves YES if one {symbol} share&apos;s <code className="text-xs">navPerShare.listed</code>{" "}
+            rose more than SPY&apos;s adjusted close between two Friday US closes (16:00 New York). Both are
+            read from <code className="text-xs">/api/nav/{short(basket, 4, 4)}?at=&lt;close&gt;</code>, the
+            market&apos;s first source of truth.
           </p>
           {c.quote?.draft && (
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
@@ -603,7 +603,7 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
             <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-ink-2">
               Whoever opens a Panta market earns its creator fees once it graduates. For a basket&apos;s
               creator that is a third income, beside the creator fee on every share creation (up to 1%, paid in
-              new shares) and half of the launch curve&apos;s trading fees.
+              new shares) and 40% of the launch curve&apos;s trading fees.
               {isCreator ? " This is your basket." : ` This basket's creator is ${short(creator, 4, 4)}.`}
               {mode === "sandbox" && !isCreator && " The sandbox lets any wallet try the build; live, Panta checks the wallet is the market's creator."}
             </p>

@@ -6,7 +6,15 @@ import type { ChainBasket, Deployment } from "@/lib/chains";
 import { DESK_ABI, explainEvmError, fromRaw, readDeskOrders, type DeskOrder } from "@/lib/evm";
 import { quantity, shortAddress, timeAgo } from "@/lib/format";
 import { useKeeperKick } from "@/lib/use-keeper-kick";
+import { teamTag, teamWallet } from "@/lib/team-wallets";
 import type { EvmWallet } from "./evm-wallet";
+
+/** The tag beside a buyer the team runs: the house filler, or one of our test wallets. Null for anyone else. */
+function buyerPill(address: string): string | null {
+  const w = teamWallet(address);
+  if (!w || teamTag(address) == null) return null;
+  return w.role === "house" ? "house" : w.role === "test" ? "our test" : "Sheaf";
+}
 
 /**
  * The creation desk's book, read straight from the contract: every recent dollar
@@ -84,7 +92,7 @@ export function EvmDeskBook({
     setNote(null);
     try {
       await wallet.send([{ label: `Cancel order #${id}`, to: d.desk as Address, data: encodeFunctionData({ abi: DESK_ABI, functionName: "cancel", args: [BigInt(id)] }) }], () => undefined);
-      setNote(`Order #${id} cancelled; the dollars are back.`);
+      setNote(`Order #${id} canceled; the dollars are back.`);
       await load();
       onDone();
     } catch (err) {
@@ -137,7 +145,11 @@ export function EvmDeskBook({
                 const mine = me && o.buyer.toLowerCase() === me;
                 return (
                   <tr key={o.id} className={`border-b border-line/60 last:border-0 ${o.basket.toLowerCase() === basket.address.toLowerCase() ? "" : "text-ink-3"}`}>
-                    <td className="tnum px-3 py-3 text-ink-2 sm:px-4">#{o.id}</td>
+                    <td className="tnum px-3 py-3 text-ink-2 sm:px-4">
+                      #{o.id}
+                      {/* On phones the buyer column is hidden, so the team tag rides with the order number. */}
+                      {buyerPill(o.buyer) && <span className="mt-0.5 block text-[11px] text-ink-3 sm:hidden">{buyerPill(o.buyer)}</span>}
+                    </td>
                     <td className="px-3 py-3 sm:px-4">{symbolOf(o.basket)}</td>
                     <td className="tnum px-3 py-3 text-right sm:px-4">{quantity(fromRaw(o.shares), 4)}</td>
                     <td className="tnum px-3 py-3 text-right sm:px-4">
@@ -147,6 +159,11 @@ export function EvmDeskBook({
                       <a href={`${d.explorer}/address/${o.buyer}`} target="_blank" rel="noreferrer" className="hover:underline">
                         {mine ? "you" : shortAddress(o.buyer, 6, 4)}
                       </a>
+                      {buyerPill(o.buyer) && (
+                        <span className="ml-2 whitespace-nowrap rounded-full bg-sunk px-2 py-0.5 text-[11px] leading-none text-ink-3" title="A wallet the Sheaf team runs; not counted as an outside buyer">
+                          {buyerPill(o.buyer)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 sm:px-4">
                       {o.status === "Filled" ? (

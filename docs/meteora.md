@@ -7,11 +7,11 @@ The launch token is a bet on the basket, not a redemption right. Everything belo
 | Piece | Where |
 |---|---|
 | Curve, fees, one-signature open (`createConfigAndPool`) | `web/lib/launch.ts`, preset in `web/lib/meteora-preset.json` |
-| Addresses, official-launch check, raw-account decoder | `web/lib/dbc.ts` |
+| Addresses, official-launch check (identity and terms), raw-account decoder | `web/lib/dbc.ts` |
 | Curve trades (`swap2`, PartialFill buys), DAMM v2 trades (`cp-amm swap2`), LP fee read and claim | `web/lib/trade.ts` |
 | Card with buy, sell, graduate, creator claim, LP claim, and the lifecycle receipts | `web/components/launch-market.tsx` |
-| Public feed, no indexer | `GET /api/launches` |
-| Scripts: decoder check, full lifecycle, squat test, partner claims, one buy | `scripts/meteora-*.mjs` |
+| Public feed and trade tape, no indexer | `GET /api/launches`, `GET /api/launches/trades?pool=` |
+| Scripts: decoder and terms check, full lifecycle, squat test, rogue-terms test, partner claims, one buy | `scripts/meteora-*.mjs` |
 
 ## 1. The whole life of a launch, on devnet
 
@@ -39,7 +39,7 @@ BIG5A sits in front of The Big Five (`FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiE
 | Leftover 1% supply to the treasury | `withdrawLeftover` | [3woVQFFw…GFqF2W](https://explorer.solana.com/tx/3woVQFFw522NMXVpkuajQUMcJ8uuVfvtwUEicg6t4i6yuE48XPfByNh1q4EwsUqf5AfQzb3CHmF9kWuBdMGFqF2W?cluster=devnet) |
 | Treasury claims locked-LP fees (0.002271 SOL) | cp-amm `claimPositionFee` | [5FBcxq3i…gDYXEn](https://explorer.solana.com/tx/5FBcxq3iF1XmNYVzeU8XzcYg752UBP1TTE4rKfym7EAdyocPbJUve4VMJSzfRq6fzJBvxcefVEQQmDs5J2gDYXEn?cluster=devnet) |
 
-`scripts/meteora-partner.mjs` repeats the treasury side for every official launch in the feed. Its first run also claimed partner curve fees on QAENU6A ([345YAudJ…](https://explorer.solana.com/tx/345YAudJsLyVHa8pZN2qE9UR4xRBR75FEATMnxAwYxs72gLYGHYkCtV2hYU2GAyytF9ijqd9buDtc4hcPLq7n3jU?cluster=devnet)) and PROXYA ([5PfCe1E9…](https://explorer.solana.com/tx/5PfCe1E9jrsBbSEJTynDgDghbMuqHcHkcwnP9dTWNge3NyKtYHKxW17DUSZLKV3QJQo1xqQpkf4AUbUe5Jyb3HAM?cluster=devnet)).
+`scripts/meteora-partner.mjs` repeats the treasury side for every official launch in the feed. Its first run also claimed partner curve fees on QAENU6A, a launch opened by our own QA test wallet ([345YAudJ…](https://explorer.solana.com/tx/345YAudJsLyVHa8pZN2qE9UR4xRBR75FEATMnxAwYxs72gLYGHYkCtV2hYU2GAyytF9ijqd9buDtc4hcPLq7n3jU?cluster=devnet)) and PROXYA ([5PfCe1E9…](https://explorer.solana.com/tx/5PfCe1E9jrsBbSEJTynDgDghbMuqHcHkcwnP9dTWNge3NyKtYHKxW17DUSZLKV3QJQo1xqQpkf4AUbUe5Jyb3HAM?cluster=devnet)).
 
 **What the run taught us.** BIG5A was opened on the first preset (v1). One wallet's 0.30 SOL bought 548M tokens, more than half the supply, for 27% of the raise. Graduation put only about 6% of supply into DAMM v2. A single 46M-token sell then took the pool from a 18.5 SOL graduation cap down to about 6.2 SOL. Those are the two failure modes in §2. The v2 preset fixes both, and every launch opened now uses it.
 
@@ -53,7 +53,7 @@ The preset is `web/lib/meteora-preset.json`. Anyone can reuse it: market caps ar
 
 Measured with the SDK's own builder at NAV = 10 SOL (every figure scales linearly with NAV):
 
-| | v1 (BIG5A, FRNTRA, QAENU6A) | **v2 (PROXYA, QA3KRAA, every new launch)** |
+| | v1 (BIG5A, FRNTRA; QAENU6A, opened by our QA test wallet) | **v2 (PROXYA and every new launch; QA3KRAA and the other QA launches are ours too)** |
 |---|---|---|
 | Opens at | 0.5× NAV | **0.5× NAV** |
 | Graduation | 20× NAV (40× the opening cap) | **5× NAV (10× the opening cap)** |
@@ -75,11 +75,11 @@ Why these choices:
 - **No half-the-token whale.** v1's heavy first segment (weight 16) sold 43.5% of supply for the first 20% of SOL. v2 spreads the weight, so the same money buys about a third. The early price is still the lowest on the curve; it just is not a shelf that one wallet can clear.
 - **A bot tax that ends.** The exponential fee scheduler runs 60 periods of 10 seconds, with a reduction factor of 522 / 10,000 per period. A buy in the opening block pays 25%, a buy at one minute about 18%, at five minutes about 5%, and at ten minutes 1%. On devnet a 0.01 SOL buy 98 seconds after PROXYA opened paid 15.43% ([3FdswP7j…](https://explorer.solana.com/tx/3FdswP7jGShqdzic17P4V65Ga3VNsRpSYB3gVH7WP9bECiRa6tKVoL5iXkpqghKgRGCRBiAJRbCCP4yABttvuk54?cluster=devnet)). The dynamic fee stays on for volatility.
 - **A graduation cushion.** The DAMM v2 base fee uses `FeeMarketCapSchedulerExponential`. It opens at 2% and falls to 1% only as the market cap doubles from graduation (10 steps, 7-day expiry). Selling into a falling pool right after graduation pays the locked LP more. A token that holds its price trades at 1%.
-- **Fees.** Curve fees are collected in SOL, split 50/50 creator/partner. There is a 1% migration fee to the partner. 100% of graduated LP is permanently locked, half for the creator and half for the partner, and both halves keep earning.
+- **Fees.** Curve fees are collected in SOL. The DBC program keeps 20% of every fee for Meteora (`PROTOCOL_FEE_PERCENT`), and `creator_trading_fee_percentage = 50` splits the other 80% evenly, so **the creator and Sheaf's treasury each get 40% of every curve fee**, not half. On BIG5A the curve charged 0.017513 SOL in fees: Meteora 0.003503 (20.0%), creator 0.007005 (40.0%), treasury 0.007005 (40.0%). There is a 1% migration fee, all of it to the treasury. 100% of graduated LP is permanently locked, half for the creator and half for the treasury. DAMM v2 also keeps 20% of the pool's fees (BIG5A's pool: 0.001175 to the protocol against 0.004701 to LP), so each locked half earns 40% of every graduated-pool fee. The split is also in the preset (`feeSplit`) and in the feed.
 
-The first v2 launch is PROXYA (slot 1, see §3): pool `3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV`, opened in one signature ([xRNiKFgd…](https://explorer.solana.com/tx/xRNiKFgdw4DNUBVGUpMxGhjSktu6cMqVk7QFUFBSrU7vCNiJ67tchr8DehBr4dPMVDEPCgEEqNaaESqGp8z61qs?cluster=devnet)). Its config decodes as `activation timestamp, cliff 250000000, 60 periods of 10, reduction 522`. BIG5A, FRNTRA and QAENU6A keep their v1 curves; PROXYA and QA3KRAA are v2. The UI reads every multiple from each pool's own config, so both kinds display correctly.
+The first v2 launch is PROXYA (slot 1, see §3): pool `3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV`, opened in one signature ([xRNiKFgd…](https://explorer.solana.com/tx/xRNiKFgdw4DNUBVGUpMxGhjSktu6cMqVk7QFUFBSrU7vCNiJ67tchr8DehBr4dPMVDEPCgEEqNaaESqGp8z61qs?cluster=devnet)). Its config decodes as `activation timestamp, cliff 250000000, 60 periods of 10, reduction 522`. BIG5A, FRNTRA and QAENU6A (our QA test wallet's) keep their v1 curves; PROXYA and QA3KRAA (also ours, from a QA run) are v2. The UI reads every multiple from each pool's own config, so both kinds display correctly.
 
-## 3. Indexer-free discovery, and why a squatter cannot take a launch
+## 3. Indexer-free discovery, and why neither a squatter nor a creator on other terms gets the official label
 
 Each basket's launch lives at addresses derived from the basket: config and mint keypairs come from `sha256("sheaf-launch-v1:{role}:{basket}")`. Anyone can find a launch with one batched `getMultipleAccounts`. The secrets of those keys are public, so anyone can also create *something* there. Discovery therefore never trusts an address. `checkLaunch` (`web/lib/dbc.ts`) decodes both accounts and accepts a pool only if all of these hold:
 
@@ -91,9 +91,15 @@ Each basket's launch lives at addresses derived from the basket: config and mint
 | `config.leftover_receiver` is Sheaf's treasury | PoolConfig 72 |
 | `config.quote_mint` is wrapped SOL | PoolConfig 8 |
 | `config.migration_option` is 1 (DAMM v2) | PoolConfig 233 |
-| `pool.creator` is the basket's creator | VirtualPool 104 |
+| `pool.creator` is the basket's creator (required: no creator, no official launch) | VirtualPool 104 |
+| **Terms:** no unlocked or vesting LP (`partner_liquidity_percentage`, `creator_liquidity_percentage`, both vesting percentages all 0), and locked LP split 50/50 | PoolConfig 240, 242, 185, 201; 239, 241 |
+| **Terms:** `token_update_authority` is 1 (Immutable), `token_type` is 1 (Token-2022), and the mint has no mint authority | PoolConfig 246, 237; mint 0 |
+| **Terms:** fees in SOL, `creator_trading_fee_percentage` is 50 | PoolConfig 232, 245 |
+| **Terms:** `migration_fee_option` is 6 (Customizable), `migration_fee_percentage` ≤ 1, `creator_migration_fee_percentage` is 0 | PoolConfig 243, 247, 248 |
+| **Terms:** no locked vesting supply | PoolConfig 296, 328 |
+| **Terms:** the curve, fee schedule, volatility fee and DAMM v2 fee are exactly v1 or v2 (breakpoints and liquidity weights within 0.2%) | PoolConfig 104–148, 234, 362, 364, 392, 408… |
 
-The last check is the one a squatter cannot pass: DBC requires the pool creator's signature to create a pool.
+The creator check is the one a squatter cannot pass: DBC requires the pool creator's signature to create a pool. The terms checks are the ones a creator cannot pass. A creator can skip the UI and script `createConfigAndPool` on any terms at a free slot of their own basket, so every claim the card makes ("liquidity locked for good", "immutable", the fee split, the preset) is now read from the config, and a pool that breaks one is unofficial, with the broken term as the reason. Every offset is from the `PoolConfig` struct in the SDK 1.5.12 IDL and is asserted against the SDK's decoder by `scripts/meteora-check.mjs`.
 
 - **Squat.** A pool that fails the checks is never shown as the launch. `/api/launches` lists it under `unofficial` with the reason, and the basket page names it as unofficial.
 - **DoS.** Sending lamports to a derived key, or squatting it, only burns that slot. A basket has `LAUNCH_SLOTS = 4` derived slots. Slot 1 and later are salted: `sheaf-launch-v2:{role}:{basket}:{n}`. `buildLaunch` opens in the first slot whose pool, config and mint are all empty, and refuses if an official launch already exists. That refusal makes `/api/admin/launch` idempotent.
@@ -101,24 +107,55 @@ The last check is the one a squatter cannot pass: DBC requires the pool creator'
 
 **Proven on devnet.** `scripts/meteora-squat-test.mjs` squatted PROXY's slot 0 with the public keys ([4idbhKkH…](https://explorer.solana.com/tx/4idbhKkH8RXQroStBLrsUDBovzeLsjCZddnGqVvvDutLjr6ZkGTb8uAZJVG6NM3MhYE5bHox49FR7D2Qm9KcXX45?cluster=devnet)). The squat copied everything it could: fees to the treasury, leftover to the treasury, migration to DAMM v2. Only the creator differed. `/api/launches` reports `{"slot":0,"reason":"It was not opened by the basket's creator."}`. The house then opened PROXY's real launch, which went into slot 1 automatically. Receipts are in `web/lib/meteora-squat.json`.
 
+**Rogue terms, proven on devnet.** `scripts/meteora-rogue-test.mjs` had PROXY's own creator (the house key) open a pool in PROXY's free slot 2 ([2r73HUpR…](https://explorer.solana.com/tx/2r73HUpR8p6nLJjZ2N6tQqJwcWSZcFZ94WXoyF3Ppz9sXREzpyyuQYjE7ZVCzrWCU5AL17NGQXDKt69ybNj8saxo?cluster=devnet), pool `6vcMztC7j2oSREJ8cQ2gZEHq9THaNuDtfnv6ESwLJQHD`, 0.0146 SOL of rent). It copies the v2 preset exactly, the same price points as the real launch, fees to the treasury, DAMM v2, with one rogue term: the creator's half of the graduated liquidity is unlocked (`creator_liquidity_percentage = 50`). The creator check passes. `/api/launches` reports `{"slot":2,"reason":"50% of its graduated liquidity is not permanently locked and can be withdrawn after graduation."}`, and `meteora-check.mjs` asserts that verdict (and the squat's) on every run. The receipt is `rogueTerms` in `web/lib/meteora-squat.json`.
+
 Honest limit: four slots raise the cost of bricking from one rent-exempt account to eight. A determined griefer can still burn all four for about 0.01 SOL. The full fix is to record the pool in the Sheaf basket account, which needs a program change. The other option is random keys plus `getProgramAccounts` with a memcmp on `pool.creator` (offset 104), which the browser RPC proxy does not allow today.
 
-`scripts/meteora-check.mjs` decodes BIG5A, FRNTRA and PROXYA with both the hand offsets and the SDK, field by field, and exits non-zero on any mismatch. A layout upgrade therefore fails loudly instead of silently.
+`scripts/meteora-check.mjs` decodes BIG5A, FRNTRA, PROXYA, the squat and the rogue pool with both the hand offsets and the SDK, field by field (44 fields each), runs the terms check on each (v1, v1, v2, rejected, rejected), and exits non-zero on any mismatch. A layout upgrade or a broken check therefore fails loudly instead of silently.
 
 `GET /api/launches` returns one entry per basket with these fields:
 
+- `basket {address, name, symbol, creator, creatorTeam}`: `creatorTeam` is `house` for baskets Sheaf seeded, `test wallet` for our QA runs, null for anyone else
+- `test`: true for launches our own QA runs opened (a test basket, or one a team test wallet created). They are **left out unless `?tests=1`**
 - `launch {pool, config, mint, symbol, slot}`
-- `open`, `official`
+- `open`, `official`, `preset` (`v1` or `v2`) and `presetId`
 - `raisedSol`, `thresholdSol`
 - `marketCapSol`, `openCapSol`, `graduationCapSol`, `graduated`
-- `creatorFeesSol`, `partnerFeesSol`, `totalFeesSol`
+- `creatorFeesSol`, `partnerFeesSol`, `meteoraFeesSol`, `totalFeesSol` (Meteora's share included)
 - `feeSchedulerCounts` (`slots` or `seconds`)
 - `shape`, the curve's own breakpoints
+- `traders` (distinct wallets outside the team that swapped), `outsideTrades`, `teamTrades`
 - `unofficial`, when present
 
-The response is cached 30 seconds at the edge. It needs no indexer and no SDK.
+At the top level: `feeSplit`, `openLaunches`, `outsideLaunches` (launches whose basket creator is outside the team), `traders` (distinct outside wallets across all launches), `tradeWindow` and `testLaunchesHidden`. Team wallets are the ones listed in `web/lib/team-wallets.ts`. Today `outsideLaunches` is 0: every launch was opened by the house or by our QA wallets.
 
-## 4. UI fixes in this pass
+`GET /api/launches/trades?pool=<DBC pool>` is the trade tape: every recent swap on the curve and, once graduated, on the DAMM v2 pool, read from the pool's SOL vault change in each transaction, with Sheaf's own wallets tagged (`house`, `test wallet`). The card lists it as "Recent trades".
+
+Both responses are cached 30 seconds at the edge. They need no indexer and no SDK.
+
+## 4. House buys (ours, not traction)
+
+To give the v2 curve a visible shape, the house key bought PROXYA three times on 9 October with `WALLET=house scripts/meteora-buy.mjs`. These are Sheaf's own buys. The card's trade list tags each one "house buy", the feed counts them under `teamTrades`, and they are never counted as traders or traction. PROXYA was not graduated.
+
+| Buy | Fee paid | Signature |
+|---|---|---|
+| 0.020 SOL | 1.05% | [3ijvbVH1…](https://explorer.solana.com/tx/3ijvbVH1HRzBb6Z5dwzuiAqTSu4w6EtVN8eWs7ALmGAyNgDBBWRNphdY92GqZDkAJvkAyLptPMnnHvE5dy6ZHMMP?cluster=devnet) |
+| 0.015 SOL | 1.20% | [46rr2T3i…](https://explorer.solana.com/tx/46rr2T3iPEptUZQdZcCdCg7qrK6xtVZFhSx4RMaNXgJxZLv1muLxzUNQPNRnBcbPdzUqLUX5k5vy2pynj5sNSWLt?cluster=devnet) |
+| 0.025 SOL | 1.20% | [5mf7qu1w…](https://explorer.solana.com/tx/5mf7qu1we7SjxhgTVmVhgy3zxJSFD5rjQmaDtjCCrbfixBNLQ98sDMYrf5iXqsFQxskNuwEMn31BHNJxHKkXSA84?cluster=devnet) |
+
+PROXYA now holds 0.0678 SOL of its 0.578 SOL threshold. Every buy on it so far is ours: the first (0.01 SOL, 3FdswP7j…) came from lifecycle wallet 2. Receipts are in `web/lib/meteora-house-buys.json`.
+
+## 5. UI fixes
+
+Round 3:
+
+- The home card now features PROXYA, the first launch on the v2 curve, through `FEATURED_LAUNCH`. FRNTRA stays reachable from Frontier Labs' own basket page, and the method page keeps Frontier Labs as its running example basket.
+- The curve marker is right from the first frame. The tween starts at the pool's own value, and the dot and its label always come from the settled state; only the fill animates after a trade. A graduated pool's dot sits at the end of the curve, and amounts under 0.1 SOL show three significant figures (PROXYA read "0 SOL in" while it held 0.0085 SOL).
+- Every card links its preset (v2 to `meteora-preset.json`, v1 to §2 here) and lists recent trades with Sheaf's own wallets tagged.
+- A graduated pool whose market cap is below half its graduation figure says why on its card. The graduation figure is the market cap at the curve's last price, not SOL raised. On v1 only 6% of supply went into the pool, so BIG5A's one stress sell after graduation took it from 18.48 SOL to about 6.4 SOL.
+- The copy gives the real fee split: 40% to the creator, 40% to the treasury, 20% to Meteora.
+
+Round 2:
 
 - The featured card read "FRNTRAA". `FeaturedLaunch` now passes the basket's own name and symbol (`FEATURED_BASKET`: Frontier Labs, FRNTR).
 - When no SOL has been raised, the card reads "Opens at X SOL. Be the first buyer." instead of showing zeros.
@@ -126,15 +163,15 @@ The response is cached 30 seconds at the edge. It needs no indexer and no SDK.
 - The multiple in "Graduates at" is computed from each pool (20× for v1, 5× for v2). The copy no longer claims "less than a quarter" or "within the hour".
 - The card border uses `border-line`.
 
-## 5. Mainnet plan
+## 6. Mainnet plan
 
 - **Same program ids, no code change** beyond `TREASURY` and the cluster split in `lib/config.ts`.
 - **Keeper migration thresholds.** Meteora's mainnet keepers auto-migrate SOL-quoted pools at a `migration_quote_threshold` of at least 10 SOL, and USDC pools at 750. v2 needs 1.258 SOL per SOL of NAV, so a basket would need about 8 SOL of NAV per share to clear 10 SOL. Mainnet launches will therefore floor the threshold at `max(1.258 × NAV, 10 SOL)` by raising the anchor, or quote in USDC with a 750 floor (which also stops "0.5× NAV" drifting with SOL/USD). Below the floor, graduation depends on anyone pressing Graduate, which the card already offers to every visitor.
-- **NAV provenance.** Write the NAV used, the SOL price and the timestamp into the launch metadata at `/api/launch/[address]`, so readers can check "opened at 0.5× NAV".
+- **NAV provenance (built for new launches).** `buildLaunch` now mints the token with a URI of `/api/launch/<basket>?nav=<NAV in SOL>&sol=<SOL in USD>&t=<unix open time>&preset=sheaf-nav-shelf-v2`. The token is immutable, so that URI is a permanent on-chain record that anyone can check "opened at 0.5× NAV" against. Launches opened before this change (BIG5A, FRNTRA, PROXYA) carry the plain URI.
 - **Partner ops** run from `scripts/meteora-partner.mjs` on a schedule, using the treasury key from the environment.
 - No mainnet transaction has been sent. Mainnet needs real SOL and the owner's go-ahead.
 
-## 6. What is devnet, and what is not built
+## 7. What is devnet, and what is not built
 
 - **Devnet.** Every pool, trade, graduation and claim above. The house (faucet) key funds throwaway wallets. Their keys are in `.keys/lifecycle-wallets.json`, which is gitignored.
 - **Not built.**
@@ -142,4 +179,4 @@ The response is cached 30 seconds at the edge. It needs no indexer and no SDK.
   - **Share-quoted curves** (quote in the basket share itself).
   - **`createConfigAndPoolWithFirstBuy`** for creator first buys.
   - **Partner metadata.**
-  - **Swap-event tape.**
+  - **An indexed swap tape.** `/api/launches/trades` reads the last 100 signatures per market on request. Past that it undercounts, which never inflates `traders`.

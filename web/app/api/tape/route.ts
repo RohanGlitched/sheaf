@@ -16,6 +16,10 @@ export const dynamic = "force-dynamic";
  * poll runs in `after()`, which on Vercel keeps the function alive until the
  * poll finishes (an un-awaited promise would be frozen with the response).
  *
+ * A cold instance answers within about four seconds: with its backfill if that
+ * finished, otherwise an empty tape marked `warming` while it finishes in
+ * `after()`.
+ *
  * `?depth=60` returns up to 60 prints instead of 30 (used by scripts/tape-seed.mjs).
  */
 export async function GET(req: NextRequest) {
@@ -24,7 +28,12 @@ export async function GET(req: NextRequest) {
     const tape = await readTape((task) => after(task));
     return NextResponse.json(
       { ...tape, prints: tape.prints.slice(0, depth) },
-      { headers: { "cache-control": "public, s-maxage=2, stale-while-revalidate=10" } },
+      {
+        headers: {
+          // A warming answer (cold instance, backfill still running) must not be cached.
+          "cache-control": tape.warming ? "no-store" : "public, s-maxage=2, stale-while-revalidate=10",
+        },
+      },
     );
   } catch (err) {
     return NextResponse.json(

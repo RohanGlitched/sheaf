@@ -53,6 +53,14 @@ export async function POST(request: Request) {
   }
   const i = perIp.check(ip);
   if (!i.ok) return Response.json({ error: `Too many claims from here. Try again in ${Math.ceil(i.retryInSec / 60)} minutes.` }, { status: 429 });
+  // Claim the slots before the first await, so parallel requests cannot all pass
+  // the checks above; give them back if nothing is sent.
+  perAddress.hit(addrKey);
+  perIp.hit(ip);
+  const release = () => {
+    perAddress.undo(addrKey);
+    perIp.undo(ip);
+  };
 
   // Tempo: the chain's own faucet, keyless.
   if (isTempo(d)) {
@@ -65,18 +73,18 @@ export async function POST(request: Request) {
       });
       const json = (await res.json()) as { result?: Hex[]; error?: { message: string } };
       if (!json.result) throw new Error(json.error?.message ?? "the Tempo faucet did not answer");
-      perAddress.hit(addrKey);
-      perIp.hit(ip);
       return Response.json({
         txs: json.result.map((hash, n) => ({ label: `Tempo faucet ${n + 1}`, hash })),
         notes: ["Tempo's faucet sent pathUSD (fees), AlphaUSD (orders) and two more test dollars."],
       });
     } catch (err) {
+      release();
       return Response.json({ error: `Tempo faucet: ${(err as Error).message}` }, { status: 502 });
     }
   }
 
   if (!houseAccount()) {
+    release();
     return Response.json({ error: "The faucet is not configured here. Set EVM_FAUCET_PRIVATE_KEY on the server." }, { status: 503 });
   }
 
@@ -89,7 +97,9 @@ export async function POST(request: Request) {
       else notes.push(gas.note);
 
       if (d.tokenSource === "real") {
+        // Checked and taken inside the chain lock, so queued requests see each other's claims.
         const r = realDaily.check(d.network);
+        if (r.ok) realDaily.hit(d.network);
         if (!r.ok) {
           notes.push("Today's share of Robinhood test tokens is spent. Robinhood's own faucet gives 5 of each daily.");
         } else {
@@ -98,6 +108,7 @@ export async function POST(request: Request) {
           const client = publicClientFor(d);
           const house = houseAccount()!.address;
           const wallet = walletFor(d);
+          const before = txs.length;
           for (const [n, c] of basket.components.entries()) {
             const held = await client.readContract({ address: c.token as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [house] });
             if (held < need[n] * 4n) {
@@ -115,7 +126,7 @@ export async function POST(request: Request) {
           } else {
             notes.push(`The house is low on ${d.stable.symbol}; skipped it.`);
           }
-          realDaily.hit(d.network);
+          if (txs.length === before) realDaily.undo(d.network);
           // Wait for the lot, so the page can read the new balances straight away.
           await Promise.all(txs.map((t) => client.waitForTransactionReceipt({ hash: t.hash, timeout: 60_000 })));
           notes.push(`Enough for a quarter share of ${basket.symbol}. Robinhood's faucet gives 5 of each token a day.`);
@@ -125,12 +136,10 @@ export async function POST(request: Request) {
       }
       return { txs, notes };
     });
-    if (result.txs.length > 0) {
-      perAddress.hit(addrKey);
-      perIp.hit(ip);
-    }
+    if (result.txs.length === 0) release();
     return Response.json(result, { headers: { "cache-control": "no-store" } });
   } catch (err) {
+    release();
     return Response.json({ error: ((err as Error).message ?? "faucet failed").split("\n")[0] }, { status: 500 });
   }
 }

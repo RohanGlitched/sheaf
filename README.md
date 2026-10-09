@@ -91,15 +91,17 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 
 ## Business
 
+Full breakdown with sources: [/business](https://sheaf-index.vercel.app/business).
+
 | Who earns | What | Source |
 |---|---|---|
-| Basket creator | 0% to 1% of every share created (capped by `MAX_CREATOR_FEE_BPS = 100`), minted as new shares, never taken from the vault. The composer defaults to 0.25%. | `programs/sheaf/src/lib.rs` |
-| Fillers, including Sheaf's house filler | The spread on dollar flow: a site order starts 2% above the fair share count and falls to 2% below it over 90 seconds, so a filler keeps up to 2% of the order, less what competition takes. | `web/components/dollar-order.tsx` |
-| Creator and Sheaf | Launch-market curve trading fees, 50% each. A 25% anti-snipe fee decays to 1% over 600 seconds. | `web/lib/meteora-preset.json` |
-| Sheaf | A 1% migration fee at graduation, and the 1% of launch-token supply left over after the curve. | `web/lib/meteora-preset.json` |
-| Creator and Sheaf | Fees on the graduated DAMM v2 pool (2%, falling to 1% as market cap doubles), from LP that is 100% permanently locked, 50% each. | `web/lib/meteora-preset.json` |
+| Sheaf (protocol) | 0.10% of every share created, fixed per basket when the basket is created and never changeable, accrued in the basket and claimed to the treasury as shares. Redeeming is free. Baskets created before this fee shipped carry none, for good. | `PROTOCOL_FEE_BPS` in `programs/sheaf/src/lib.rs` |
+| Basket creator | 0% to 1% of every share created (`MAX_CREATOR_FEE_BPS = 100`), minted as new shares, never taken from the vault. The composer defaults to 0.25%. | `programs/sheaf/src/lib.rs` |
+| Fillers, including Sheaf's house filler | A dollar order's share count starts 2% above fair and falls to 2% below over 90 seconds; the first filler to deliver keeps the difference. The house filler waits until it earns 0.15% over fair, so any filler willing to take less fills first. | `FILL_MARGIN_BPS` in `web/lib/keeper-server.ts` |
+| Sheaf and the creator | Launch-market curve fees: Meteora keeps 20%, then 50/50, so 40% each. A 25% anti-snipe fee decays to 1% over 600 seconds. | `web/lib/meteora-preset.json` |
+| Sheaf | A 1% migration fee at graduation, the 1% of launch-token supply left over after the curve, and half the fees of the graduated pool's locked LP. | `web/lib/meteora-preset.json` |
 
-The program itself has no protocol fee and no fee switch.
+Holding a share costs nothing a year; there is no management fee. Monthly plans are free; each run pays the same fees as a dollar order. The first customers are platforms that already sell tokenized stocks to non-US retail and add baskets and monthly plans as a module for a revenue share.
 
 ## Run it yourself
 
@@ -155,8 +157,8 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 ## Trust model
 
 - **No oracle.** Creation and redemption are in kind. Dollar orders are auctions on share count; a plan's reference is its own last fill.
-- **No editable recipe.** No admin key, no rebalance authority, no fee switch. The share mint's authority is the basket PDA.
-- **The program is upgradeable on devnet.** Its upgrade authority is a single deploy key. Before it holds real tokens it moves to a multisig and is then burned, after an audit.
+- **No editable recipe.** No admin key, no rebalance authority, no fee switch: every fee is fixed per basket at creation. The share mint's authority is the basket PDA.
+- **The program is upgradeable on devnet.** Its upgrade authority is a single deploy key. Before it holds real tokens it moves to a multisig after an audit. The multisig is kept, not burned, so new issuers (Ondo, Robinhood, Dinari) can be added to `KNOWN_ISSUERS`; an upgrade can change any code, so the multisig, a public timelock and a verifiable build are the safeguards.
 - **Devnet, with mirror mints.** The program is unaudited, so it does not take custody of real stocks. Prices, dividend multipliers and the tape come from mainnet; vaults hold devnet mirrors. The mirrors match the real mints' decimals, metadata, `ScaledUiAmount` dividend multiplier and (for PreStocks) transfer fee. They do not carry the issuer powers the real mints have.
 - **Issuer powers.** Real xStocks and PreStocks carry a freeze authority, a permanent delegate and a pause authority held by their issuer. Sheaf accepts those powers only when Backed or PreStocks hold them (`KNOWN_ISSUERS` in `lib.rs`) and refuses them under anyone else, including the basket creator. This is tested against byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock; the devnet mirrors themselves carry only metadata, ScaledUiAmount and transfer-fee extensions. An issuer that pauses or freezes one component blocks redemption of the whole basket until it lifts it.
 - **The EVM contracts** have no owner, no pause, no upgrade path and no oracle; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labelled mirrors worth nothing.

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Portfolio } from "@/components/portfolio";
 
 export const metadata: Metadata = {
-  title: "Your side of it",
+  title: "Everything you own, unwrapped",
   description:
     "Your baskets valued at live prices, looked through to the companies you actually own.",
 };

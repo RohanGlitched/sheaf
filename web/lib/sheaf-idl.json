@@ -124,6 +124,102 @@
       "args": []
     },
     {
+      "name": "claim_protocol_fee",
+      "docs": [
+        "Mint a basket's accrued protocol fee to the treasury's share account and",
+        "zero the counter. Permissionless: the destination is fixed, so anyone",
+        "may crank it (create the treasury's associated share account first)."
+      ],
+      "discriminator": [
+        165,
+        228,
+        133,
+        48,
+        99,
+        249,
+        255,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "basket",
+          "writable": true
+        },
+        {
+          "name": "share_mint",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "address": "9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF"
+        },
+        {
+          "name": "treasury_share_account",
+          "docs": [
+            "The treasury's canonical share account, and nowhere else."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "treasury"
+              },
+              {
+                "kind": "account",
+                "path": "share_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "share_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "close_legacy_plan",
       "docs": [
         "Close a plan written by the pre-hardening release, whose account is",
@@ -1153,6 +1249,19 @@
       ]
     },
     {
+      "name": "BasketFeeTerms",
+      "discriminator": [
+        174,
+        145,
+        144,
+        99,
+        79,
+        119,
+        99,
+        247
+      ]
+    },
+    {
       "name": "OrderCancelled",
       "discriminator": [
         108,
@@ -1241,6 +1350,32 @@
         70,
         253,
         195
+      ]
+    },
+    {
+      "name": "ProtocolFeeAccrued",
+      "discriminator": [
+        28,
+        67,
+        46,
+        110,
+        88,
+        175,
+        215,
+        194
+      ]
+    },
+    {
+      "name": "ProtocolFeeClaimed",
+      "discriminator": [
+        169,
+        107,
+        23,
+        223,
+        26,
+        230,
+        194,
+        184
       ]
     },
     {
@@ -1525,6 +1660,21 @@
       "code": 6050,
       "name": "ShareMintNotToken2022",
       "msg": "Share mint must be a Token-2022 mint"
+    },
+    {
+      "code": 6051,
+      "name": "NothingToClaim",
+      "msg": "This basket has no protocol fee to claim"
+    },
+    {
+      "code": 6052,
+      "name": "TreasuryMismatch",
+      "msg": "Protocol fees go only to the treasury"
+    },
+    {
+      "code": 6053,
+      "name": "RefundNotToBuyerAta",
+      "msg": "A third party's refund must go to the buyer's associated cash account"
     }
   ],
   "types": [
@@ -1589,6 +1739,24 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "The protocol's creation fee, fixed at `create_basket` and never",
+              "changed. Appended into the account's headroom, so a basket created",
+              "before it existed reads its zeroed tail as 0: no protocol fee, ever."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_accrued",
+            "docs": [
+              "Protocol-fee shares created and backed in the vault but not yet minted;",
+              "`claim_protocol_fee` mints them to the treasury. The vault backs",
+              "`supply + protocol_fee_accrued`."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1621,6 +1789,33 @@
           {
             "name": "component_count",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BasketFeeTerms",
+      "docs": [
+        "The fee terms a basket was created with. Both are fixed for its lifetime."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
           }
         ]
       }
@@ -2231,6 +2426,52 @@
           },
           {
             "name": "max_ref_shares_per_cash_e9",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeeAccrued",
+      "docs": [
+        "Protocol-fee shares created (and backed) by one issuance, not yet minted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "type": "u64"
+          },
+          {
+            "name": "accrued",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeeClaimed",
+      "docs": [
+        "Accrued protocol-fee shares minted to the treasury."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury_share_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
             "type": "u64"
           }
         ]

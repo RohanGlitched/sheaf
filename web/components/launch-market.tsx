@@ -5,7 +5,10 @@ import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
-  FEATURED_BASKET,
+  FEATURED_LAUNCH,
+  METEORA_DOCS_URL,
+  PRESET_NAMES,
+  PRESET_URL,
   dammV2PoolAddress,
   findLaunch,
   launchFor,
@@ -15,11 +18,18 @@ import {
   type FoundLaunch,
   CURVE_FULL,
 } from "@/lib/dbc";
-import { GRADUATION_MULTIPLE, LAUNCH_FEE, OPEN_MULTIPLE } from "@/lib/launch";
+import {
+  CREATOR_FEE_PERCENT,
+  GRADUATION_MULTIPLE,
+  LAUNCH_FEE,
+  METEORA_FEE_PERCENT,
+  OPEN_MULTIPLE,
+  TREASURY_FEE_PERCENT,
+} from "@/lib/launch";
 import lifecycle from "@/lib/meteora-lifecycle.json";
 import preset from "@/lib/meteora-preset.json";
 import { explorerAddress, explorerTx } from "@/lib/config";
-import { count, money, percent, quantity } from "@/lib/format";
+import { count, money, percent, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { useMeasure } from "@/lib/use-measure";
 import { explainError } from "@/lib/tx";
 import { ConnectButton } from "./connect-button";
@@ -51,7 +61,32 @@ function explain(error: unknown, fallback: string): string {
 /** SOL the curve took in. A graduated curve raised exactly its threshold, whatever its reserve reads now. */
 const raisedOf = (state: DbcState) => (state.migrated ? state.threshold : state.raised);
 
+/** An amount of SOL: three significant figures under 0.1 SOL, so a small raise never reads as 0. */
+function solText(value: number): string {
+  if (value > 0 && value < 0.1) return value.toLocaleString("en-US", { maximumSignificantDigits: 3 });
+  return quantity(value, value < 10 ? 3 : 2);
+}
+
+/** Who gets what of every curve fee, from the published preset. */
+const FEE_SPLIT = `Of every fee a trader pays, Meteora keeps ${METEORA_FEE_PERCENT}%, the basket's creator gets ${CREATOR_FEE_PERCENT}% and Sheaf's treasury ${TREASURY_FEE_PERCENT}%.`;
+
 type LaunchBasketProps = { address: string; name: string; symbol: string; creator: string };
+
+/** A pool's preset, linked to where it is published: v2 to its JSON, v1 to the write-up that retires it. */
+function PresetLink({ state }: { state: DbcState }) {
+  if (!state.preset) return null;
+  const href = state.preset === "v2" ? PRESET_URL : `${METEORA_DOCS_URL}#2-curve-and-fee-rationale-preset-sheaf-nav-shelf-v2`;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+    >
+      Curve preset {state.preset} ({PRESET_NAMES[state.preset]})
+    </a>
+  );
+}
 
 /**
  * Where a basket's launch lives, and its live state once opened. Only a pool
@@ -95,9 +130,7 @@ function graduationMultiple(state: DbcState): number {
 }
 
 export function LaunchMarket() {
-  const launch = useLaunch(FEATURED_BASKET);
-  // The featured curve predates the current preset, so its multiple is read off the pool, never assumed.
-  const featuredMultiple = launch.state ? graduationMultiple(launch.state) : null;
+  const launch = useLaunch(FEATURED_LAUNCH.basket);
   return (
     <div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
@@ -110,16 +143,24 @@ export function LaunchMarket() {
             A new basket starts with no shares, and nobody wants to be first to
             assemble every component. So a bonding curve opens in front of it: a
             token priced along a curve that starts at half the basket&rsquo;s NAV
-            and graduates into a permanent Meteora DAMM v2 pool at a fixed
-            multiple of it, with every LP position locked for good.
+            and graduates into a permanent Meteora DAMM v2 pool at {GRADUATION_MULTIPLE} times
+            it, with every LP position locked for good.
           </p>
           <p className="mt-4 text-sm leading-relaxed text-ink-3">
-            Any basket&rsquo;s creator can open one from the basket page in a single
-            signature, and earns half of its trading fees.{" "}
-            {featuredMultiple != null && featuredMultiple !== GRADUATION_MULTIPLE
-              ? `This one stands in front of the Frontier Labs basket and graduates at ${featuredMultiple} times NAV; launches opened now use a gentler curve that graduates at ${GRADUATION_MULTIPLE} times, after raising about ${THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL, and puts a quarter of the supply into the graduated pool.`
-              : `Launches open at half of NAV and graduate at ${GRADUATION_MULTIPLE} times it, after raising about ${THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL, with a quarter of the supply going into the graduated pool.`}{" "}
-            Every figure here is read from the pool account on each load.
+            This one stands in front of {FEATURED_LAUNCH.basket.name}. It graduates once about{" "}
+            {THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL has gone in, and a quarter of the
+            supply goes into the graduated pool. Any basket&rsquo;s creator can open one from the
+            basket page in a single signature. {FEE_SPLIT} Every figure here is read from the
+            pool account on each load, and{" "}
+            <a
+              href={PRESET_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+            >
+              the curve is a published preset
+            </a>
+            .
           </p>
         </div>
         <FeaturedLaunch launch={launch} />
@@ -135,14 +176,14 @@ export function FeaturedLaunch({ launch: given }: { launch?: ReturnType<typeof u
 }
 
 function OwnFeaturedLaunch() {
-  return <FeaturedCard launch={useLaunch(FEATURED_BASKET)} />;
+  return <FeaturedCard launch={useLaunch(FEATURED_LAUNCH.basket)} />;
 }
 
 function FeaturedCard({ launch }: { launch: ReturnType<typeof useLaunch> }) {
   if (!launch.info) return <LaunchSkeleton />;
   return (
     <LaunchCard
-      basketAddress={FEATURED_BASKET.address}
+      basketAddress={FEATURED_LAUNCH.basket.address}
       info={launch.info}
       state={launch.state ?? null}
       readError={launch.readError}
@@ -190,8 +231,8 @@ export function BasketLaunch({
             {launch.info.baseSymbol} is a separate token priced off {basket.symbol}&rsquo;s NAV: the
             curve opened at half of it and{" "}
             {launch.state.migrated
-              ? `raised ${quantity(launch.state.threshold, 2)} SOL, then graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
-              : `graduates at ${graduationMultiple(launch.state)} times it, once ${quantity(launch.state.threshold, 2)} SOL has gone in, into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
+              ? `raised ${solText(launch.state.threshold)} SOL, then graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
+              : `graduates at ${graduationMultiple(launch.state)} times it, once ${solText(launch.state.threshold)} SOL has gone in, into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
             Buy and sell it here either way. It is a bet on the basket, not a redemption right into it.
           </p>
         </div>
@@ -273,7 +314,7 @@ function OpenLaunch({
     setError(null);
     try {
       const { buildLaunch } = await import("@/lib/launch");
-      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol });
+      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol, solUsd: sol });
       const sig = await sendTransaction(transaction, connection);
       await confirmSignature(connection, sig);
       await onOpened();
@@ -296,8 +337,8 @@ function OpenLaunch({
           {GRADUATION_MULTIPLE} times it. About a quarter of the supply goes into that pool, so
           it is a real market on the day it opens, and the first fifth of the money in buys
           about a third of the supply, so no single early wallet takes half the token. It
-          graduates once about {THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL has gone in.
-          You earn half of every trading fee on the curve.
+          graduates once about {THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL has gone in.{" "}
+          {FEE_SPLIT} The token records the NAV, the SOL price and the time it opened at.
         </p>
       </div>
       <dl className="grid grid-cols-1 gap-px border-y border-line bg-line sm:grid-cols-3">
@@ -317,8 +358,8 @@ function OpenLaunch({
         />
         <Fact
           label="Your share of fees"
-          value={`${preset.fees.creatorTradingFeePercentage}%`}
-          note={`The fee is ${LAUNCH_FEE.startingFeeBps / 100}% in the first ${FIRST_FEE_SECONDS} seconds, ${LAUNCH_FEE.endingFeeBps / 100}% after ${LAUNCH_FEE.totalDurationSeconds / 60} minutes`}
+          value={`${CREATOR_FEE_PERCENT}%`}
+          note={`of every curve fee (Meteora ${METEORA_FEE_PERCENT}%, Sheaf ${TREASURY_FEE_PERCENT}%). The fee is ${LAUNCH_FEE.startingFeeBps / 100}% in the first ${FIRST_FEE_SECONDS} seconds, ${LAUNCH_FEE.endingFeeBps / 100}% after ${LAUNCH_FEE.totalDurationSeconds / 60} minutes`}
         />
       </dl>
       <div className="px-6 py-5">
@@ -337,10 +378,115 @@ function OpenLaunch({
           One signature and about 0.02 SOL of rent. The token is fixed once it exists: no mint
           authority, no edits, and one launch per basket. The opening fee is a bot tax: a buy
           in the first {FIRST_FEE_SECONDS} seconds pays {LAUNCH_FEE.startingFeeBps / 100}% of its
-          order in fees, split between you and the treasury, falling to{" "}
+          order in fees ({CREATOR_FEE_PERCENT}% of that to you, {TREASURY_FEE_PERCENT}% to the treasury,{" "}
+          {METEORA_FEE_PERCENT}% to Meteora), falling to{" "}
           {LAUNCH_FEE.endingFeeBps / 100}% over {LAUNCH_FEE.totalDurationSeconds / 60} minutes.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Why a graduated pool's market cap sits far under its graduation figure. The
+ * graduation figure is the market cap at the curve's last price, not the SOL
+ * raised; after graduation the price is the DAMM v2 pool's, and a thin pool
+ * moves a long way on one sell.
+ */
+function GraduationNote({ state, symbol }: { state: DbcState; symbol: string }) {
+  if (!state.migrated || state.cap >= state.graduationCap * 0.5) return null;
+  return (
+    <p className="mt-3 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
+      <span className="text-ink">
+        Market cap now {quantity(state.cap, 2)} SOL, against {quantity(state.graduationCap, 2)} SOL at graduation.
+      </span>{" "}
+      The graduation figure is the market cap at the curve&rsquo;s last price; the curve itself raised{" "}
+      {solText(state.threshold)} SOL. Since then the price is the DAMM v2 pool&rsquo;s.
+      {state.preset === "v1" && (
+        <>
+          {" "}On the first curve only {preset.previous.measured.supplyInGraduatedPoolPercent}% of the supply
+          went into that pool, so it is thin
+          {symbol === lifecycle.launch.symbol
+            ? ": one sell of 4.6% of the supply right after graduation, in our own lifecycle test, took it from 18.5 to about 6.2 SOL"
+            : ""}
+          . That is why launches now open on the v2 curve, which puts a quarter of the supply into the
+          pool.{" "}
+          <a
+            href={`${METEORA_DOCS_URL}#1-the-whole-life-of-a-launch-on-devnet`}
+            target="_blank"
+            rel="noreferrer"
+            className="underline decoration-line-strong underline-offset-4 hover:text-ink"
+          >
+            What the run taught us
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
+
+type Trade = {
+  signature: string;
+  at: number | null;
+  wallet: string;
+  team: string | null;
+  side: "buy" | "sell";
+  sol: number;
+  market: "curve" | "damm";
+};
+
+/**
+ * The launch's recent swaps, from `/api/launches/trades`. Sheaf's own wallets
+ * are tagged ("house buy", "test wallet sell"), and only wallets outside the
+ * team are counted as traders.
+ */
+function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null }) {
+  const [data, setData] = useState<{ trades: Trade[]; traders: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/launches/trades?pool=${pool}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => live && d && setData(d))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [pool, refresh]);
+  if (!data || data.trades.length === 0) return null;
+  return (
+    <div className="mt-5 border-t border-line pt-4">
+      <p className="text-xs text-ink-3">Recent trades</p>
+      <ul className="mt-1 divide-y divide-line">
+        {data.trades.slice(0, 6).map((t) => (
+          <li key={t.signature} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2 text-sm">
+            <span className="text-ink-2">
+              {t.team ? (
+                <span className="mr-1.5 inline-block rounded-[var(--radius-control)] border border-line-strong px-1.5 py-px text-xs text-ink">
+                  {t.team} {t.side}
+                </span>
+              ) : (
+                <span className="mr-1.5 font-mono text-xs text-ink">
+                  {shortAddress(t.wallet)} {t.side}
+                </span>
+              )}
+              <span className="text-xs text-ink-3">{t.market === "damm" ? "on DAMM v2" : "on the curve"}</span>
+            </span>
+            <a
+              href={explorerTx(t.signature)}
+              target="_blank"
+              rel="noreferrer"
+              className="tnum text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+            >
+              {solText(t.sol)} SOL{t.at ? ` · ${timeAgo(t.at)}` : ""}
+            </a>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs leading-relaxed text-ink-3">
+        {data.traders === 0
+          ? "No wallet outside the Sheaf team has traded this launch yet. Every trade here is ours: house buys from Sheaf's own key and wallets from our own tests, and none of it counts as traction."
+          : `${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it. Trades tagged house or test wallet are ours and are not counted.`}
+      </p>
     </div>
   );
 }
@@ -576,7 +722,7 @@ export function LaunchCard({
         <Fact
           label={state?.migrated ? "Graduated at" : "Graduates at"}
           value={state ? `${quantity(state.graduationCap, 2)} SOL` : "—"}
-          note={state ? `${graduationMultiple(state)} × NAV, liquidity locked` : "reading"}
+          note={state ? `market cap, ${graduationMultiple(state)} × NAV, LP locked` : "reading"}
         />
       </dl>
 
@@ -591,7 +737,7 @@ export function LaunchCard({
         {state?.migrated && (
           <p className="mb-4 text-sm leading-relaxed text-ink-2">
             <span className="text-ink">
-              Raised {quantity(state.threshold, 2)} SOL and graduated to a Meteora DAMM v2 pool.
+              Raised {solText(state.threshold)} SOL and graduated to a Meteora DAMM v2 pool.
             </span>{" "}
             The curve&rsquo;s liquidity moved there, locked for good, and trading carries on there,
             from this card.{" "}
@@ -604,6 +750,11 @@ export function LaunchCard({
               The DAMM v2 pool
             </a>
           </p>
+        )}
+        {state?.migrated && (
+          <div className="mb-4">
+            <GraduationNote state={state} symbol={info.baseSymbol} />
+          </div>
         )}
         {connected ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -763,7 +914,10 @@ export function LaunchCard({
           </p>
         )}
 
+        {state && <LaunchTrades pool={info.pool} refresh={done?.signature ?? null} />}
+
         <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
+          {state && <PresetLink state={state} />}
           {!onBasketPage && (
             <Link
               href={`/basket/${basketAddress}`}
@@ -914,30 +1068,11 @@ const PAD = { top: 20, right: 16, bottom: 30, left: 16 };
  * of price and the piece between two points is an exact parabola.
  */
 function Curve({ state, error }: { state: DbcState | null; error: string | null }) {
-  const { ref: measure, width } = useMeasure<HTMLDivElement>();
-  const el = useRef<HTMLDivElement | null>(null);
-  const ref = useCallback(
-    (node: HTMLDivElement | null) => {
-      el.current = node;
-      measure(node);
-    },
-    [measure],
-  );
-  // The chart usually sits below the fold, so the draw-in waits until it is seen.
-  const [seen, setSeen] = useState(false);
-  useEffect(() => {
-    if (!el.current) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) setSeen(true);
-    });
-    observer.observe(el.current);
-    return () => observer.disconnect();
-  }, []);
-  const progress = useTween(seen && state ? Math.min(1, raisedOf(state) / state.threshold) : 0);
+  const { ref, width } = useMeasure<HTMLDivElement>();
   return (
     <div ref={ref} className="h-[220px]">
       {state && width > 0 ? (
-        <CurvePlot state={state} W={width} progress={progress} />
+        <CurvePlot state={state} W={width} />
       ) : (
         <p className="flex h-full items-center justify-center px-6 text-center text-xs text-ink-3">
           {error ?? "Reading the pool"}
@@ -948,19 +1083,22 @@ function Curve({ state, error }: { state: DbcState | null; error: string | null 
 }
 
 /**
- * Eases a value towards its target over 800ms, so the curve draws itself on
- * first view and the marker slides along it after a buy instead of jumping.
+ * Eases a value towards its target over 800ms. It starts at the target, so the
+ * first frame (and any screenshot of it) is already right; only a later change,
+ * such as a buy, slides the fill along the curve.
  */
 function useTween(target: number): number {
-  const [value, setValue] = useState(0);
-  const from = useRef(0);
+  const [value, setValue] = useState(target);
+  const from = useRef(target);
   useEffect(() => {
+    const begin = from.current;
+    if (begin === target) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      from.current = target;
       const frame = requestAnimationFrame(() => setValue(target));
       return () => cancelAnimationFrame(frame);
     }
     const start = performance.now();
-    const begin = from.current;
     let frame = 0;
     const step = (now: number) => {
       const t = Math.min(1, (now - start) / 800);
@@ -976,7 +1114,7 @@ function useTween(target: number): number {
   return value;
 }
 
-function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progress: number }) {
+function CurvePlot({ state, W }: { state: DbcState; W: number }) {
   const x = (raised: number) => PAD.left + (raised / state.threshold) * (W - PAD.left - PAD.right);
   const y = (cap: number) => H - PAD.bottom - (cap / state.graduationCap) * (H - PAD.top - PAD.bottom);
   const base = H - PAD.bottom;
@@ -997,13 +1135,15 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
     Array.from({ length: 97 }, (_, i) => from + ((to - from) * i) / 96)
       .map((f, i) => `${i === 0 ? "M" : "L"}${x(f * state.threshold).toFixed(1)},${y(capAt(f * state.threshold)).toFixed(1)}`)
       .join(" ");
-  // While the marker is moving it sits on the curve itself; at rest it sits at the pool's own price.
-  const settled = Math.abs(progress - Math.min(1, raisedOf(state) / state.threshold)) < 0.0005;
-  const raised = settled ? raisedOf(state) : progress * state.threshold;
+  // The dot and its label always show the pool's settled state; only the fill animates.
+  const raised = raisedOf(state);
+  const fraction = Math.min(1, raised / state.threshold);
+  const progress = useTween(fraction);
   // A graduated pool's live price is off this chart, so its marker stays at the curve's end.
-  const cap = settled && !state.migrated ? state.cap : capAt(raised);
+  const cap = state.migrated ? capAt(raised) : state.cap;
   const filled = `${line(0, progress)} L${x(progress * state.threshold).toFixed(1)},${base} L${x(0)},${base} Z`;
   const px = x(Math.min(raised, state.threshold));
+  const labelLeft = fraction > 0.6;
 
   return (
     <svg
@@ -1015,7 +1155,7 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
       aria-label={
         state.migrated
           ? `Bonding curve: raised ${quantity(state.threshold, 2)} SOL and graduated to Meteora DAMM v2, market cap ${quantity(state.cap, 2)} SOL`
-          : `Bonding curve: ${quantity(state.raised, 4)} of ${quantity(state.threshold, 2)} SOL raised, market cap ${quantity(state.cap, 2)} SOL`
+          : `Bonding curve: ${solText(state.raised)} of ${quantity(state.threshold, 2)} SOL raised, market cap ${quantity(state.cap, 2)} SOL`
       }
     >
       <line x1={x(0)} x2={x(state.threshold)} y1={base} y2={base} stroke="var(--color-line)" />
@@ -1026,20 +1166,20 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
       <circle cx={px} cy={y(cap)} r="6" fill="var(--color-bind)" stroke="var(--color-raised)" strokeWidth="2" />
       {/* Past the middle the label sits left of the dot, so it never runs off the edge. */}
       <text
-        x={progress > 0.6 ? px - 12 : px + 12}
-        y={progress > 0.6 ? y(cap) + 20 : y(cap) - 10}
+        x={labelLeft ? px - 12 : px + 12}
+        y={labelLeft ? y(cap) + 20 : y(cap) - 10}
         fill="var(--color-ink)"
         fontSize="13"
-        textAnchor={progress > 0.6 ? "end" : "start"}
+        textAnchor={labelLeft ? "end" : "start"}
       >
         {state.migrated
-          ? `graduated · raised ${quantity(state.threshold, 2)} SOL`
+          ? `graduated · raised ${solText(state.threshold)} SOL`
           : state.raised === 0
             ? "opens here · be the first buyer"
-            : `now · ${quantity(raised, 4)} SOL in`}
+            : `now · ${solText(raised)} SOL in`}
       </text>
       <circle cx={x(state.threshold)} cy={y(state.graduationCap)} r="4" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.5" />
-      {progress < 0.85 && (
+      {fraction < 0.85 && (
         <text x={x(state.threshold) - 10} y={y(state.graduationCap) + 4} fill="var(--color-ink-2)" fontSize="12" textAnchor="end">
           graduates to Meteora DAMM v2
         </text>

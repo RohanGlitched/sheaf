@@ -2,7 +2,7 @@ import { SheafMark } from "./sheaf-mark";
 
 /**
  * A monthly plan drawn as a sheaf that grows: every run that has filled adds one
- * stalk, so a year of buying is a full bundle. Stalks are coloured by run, from
+ * stalk, so a year of buying is a full bundle. Stalks are colored by run, from
  * the first (deepest) to the latest (brightest), and the band ties whatever has
  * been gathered so far.
  */

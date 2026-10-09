@@ -63,6 +63,18 @@ use spl_token_2022::state::{Account as SplAccount, Mint as SplMint};
 
 declare_id!("GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz");
 
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "Sheaf",
+    project_url: "https://github.com/RohanGlitched/sheaf",
+    contacts: "link:https://github.com/RohanGlitched/sheaf/issues",
+    policy: "https://github.com/RohanGlitched/sheaf/issues",
+    preferred_languages: "en",
+    source_code: "https://github.com/RohanGlitched/sheaf",
+    source_release: "",
+    auditors: "None"
+}
+
 /// Share tokens always have 6 decimals.
 pub const SHARE_DECIMALS: u8 = 6;
 /// One whole share, in raw share units.
@@ -71,6 +83,14 @@ pub const ONE_SHARE: u64 = 1_000_000;
 pub const MAX_COMPONENTS: usize = 8;
 /// Creator fees are capped at 1%.
 pub const MAX_CREATOR_FEE_BPS: u16 = 100;
+/// The protocol's creation fee: 0.10% of the shares a deposit creates, written
+/// into every basket at `create_basket` and never changeable afterwards.
+/// Redemption is free. Baskets created before this fee existed carry 0.
+pub const PROTOCOL_FEE_BPS: u16 = 10;
+/// Where claimed protocol fees go: the treasury's Token-2022 share account
+/// (its associated token account for the basket's share mint).
+pub const TREASURY: Pubkey =
+    anchor_lang::solana_program::pubkey!("9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF");
 pub const MAX_NAME_LEN: usize = 32;
 pub const MAX_SYMBOL_LEN: usize = 10;
 /// Basis-point denominator.
@@ -95,9 +115,16 @@ pub const BACKED_PAUSER: Pubkey =
 pub const PRESTOCKS_ISSUER: Pubkey =
     anchor_lang::solana_program::pubkey!("WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc");
 /// The write cluster's stand-in issuer: the key that mints the devnet mirrors
-/// of xStocks and PreStocks and the test dollar.
+/// of xStocks and PreStocks and the test dollar. Known only in a `devnet`
+/// build.
 pub const STAND_IN_ISSUER: Pubkey =
     anchor_lang::solana_program::pubkey!("B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L");
+/// The write cluster's deploy key, which set up the PreStocks mirrors and holds
+/// their transfer-fee authority. It is also the devnet program's upgrade
+/// authority, so trusting it as an issuer there adds no power it lacks. Known
+/// only in a `devnet` build.
+pub const STAND_IN_FEE_AUTHORITY: Pubkey =
+    anchor_lang::solana_program::pubkey!("7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4");
 
 /// Issuers of tokenized stocks whose powers a component may carry.
 ///
@@ -109,12 +136,23 @@ pub const STAND_IN_ISSUER: Pubkey =
 /// every authority on them is empty or one of these keys, so a basket's
 /// holders trust each stock's issuer and nobody else: a basket creator cannot
 /// slip in a token that gives *them* such a lever. The keys were read off the
-/// live mainnet mints (see docs/program.md). A build with the `mainnet`
-/// feature leaves out the write cluster's stand-in.
-#[cfg(not(feature = "mainnet"))]
-pub const KNOWN_ISSUERS: [Pubkey; 4] = [BACKED_ISSUER, BACKED_PAUSER, PRESTOCKS_ISSUER, STAND_IN_ISSUER];
-#[cfg(feature = "mainnet")]
+/// live mainnet mints (see docs/program.md).
+///
+/// The default build knows only the real issuers. The write cluster's
+/// stand-in keys are added by the `devnet` feature alone, so forgetting a flag
+/// can never produce a mainnet program that trusts a server key as an issuer.
+/// The list is compile-time: an issuer rotating a key stops new deposits into
+/// affected baskets until an upgrade (redemptions never re-check it).
+#[cfg(not(feature = "devnet"))]
 pub const KNOWN_ISSUERS: [Pubkey; 3] = [BACKED_ISSUER, BACKED_PAUSER, PRESTOCKS_ISSUER];
+#[cfg(feature = "devnet")]
+pub const KNOWN_ISSUERS: [Pubkey; 5] = [
+    BACKED_ISSUER,
+    BACKED_PAUSER,
+    PRESTOCKS_ISSUER,
+    STAND_IN_ISSUER,
+    STAND_IN_FEE_AUTHORITY,
+];
 
 /// Whether `key` is in `KNOWN_ISSUERS`.
 pub fn is_known_issuer(key: &Pubkey) -> bool {
@@ -242,6 +280,8 @@ pub mod sheaf {
         basket.mint_count = 0;
         basket.redeem_count = 0;
         basket.bump = ctx.bumps.basket;
+        basket.protocol_fee_bps = PROTOCOL_FEE_BPS;
+        basket.protocol_fee_accrued = 0;
 
         emit!(BasketCreated {
             basket: basket_key,
@@ -250,6 +290,12 @@ pub mod sheaf {
             name,
             symbol,
             component_count: basket.component_count,
+        });
+        emit!(BasketFeeTerms {
+            basket: basket_key,
+            creator_fee_bps,
+            protocol_fee_bps: PROTOCOL_FEE_BPS,
+            treasury: TREASURY,
         });
         Ok(())
     }
@@ -275,10 +321,16 @@ pub mod sheaf {
             shares,
         )?;
 
-        // The creator's cut comes out of the shares issued, never out of the
-        // vault, so backing per share is identical before and after.
-        let fee_shares = creator_fee_on(shares, basket.creator_fee_bps)?;
-        let net_shares = shares.checked_sub(fee_shares).ok_or(SheafError::MathOverflow)?;
+        // The creator's and the protocol's cuts come out of the shares
+        // created, never out of the vault, so backing per share is identical
+        // before and after. The protocol's cut is accrued, backed by this very
+        // deposit, and minted to the treasury by `claim_protocol_fee`.
+        let (fee_shares, protocol_shares) =
+            fee_split(shares, basket.creator_fee_bps, basket.protocol_fee_bps)?;
+        let net_shares = shares
+            .checked_sub(fee_shares)
+            .and_then(|n| n.checked_sub(protocol_shares))
+            .ok_or(SheafError::MathOverflow)?;
         require!(net_shares > 0, SheafError::ZeroShares);
 
         issue_shares(
@@ -297,6 +349,7 @@ pub mod sheaf {
 
         let basket = &mut ctx.accounts.basket;
         basket.mint_count = basket.mint_count.saturating_add(1);
+        accrue_protocol_fee(basket, basket_key, protocol_shares)?;
 
         emit!(SharesMinted {
             basket: basket_key,
@@ -489,8 +542,14 @@ pub mod sheaf {
 
         let basket = &ctx.accounts.basket;
         let basket_key = basket.key();
-        let gross = gross_shares_for_net(shares_out, basket.creator_fee_bps)?;
-        let fee_shares = gross.checked_sub(shares_out).ok_or(SheafError::MathOverflow)?;
+        let gross = gross_shares_for_net(shares_out, total_fee_bps(basket))?;
+        let (fee_shares, protocol_shares) =
+            fee_split(gross, basket.creator_fee_bps, basket.protocol_fee_bps)?;
+        require!(
+            gross.checked_sub(fee_shares).and_then(|n| n.checked_sub(protocol_shares))
+                == Some(shares_out),
+            SheafError::MathOverflow
+        );
 
         // Same deposit path, rounding and vault checks as `mint_shares`.
         let deposited = deposit_components(
@@ -580,6 +639,7 @@ pub mod sheaf {
 
         let basket = &mut ctx.accounts.basket;
         basket.mint_count = basket.mint_count.saturating_add(1);
+        accrue_protocol_fee(basket, basket_key, protocol_shares)?;
 
         // Every share issuance emits SharesMinted, so supply can be rebuilt
         // from events alone; OrderFilled carries the desk-specific detail.
@@ -616,6 +676,23 @@ pub mod sheaf {
         let by = ctx.accounts.caller.key();
         let expired = now > order.end_ts;
         require!(by == order.buyer || expired, SheafError::OrderNotExpired);
+        // Anyone else's refund lands only in the buyer's canonical cash account,
+        // the one every client reads, never in a side account a third party
+        // opened in the buyer's name.
+        if by != order.buyer {
+            let (canonical, _) = Pubkey::find_program_address(
+                &[
+                    order.buyer.as_ref(),
+                    ctx.accounts.cash_token_program.key().as_ref(),
+                    order.cash_mint.as_ref(),
+                ],
+                &anchor_spl::associated_token::ID,
+            );
+            require!(
+                ctx.accounts.buyer_cash_account.key() == canonical,
+                SheafError::RefundNotToBuyerAta
+            );
+        }
 
         let refunded = drain_and_close_escrow(
             &order,
@@ -775,6 +852,12 @@ pub mod sheaf {
         plan.auction_secs = auction_secs;
         plan.min_ref_shares_per_cash_e9 = min_ref_shares_per_cash_e9;
         plan.max_ref_shares_per_cash_e9 = max_ref_shares_per_cash_e9;
+        // A new terms epoch: a fill of an order the plan placed before this
+        // re-centre no longer moves the reference (`fill_order` updates the
+        // plan only from orders created at or after `created_at`), so a stale
+        // order cannot undo the owner's update. The plan's opening time stays
+        // in the `PlanOpened` event.
+        plan.created_at = Clock::get()?.unix_timestamp;
 
         emit!(PlanUpdated {
             plan: plan.key(),
@@ -900,6 +983,44 @@ pub mod sheaf {
             runs_done: plan.runs_total - plan.runs_left,
             runs_left: plan.runs_left,
             revoked,
+        });
+        Ok(())
+    }
+
+    /// Mint a basket's accrued protocol fee to the treasury's share account and
+    /// zero the counter. Permissionless: the destination is fixed, so anyone
+    /// may crank it (create the treasury's associated share account first).
+    pub fn claim_protocol_fee(ctx: Context<ClaimProtocolFee>) -> Result<()> {
+        let basket = &ctx.accounts.basket;
+        let basket_key = basket.key();
+        let shares = basket.protocol_fee_accrued;
+        require!(shares > 0, SheafError::NothingToClaim);
+        // The same check every issuance makes: no lever over the shares minted.
+        check_share_mint_extensions(&ctx.accounts.share_mint.to_account_info().try_borrow_data()?)?;
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"basket",
+            basket.creator.as_ref(),
+            basket.symbol.as_bytes(),
+            &[basket.bump],
+        ]];
+        token_interface::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.share_token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.share_mint.to_account_info(),
+                    to: ctx.accounts.treasury_share_account.to_account_info(),
+                    authority: ctx.accounts.basket.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            shares,
+        )?;
+        let basket = &mut ctx.accounts.basket;
+        basket.protocol_fee_accrued = 0;
+        emit!(ProtocolFeeClaimed {
+            basket: basket_key,
+            treasury_share_account: ctx.accounts.treasury_share_account.key(),
+            shares,
         });
         Ok(())
     }
@@ -1284,6 +1405,31 @@ pub struct UpdatePlan<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ClaimProtocolFee<'info> {
+    #[account(mut)]
+    pub basket: Account<'info, Basket>,
+
+    #[account(mut, address = basket.share_mint @ SheafError::ShareMintMismatch)]
+    /// CHECK: pinned to the basket's recorded share mint.
+    pub share_mint: UncheckedAccount<'info>,
+
+    #[account(address = TREASURY @ SheafError::TreasuryMismatch)]
+    /// CHECK: pinned to the treasury constant.
+    pub treasury: UncheckedAccount<'info>,
+
+    /// The treasury's canonical share account, and nowhere else.
+    #[account(
+        mut,
+        associated_token::mint = share_mint,
+        associated_token::authority = treasury,
+        associated_token::token_program = share_token_program,
+    )]
+    pub treasury_share_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    pub share_token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
 pub struct CloseLegacyPlan<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -1335,6 +1481,14 @@ pub struct Basket {
     pub mint_count: u64,
     pub redeem_count: u64,
     pub bump: u8,
+    /// The protocol's creation fee, fixed at `create_basket` and never
+    /// changed. Appended into the account's headroom, so a basket created
+    /// before it existed reads its zeroed tail as 0: no protocol fee, ever.
+    pub protocol_fee_bps: u16,
+    /// Protocol-fee shares created and backed in the vault but not yet minted;
+    /// `claim_protocol_fee` mints them to the treasury. The vault backs
+    /// `supply + protocol_fee_accrued`.
+    pub protocol_fee_accrued: u64,
 }
 
 impl Basket {
@@ -1346,7 +1500,7 @@ impl Basket {
         + MAX_COMPONENTS * 48       // components
         + 8 + 8 + 8                 // created_at, mint_count, redeem_count
         + 1                         // bump
-        + 64; // headroom
+        + 64; // headroom: protocol_fee_bps and protocol_fee_accrued use 10 of it
 }
 
 /// A cash order on the desk. PDA: `["order", basket, buyer, nonce_le]` for
@@ -1415,6 +1569,31 @@ pub struct Plan {
 pub const LEGACY_PLAN_LEN: usize = 280;
 
 // ------------------------------------------------------------------ events
+
+/// The fee terms a basket was created with. Both are fixed for its lifetime.
+#[event]
+pub struct BasketFeeTerms {
+    pub basket: Pubkey,
+    pub creator_fee_bps: u16,
+    pub protocol_fee_bps: u16,
+    pub treasury: Pubkey,
+}
+
+/// Protocol-fee shares created (and backed) by one issuance, not yet minted.
+#[event]
+pub struct ProtocolFeeAccrued {
+    pub basket: Pubkey,
+    pub shares: u64,
+    pub accrued: u64,
+}
+
+/// Accrued protocol-fee shares minted to the treasury.
+#[event]
+pub struct ProtocolFeeClaimed {
+    pub basket: Pubkey,
+    pub treasury_share_account: Pubkey,
+    pub shares: u64,
+}
 
 #[event]
 pub struct BasketCreated {
@@ -1657,16 +1836,16 @@ fn freeze_authority_of(data: &[u8]) -> Result<Option<Pubkey>> {
 /// What a component may carry.
 ///
 /// Always fine: metadata, group membership, the ScaledUiAmount dividend
-/// multiplier (display only), a transfer fee (a deposit grosses up for it,
-/// and a fee can never stop a transfer), and an "initialised" default
-/// account state.
+/// multiplier (display only), and an "initialised" default account state.
 ///
 /// Issuer powers, accepted only when every authority on them is empty or a
 /// known stock issuer (`KNOWN_ISSUERS`), because each one is a lever over the
 /// vault: a freeze authority, a permanent delegate (moves vault balances), a
-/// pause switch (blocks every redemption), confidential-transfer configs, and
-/// a transfer hook with no program set (whose authority could set one, and a
-/// hook's extra accounts are not forwarded, so that would brick the basket).
+/// pause switch (blocks every redemption), a transfer fee (its authority can
+/// raise it until deposits fail or pay double), confidential-transfer
+/// configs, and a transfer hook with no program set (whose authority could set
+/// one, and a hook's extra accounts are not forwarded, so that would brick the
+/// basket).
 /// Every real xStock and PreStock carries all of these under its issuer.
 ///
 /// Refused outright, along with anything unrecognised: a transfer hook with a
@@ -1674,8 +1853,7 @@ fn freeze_authority_of(data: &[u8]) -> Result<Option<Pubkey>> {
 fn check_component_extensions(data: &[u8]) -> Result<()> {
     for_each_mint_extension(data, |ty, value| {
         let ok = match ty {
-            ext::TRANSFER_FEE_CONFIG
-            | ext::METADATA_POINTER
+            ext::METADATA_POINTER
             | ext::TOKEN_METADATA
             | ext::GROUP_POINTER
             | ext::TOKEN_GROUP
@@ -1683,6 +1861,13 @@ fn check_component_extensions(data: &[u8]) -> Result<()> {
             | ext::TOKEN_GROUP_MEMBER
             | ext::SCALED_UI_AMOUNT => true,
             ext::DEFAULT_ACCOUNT_STATE => value.first() == Some(&ext::STATE_INITIALIZED),
+            // TransferFeeConfig = { transfer_fee_config_authority, .. }: its
+            // authority could raise the fee until every deposit overflows or
+            // pays it double (and harvest the difference), so only an issuer.
+            ext::TRANSFER_FEE_CONFIG => {
+                require!(none_or_known_issuer(value), SheafError::ComponentIssuerAuthority);
+                true
+            }
             // PermanentDelegate = { delegate }; PausableConfig = { authority,
             // paused }; ConfidentialTransferMint = { authority, .. };
             // ConfidentialTransferFeeConfig = { authority, .. }.
@@ -1714,8 +1899,12 @@ fn check_component_extensions(data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// A cash mint must not let anyone take escrowed cash back out, freeze it in
-/// place, or make it untransferable before the filler is paid. Refused: a
+/// A cash mint must not let anyone take escrowed cash back out, pause it, or
+/// make it untransferable before the filler is paid. Not checked: the base
+/// freeze authority, which is the cash issuer's (Circle holds one on USDC) and
+/// can freeze any holder's account, an escrow or a filler's included; that is
+/// the issuer trust every holder of that cash already has, and fillers should
+/// fill only against cash mints they allowlist. Refused: a
 /// permanent delegate, a pause switch, a frozen default account state,
 /// non-transferability, a transfer hook with a program set (its accounts are
 /// not forwarded, so it would only brick the order), and any extension this
@@ -2136,13 +2325,50 @@ pub fn required_shares(
     Ok(start_shares - decay as u64)
 }
 
-/// The creator fee on `shares`, exactly as `mint_shares` charges it.
+/// The creator fee on `shares` alone, floored (a basket with no protocol fee
+/// charges exactly this).
 pub fn creator_fee_on(shares: u64, fee_bps: u16) -> Result<u64> {
     mul_div_floor(shares, fee_bps as u64, BPS)
 }
 
-/// The smallest gross share count whose creator fee leaves exactly `net` for
-/// the buyer. The net of `g` grows by 0 or 1 per unit of `g`, so the smallest
+/// A basket's creator and protocol fee together, in basis points.
+pub fn total_fee_bps(basket: &Basket) -> u16 {
+    basket.creator_fee_bps.saturating_add(basket.protocol_fee_bps)
+}
+
+/// The (creator, protocol) fee shares on `shares` created.
+///
+/// One rounding for the pair: together they take `floor(shares × (c + p) /
+/// 10^4)`, so the depositor's net is monotone in `shares` and
+/// `gross_shares_for_net` stays exact. The protocol takes
+/// `floor(shares × p / 10^4)` of that, and the creator the rest, which is
+/// never less than its own `floor(shares × c / 10^4)` and at most one raw unit
+/// more. With `p = 0` this is exactly the creator fee alone.
+pub fn fee_split(shares: u64, creator_bps: u16, protocol_bps: u16) -> Result<(u64, u64)> {
+    let total = mul_div_floor(shares, creator_bps as u64 + protocol_bps as u64, BPS)?;
+    let protocol = mul_div_floor(shares, protocol_bps as u64, BPS)?;
+    Ok((total - protocol, protocol))
+}
+
+/// Record protocol-fee shares created by one issuance.
+fn accrue_protocol_fee(basket: &mut Basket, basket_key: Pubkey, shares: u64) -> Result<()> {
+    if shares == 0 {
+        return Ok(());
+    }
+    basket.protocol_fee_accrued = basket
+        .protocol_fee_accrued
+        .checked_add(shares)
+        .ok_or(SheafError::MathOverflow)?;
+    emit!(ProtocolFeeAccrued {
+        basket: basket_key,
+        shares,
+        accrued: basket.protocol_fee_accrued,
+    });
+    Ok(())
+}
+
+/// The smallest gross share count whose fees (`fee_bps` = creator plus
+/// protocol, see `fee_split`) leave exactly `net` for the buyer. The net of `g` grows by 0 or 1 per unit of `g`, so the smallest
 /// `g` netting at least `net` nets exactly `net`. `ceil(net / (1 - fee))` can
 /// overshoot it by at most two units (the fee is floored), so step down.
 pub fn gross_shares_for_net(net: u64, fee_bps: u16) -> Result<u64> {
@@ -2403,6 +2629,12 @@ pub enum SheafError {
     CashMintAuthority,
     #[msg("Share mint must be a Token-2022 mint")]
     ShareMintNotToken2022,
+    #[msg("This basket has no protocol fee to claim")]
+    NothingToClaim,
+    #[msg("Protocol fees go only to the treasury")]
+    TreasuryMismatch,
+    #[msg("A third party's refund must go to the buyer's associated cash account")]
+    RefundNotToBuyerAta,
 }
 
 #[cfg(test)]
@@ -2594,11 +2826,15 @@ mod tests {
             code(SheafError::ComponentIssuerAuthority),
             "a freeze authority is an issuer power too"
         );
-        #[cfg(not(feature = "mainnet"))]
         assert_eq!(
             failure(check_component_extensions(&with_freezer(mint_with(&[]), &STAND_IN_ISSUER))),
-            None,
-            "the write cluster's stand-in issuer is known outside a mainnet build"
+            if cfg!(feature = "devnet") { None } else { code(SheafError::ComponentIssuerAuthority) },
+            "the write cluster's stand-in issuer is known only in a devnet build"
+        );
+        // A transfer fee is an issuer power too: under the creator it is refused.
+        assert_eq!(
+            failure(check_component_extensions(&mint_with(&[authority_ext(ext::TRANSFER_FEE_CONFIG, &creator, 108)]))),
+            code(SheafError::ComponentIssuerAuthority)
         );
         for bad in [frozen.clone(), live_hook.clone(), non_transferable.clone(), close_authority.clone(), unknown.clone()] {
             assert_eq!(
@@ -2645,6 +2881,10 @@ mod tests {
         assert_eq!(PRESTOCKS_ISSUER.to_string(), "WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc");
         assert!(KNOWN_ISSUERS.iter().all(is_known_issuer));
         assert!(!is_known_issuer(&Pubkey::default()));
+        // The default build is mainnet-safe: no server key is an issuer.
+        assert_eq!(is_known_issuer(&STAND_IN_ISSUER), cfg!(feature = "devnet"));
+        assert_eq!(is_known_issuer(&STAND_IN_FEE_AUTHORITY), cfg!(feature = "devnet"));
+        assert_eq!(TREASURY.to_string(), "9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF");
     }
 
     #[test]
@@ -2664,6 +2904,74 @@ mod tests {
         let g = pre_fee_amount(&v, 1_000_000_000, 1050).unwrap();
         assert_eq!(net(g, 100), 1_000_000_000);
         assert!(pre_fee_amount(&v[..100], 1, 0).is_err());
+    }
+
+    #[test]
+    fn protocol_fee_split_and_gross_up() {
+        // No protocol fee: exactly the creator fee alone, as before.
+        for shares in [0u64, 1, 333, 334, 999_999, 1_000_000, 123_456_789] {
+            assert_eq!(fee_split(shares, 30, 0).unwrap(), (creator_fee_on(shares, 30).unwrap(), 0));
+        }
+        // 1 share at 0.25% + 0.10%: 2,500 to the creator, 1,000 to the protocol.
+        assert_eq!(fee_split(1_000_000, 25, 10).unwrap(), (2_500, 1_000));
+        // Rounding: below 1,000 raw units the protocol takes nothing; the pair
+        // is floored once and the creator never gets less than its own floor.
+        assert_eq!(fee_split(999, 0, 10).unwrap(), (0, 0));
+        assert_eq!(fee_split(1_000, 0, 10).unwrap(), (0, 1));
+        for g in 0u64..50_000 {
+            for (c, p) in [(0u16, 10u16), (25, 10), (30, 10), (100, 10), (7, 3)] {
+                let (cf, pf) = fee_split(g, c, p).unwrap();
+                assert_eq!(cf + pf, g * (c as u64 + p as u64) / 10_000);
+                assert_eq!(pf, g * p as u64 / 10_000);
+                assert!(cf >= g * c as u64 / 10_000 && cf <= g * c as u64 / 10_000 + 1);
+            }
+        }
+        // A desk fill delivers the smallest gross whose two fees leave the
+        // buyer exactly `net`.
+        for (c, p) in [(0u16, 10u16), (25, 10), (100, 10)] {
+            for net in (1u64..20_000).chain([999_999, 1_000_000, 2_500_001]) {
+                let g = gross_shares_for_net(net, c + p).unwrap();
+                let (cf, pf) = fee_split(g, c, p).unwrap();
+                assert_eq!(g - cf - pf, net);
+                if g > net {
+                    let (cf, pf) = fee_split(g - 1, c, p).unwrap();
+                    assert!(g - 1 - cf - pf < net);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn basket_fee_fields_fit_the_headroom_and_read_zero_on_old_baskets() {
+        let mut b = Basket {
+            creator: Pubkey::new_unique(),
+            share_mint: Pubkey::new_unique(),
+            token_program: spl_token_2022::ID,
+            name: "x".repeat(MAX_NAME_LEN),
+            symbol: "y".repeat(MAX_SYMBOL_LEN),
+            creator_fee_bps: 100,
+            component_count: 8,
+            components: Default::default(),
+            created_at: 1,
+            mint_count: 2,
+            redeem_count: 3,
+            bump: 254,
+            protocol_fee_bps: PROTOCOL_FEE_BPS,
+            protocol_fee_accrued: u64::MAX,
+        };
+        let mut buf = Vec::new();
+        b.try_serialize(&mut buf).unwrap();
+        assert!(buf.len() <= Basket::SPACE, "the longest basket still fits its account");
+        // An old basket: the same bytes up to `bump`, then the zeroed tail.
+        b.protocol_fee_bps = 0;
+        b.protocol_fee_accrued = 0;
+        let mut old = Vec::new();
+        b.try_serialize(&mut old).unwrap();
+        let mut account = old[..old.len() - 10].to_vec();
+        account.resize(Basket::SPACE, 0);
+        let read = Basket::try_deserialize(&mut &account[..]).unwrap();
+        assert_eq!((read.protocol_fee_bps, read.protocol_fee_accrued), (0, 0));
+        assert_eq!(read.bump, 254);
     }
 
     #[test]

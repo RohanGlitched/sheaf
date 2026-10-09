@@ -6,6 +6,7 @@ import {
   http,
   maxUint256,
   nonceManager,
+  parseAbiItem,
   parseEther,
   parseEventLogs,
   publicActions,
@@ -15,7 +16,7 @@ import {
 } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { tempoModerato } from "viem/chains";
-import { Account as TempoAccount, Actions as TempoActions } from "viem/tempo";
+import { Account as TempoAccount, Actions as TempoActions, Addresses as TempoAddresses } from "viem/tempo";
 import { sendTransactionSync } from "viem/actions";
 import { DEPLOYED, type ChainBasket, type Deployment } from "./chains";
 import {
@@ -105,6 +106,10 @@ export function rateLimiter(windowMs: number, max: number) {
       list.push(Date.now());
       hits.set(key, list);
     },
+    /** Give back the latest hit, when the action it reserved did not happen. */
+    undo(key: string) {
+      hits.get(key)?.pop();
+    },
   };
 }
 
@@ -155,6 +160,11 @@ const MAX_MIRROR_SHARES = 5n * ONE_SHARE;
 const MIRROR_BAND = 0.05;
 /** House fills per buyer per hour, across chains. Per instance, like the faucets. */
 const perBuyer = rateLimiter(60 * 60_000, 3);
+/**
+ * SIP instalments the house placed itself, as network:id. They are bounded by the
+ * account's access-key budget already, so the per-buyer quota never strands one.
+ */
+const sipOrders = new Set<string>();
 
 function basketOf(d: Deployment, address: string): ChainBasket | undefined {
   return d.baskets.find((b) => b.address.toLowerCase() === address.toLowerCase());
@@ -191,7 +201,8 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
     }
   }
   const buyerKey = o.buyer.toLowerCase();
-  const quota = perBuyer.check(buyerKey);
+  const counted = !sipOrders.has(`${d.network}:${o.id}`);
+  const quota = counted ? perBuyer.check(buyerKey) : { ok: true, retryInSec: 0 };
   if (!quota.ok) return { ...base, status: "skipped", reason: `the house has filled this buyer's orders enough for now; try again in ${Math.ceil(quota.retryInSec / 60)} min, or any holder can fill it` };
 
   const balances = await Promise.all(
@@ -236,7 +247,7 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
     }).extend(publicActions);
     const receipt = await sendTransactionSync(tempo, { calls: [...calls, fillCall] } as never);
     if (receipt.status !== "success") return { ...base, status: "failed", reason: "the fill reverted", hash: receipt.transactionHash };
-    perBuyer.hit(buyerKey);
+    if (counted) perBuyer.hit(buyerKey);
     return { ...base, status: "filled", hash: receipt.transactionHash };
   }
 
@@ -246,7 +257,7 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
   const hash = await wallet.sendTransaction({ to: fillCall.to, data: fillCall.data });
   const receipt = await client.waitForTransactionReceipt({ hash, timeout: 60_000 });
   if (receipt.status !== "success") return { ...base, status: "failed", reason: "the fill reverted", hash };
-  perBuyer.hit(buyerKey);
+  if (counted) perBuyer.hit(buyerKey);
   return { ...base, status: "filled", hash };
 }
 
@@ -291,7 +302,7 @@ export type SipResult = {
  * key, for that account. The chain decides whether it may; the keeper only adds
  * the schedule (one instalment per period).
  */
-export async function runTempoSip(account: Address, action: SipAction): Promise<SipResult> {
+export async function runTempoSip(account: Address, action: SipAction, opts: { auto?: boolean } = {}): Promise<SipResult> {
   const d = deploymentFor("tempoTestnet");
   const key = houseKey();
   if (!d || !key) throw new Error("Tempo keeper not configured.");
@@ -299,19 +310,23 @@ export async function runTempoSip(account: Address, action: SipAction): Promise<
   if (sipInFlight.has(slot)) throw new SipRefused("The keeper is already acting for this account.");
   sipInFlight.add(slot);
   try {
-    return await runTempoSipOnce(d, key, account, action);
+    return await runTempoSipOnce(d, key, account, action, !!opts.auto);
   } finally {
     sipInFlight.delete(slot);
   }
 }
 
-/** A request the keeper turns down before it reaches the chain. */
-export class SipRefused extends Error {}
+/** A request the keeper turns down before it reaches the chain; `retryAt` is when asking again could succeed. */
+export class SipRefused extends Error {
+  constructor(message: string, readonly retryAt?: number) {
+    super(message);
+  }
+}
 
 /** One SIP call per account at a time, so two requests cannot both pass the budget read. */
 const sipInFlight = new Set<string>();
 
-async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action: SipAction): Promise<SipResult> {
+async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action: SipAction, auto: boolean): Promise<SipResult> {
   const keeper = TempoAccount.fromSecp256k1(key, { access: account });
   const client = createClient({
     account: keeper,
@@ -340,11 +355,12 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
     } catch {
       throw new SipRefused("Could not read this plan's budget on Tempo. Try again in a moment.");
     }
-    // No live key: let the chain say no.
+    // No live key: let the chain say no, unless this is the schedule, which only acts for live keys.
+    if (!budget && auto) throw new SipRefused("No live access key for this account.");
     if (budget) {
       const resets = budget.periodEnd ? ` It resets ${new Date(Number(budget.periodEnd) * 1000).toISOString().slice(0, 10)}.` : "";
       if (action === "instalment" && budget.remaining < TEMPO_SIP.limit) {
-        throw new SipRefused(`This period's instalment has already been placed.${resets}`);
+        throw new SipRefused(`This period's instalment has already been placed.${resets}`, budget.periodEnd ? Number(budget.periodEnd) * 1000 : undefined);
       }
       if (action === "overspend" && budget.remaining >= TEMPO_SIP.overspend) {
         throw new SipRefused("Place this period's instalment first; the overspend test needs the budget it leaves.");
@@ -379,9 +395,97 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
   let fill: FillResult | undefined;
   if (orderId != null) {
     // The house is also a participant: deliver the mirrors in kind and mint the shares to the investor.
+    if (action === "instalment") sipOrders.add(`${d.network}:${orderId}`);
     fill = (await runEvmKeeper(d, { orderId, max: 1 }))[0];
   }
   return { action, ok: true, hash: receipt.transactionHash, orderId, fill };
+}
+
+// ------------------------------------------------------------ SIP schedule
+
+/**
+ * The schedule half of a Tempo SIP, run by the cron's sweep: every account that
+ * authorized the house key gets its instalment once a period, without anyone
+ * pressing a button. Accounts are found from the keychain's own KeyAuthorized
+ * events naming the house key, so there is no list to keep; the budget read in
+ * runTempoSip keeps it to one instalment per period.
+ */
+const KEY_AUTHORIZED = parseAbiItem("event KeyAuthorized(address indexed account, address indexed publicKey, uint8 signatureType, uint64 expiry)");
+/** Tempo's RPC answers getLogs over at most this many blocks. */
+const LOG_RANGE = 100_000n;
+/** Leave a fresh authorization to the visitor's own Instalment button for this long. */
+const SIP_GRACE_MS = 15 * 60_000;
+/** Instalments the schedule places per sweep, so one sweep stays short. */
+const SIP_PER_SWEEP = 2;
+/** Budgets the schedule reads per sweep (two Tempo reads each); the rest wait for the next sweep. */
+const SIP_CHECKS_PER_SWEEP = 6;
+
+const sipAccounts = new Map<string, { account: Address; authorizedAt: number; nextCheck: number }>();
+let sipScannedTo: bigint | null = null;
+let sipScan: Promise<void> | null = null;
+
+async function discoverSipAccounts(d: Deployment) {
+  const client = publicClientFor(d);
+  const house = houseAccount()!.address;
+  const latest = await client.getBlockNumber();
+  const [head, back] = await Promise.all([
+    client.getBlock({ blockNumber: latest }),
+    client.getBlock({ blockNumber: latest > LOG_RANGE ? latest - LOG_RANGE : 0n }),
+  ]);
+  const secsPerBlock = Math.max(0.05, Number(head.timestamp - back.timestamp) / Number(latest > LOG_RANGE ? LOG_RANGE : latest || 1n));
+  // First pass: one period back, since an older key has had this period's instalment or expired.
+  const lookback = BigInt(Math.ceil((TEMPO_SIP.period + 86_400) / secsPerBlock));
+  let from = sipScannedTo != null ? sipScannedTo + 1n : latest > lookback ? latest - lookback : 0n;
+  const ranges: [bigint, bigint][] = [];
+  for (; from <= latest; from += LOG_RANGE) ranges.push([from, from + LOG_RANGE - 1n > latest ? latest : from + LOG_RANGE - 1n]);
+  for (let i = 0; i < ranges.length; i += 6) {
+    const batch = await Promise.all(
+      ranges.slice(i, i + 6).map(([fromBlock, toBlock]) =>
+        client.getLogs({ address: TempoAddresses.accountKeychain as Address, event: KEY_AUTHORIZED, args: { publicKey: house }, fromBlock, toBlock }),
+      ),
+    );
+    for (const log of batch.flat()) {
+      const account = log.args.account;
+      if (!account || log.blockNumber == null) continue;
+      const authorizedAt = (Number(head.timestamp) - Number(latest - log.blockNumber) * secsPerBlock) * 1000;
+      const prev = sipAccounts.get(account.toLowerCase());
+      // A newer authorization (after a revoke, say) is a fresh plan: check it again.
+      if (!prev || prev.authorizedAt < authorizedAt) sipAccounts.set(account.toLowerCase(), { account, authorizedAt, nextCheck: 0 });
+    }
+  }
+  sipScannedTo = latest;
+}
+
+export type SipScheduleResult = {
+  accounts: number;
+  checked: number;
+  placed: { account: string; ok: boolean; orderId?: number; fill?: string; refusal?: string }[];
+  ms: number;
+};
+
+export async function runSipSchedule(): Promise<SipScheduleResult> {
+  const started = Date.now();
+  const d = deploymentFor("tempoTestnet");
+  if (!d || !houseKey()) return { accounts: 0, checked: 0, placed: [], ms: 0 };
+  sipScan ??= discoverSipAccounts(d).finally(() => (sipScan = null));
+  await sipScan;
+  const placed: SipScheduleResult["placed"] = [];
+  const now = Date.now();
+  let checked = 0;
+  for (const entry of sipAccounts.values()) {
+    if (placed.length >= SIP_PER_SWEEP || checked >= SIP_CHECKS_PER_SWEEP) break;
+    if (now < entry.nextCheck || now - entry.authorizedAt < SIP_GRACE_MS) continue;
+    checked++;
+    try {
+      const r = await runTempoSip(entry.account, "instalment", { auto: true });
+      placed.push({ account: entry.account, ok: r.ok, orderId: r.orderId, fill: r.fill?.status, refusal: r.refusal });
+      // Placed: next period. Refused by the chain (no AlphaUSD, say): try again in an hour.
+      entry.nextCheck = now + (r.ok ? TEMPO_SIP.period * 1000 : 3_600_000);
+    } catch (err) {
+      entry.nextCheck = err instanceof SipRefused ? (err.retryAt ?? now + 6 * 3_600_000) : now + 600_000;
+    }
+  }
+  return { accounts: sipAccounts.size, checked, placed, ms: Date.now() - started };
 }
 
 export { BASKET_ABI };

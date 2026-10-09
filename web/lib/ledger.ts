@@ -7,10 +7,11 @@
  * module walks a program's or a basket's signatures, decodes the events out of
  * the logs, and hands them over newest first, a few at a time as they arrive.
  *
- * It runs in the browser on purpose. A public RPC endpoint rations
- * `getTransaction` per caller, and a visitor's own connection has that budget
- * to itself, where a server shared by every visitor does not. Decoded events
- * never change, so each one is kept in local storage, and the repository
+ * The site reads it on the server (readLedgerBatched, behind /api/ledger, with
+ * the transactions fetched in JSON-RPC batches and cached), so a visitor makes
+ * one request instead of one per transaction. readLedger is the same walk for a
+ * browser or a script on its own connection. Decoded events never change, so in
+ * a browser each one is kept in local storage, and the repository
  * carries a snapshot of everything decoded at the last release
  * (public/ledger.snapshot.json, written by scripts/snapshot-ledger.mjs), so a
  * first visit starts from there and only reads what landed since. Every row links
@@ -48,6 +49,12 @@ export type LedgerEntry = {
   cash?: number;
   /** A plan's runs, on a plan opening. */
   runs?: number;
+  /** The order account, on an order, a plan run, a fill or a refund: what ties a fill to its order. */
+  order?: string;
+  /** The plan, when the order came from one. */
+  plan?: string;
+  /** Who delivered the stocks, on a fill. */
+  filler?: string;
 };
 
 export type Ledger = {
@@ -153,34 +160,34 @@ export function decodeEvent(
       return { kind: "redeemed", basket, actor, shares, amounts };
     }
     if (matches(data, EVENT_ORDER_PLACED)) {
-      r.pubkey(); // order
+      const order = r.pubkey();
       const basket = r.pubkey();
       const actor = r.pubkey();
       const plan = r.optPubkey();
       r.pubkey(); // cash mint
       r.u64(); // nonce
       const cash = Number(r.u64()) / CASH;
-      return { kind: plan ? "planRun" : "ordered", basket, actor, cash };
+      return { kind: plan ? "planRun" : "ordered", basket, actor, cash, order, ...(plan ? { plan } : {}) };
     }
     if (matches(data, EVENT_ORDER_FILLED)) {
-      r.pubkey(); // order
+      const order = r.pubkey();
       const basket = r.pubkey();
       const actor = r.pubkey(); // the buyer
-      r.pubkey(); // filler
-      r.optPubkey(); // plan
+      const filler = r.pubkey();
+      const plan = r.optPubkey();
       const shares = Number(r.u64()) / ONE_SHARE;
       const feeShares = Number(r.u64()) / ONE_SHARE;
       const cash = Number(r.u64()) / CASH;
-      return { kind: "filled", basket, actor, shares, feeShares, cash };
+      return { kind: "filled", basket, actor, shares, feeShares, cash, order, filler, ...(plan ? { plan } : {}) };
     }
     if (matches(data, EVENT_ORDER_CANCELLED)) {
-      r.pubkey(); // order
+      const order = r.pubkey();
       const basket = r.pubkey();
       const actor = r.pubkey();
-      r.optPubkey();
+      const plan = r.optPubkey();
       r.pubkey(); // by
       const cash = Number(r.u64()) / CASH;
-      return { kind: "returned", basket, actor, cash };
+      return { kind: "returned", basket, actor, cash, order, ...(plan ? { plan } : {}) };
     }
     if (matches(data, EVENT_PLAN_OPENED)) {
       r.pubkey(); // plan
@@ -201,7 +208,7 @@ export function decodeEvent(
 
 // --------------------------------------------------------------------- store
 
-type Known = Record<string, LedgerEntry[]>;
+export type Known = Record<string, LedgerEntry[]>;
 
 let SNAPSHOT: Known = {};
 let snapshotLoaded: Promise<void> | null = null;
@@ -247,6 +254,23 @@ function saveKnown(known: Known) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** One transaction's rows, from its logs. */
+function entriesOf(
+  info: { signature: string; slot: number; blockTime?: number | null },
+  logs: string[] | null | undefined,
+  blockTime?: number | null,
+): LedgerEntry[] {
+  const entries: LedgerEntry[] = [];
+  for (const line of logs ?? []) {
+    if (!line.startsWith(PREFIX)) continue;
+    const event = decodeEvent(fromBase64(line.slice(PREFIX.length)));
+    if (!event) continue;
+    entries.push({ signature: info.signature, time: info.blockTime ?? blockTime ?? 0, slot: info.slot, ...event });
+  }
+  // A fill also emits the share mint's own event; the fill row says it all.
+  return entries.some((e) => e.kind === "filled") ? entries.filter((e) => e.kind !== "minted") : entries;
+}
+
 /** One transaction's events, with a backoff when the endpoint says slow down. */
 async function fetchEvents(
   connection: Connection,
@@ -258,20 +282,7 @@ async function fetchEvents(
         maxSupportedTransactionVersion: 0,
         commitment: "confirmed",
       });
-      const entries: LedgerEntry[] = [];
-      for (const line of tx?.meta?.logMessages ?? []) {
-        if (!line.startsWith(PREFIX)) continue;
-        const event = decodeEvent(fromBase64(line.slice(PREFIX.length)));
-        if (!event) continue;
-        entries.push({
-          signature: info.signature,
-          time: info.blockTime ?? tx?.blockTime ?? 0,
-          slot: info.slot,
-          ...event,
-        });
-      }
-      // A fill also emits the share mint's own event; the fill row says it all.
-      return entries.some((e) => e.kind === "filled") ? entries.filter((e) => e.kind !== "minted") : entries;
+      return entriesOf(info, tx?.meta?.logMessages, tx?.blockTime);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The public endpoint rations this call per address, and a visitor who
@@ -342,6 +353,100 @@ export async function readLedger(
     saveKnown(known);
   }
   return snapshot(done);
+}
+
+/**
+ * The same walk for a server: `store` is a long-lived cache of decoded
+ * transactions that this call reads and fills, and the transactions it lacks are
+ * fetched in JSON-RPC batches, a few batches at a time.
+ */
+export async function readLedgerBatched(
+  connection: Connection,
+  options: { basket?: string; limit?: number; store: Known; batch?: number; lanes?: number },
+): Promise<Ledger> {
+  const limit = options.limit ?? 300;
+  const address = options.basket ? new PublicKey(options.basket) : PROGRAM_ID;
+  const signatures = await connection.getSignaturesForAddress(address, { limit }, "confirmed");
+  const ok = signatures.filter((s) => s.err == null);
+  const known = options.store;
+  const queue = ok.filter((s) => !known[s.signature]);
+  const size = options.batch ?? 25;
+  const chunks: (typeof queue)[] = [];
+  for (let i = 0; i < queue.length; i += size) chunks.push(queue.slice(i, i + size));
+  const lane = async () => {
+    for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
+      const txs = await connection.getTransactions(
+        chunk.map((s) => s.signature),
+        { maxSupportedTransactionVersion: 0, commitment: "confirmed" },
+      );
+      // A transaction the node cannot return yet is left out, and read on the next call.
+      chunk.forEach((info, i) => {
+        const tx = txs[i];
+        if (tx) known[info.signature] = entriesOf(info, tx.meta?.logMessages, tx.blockTime);
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: options.lanes ?? 3 }, lane));
+  return {
+    entries: ok.flatMap((s) => known[s.signature] ?? []),
+    done: ok.filter((s) => known[s.signature]).length,
+    total: ok.length,
+    truncated: signatures.length >= limit,
+  };
+}
+
+export type LedgerStats = {
+  /** Every event, and the distinct wallets behind them. */
+  actions: number;
+  wallets: number;
+  /** Wallets that are not the team's own (the house key and test wallets), and their events. */
+  outsideWallets: number;
+  outsideActions: number;
+  baskets: number;
+  plans: number;
+  /** Dollar orders and plan runs. */
+  orders: number;
+  fills: number;
+  /** Fills delivered by a wallet other than ours. */
+  outsideFills: number;
+  dollarsFilled: number;
+  returned: number;
+  /** Median seconds from an order (or plan run) to its fill, over fills whose order is in view. */
+  medianSecsToFill: number | null;
+  /** Fills over every order that has finished, filled or returned. */
+  fillRate: number | null;
+};
+
+/** The numbers behind a set of events. `isOurs` tells a team wallet from anyone else's. */
+export function ledgerStats(entries: LedgerEntry[], isOurs: (wallet: string) => boolean): LedgerStats {
+  const wallets = new Set(entries.map((e) => e.actor));
+  let outsideWallets = 0;
+  for (const w of wallets) if (!isOurs(w)) outsideWallets++;
+  const placedAt = new Map<string, number>();
+  for (const e of entries) if ((e.kind === "ordered" || e.kind === "planRun") && e.order) placedAt.set(e.order, e.time);
+  const fills = entries.filter((e) => e.kind === "filled");
+  const returned = entries.filter((e) => e.kind === "returned").length;
+  const waits = fills
+    .map((f) => (f.order && placedAt.has(f.order) ? f.time - placedAt.get(f.order)! : null))
+    .filter((w): w is number => w != null && w >= 0)
+    .sort((a, b) => a - b);
+  const mid = waits.length >> 1;
+  const median = waits.length === 0 ? null : waits.length % 2 ? waits[mid] : (waits[mid - 1] + waits[mid]) / 2;
+  return {
+    actions: entries.length,
+    wallets: wallets.size,
+    outsideWallets,
+    outsideActions: entries.filter((e) => !isOurs(e.actor)).length,
+    baskets: entries.filter((e) => e.kind === "created").length,
+    plans: entries.filter((e) => e.kind === "planOpened").length,
+    orders: entries.filter((e) => e.kind === "ordered" || e.kind === "planRun").length,
+    fills: fills.length,
+    outsideFills: fills.filter((f) => f.filler != null && !isOurs(f.filler)).length,
+    dollarsFilled: Math.round(fills.reduce((a, f) => a + (f.cash ?? 0), 0) * 100) / 100,
+    returned,
+    medianSecsToFill: median,
+    fillRate: fills.length + returned > 0 ? Math.round((fills.length / (fills.length + returned)) * 1000) / 1000 : null,
+  };
 }
 
 /** The program's events in one transaction's logs, decoded. */

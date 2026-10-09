@@ -4,7 +4,7 @@
  *
  * On mainnet each of these is held by the stock's issuer (Backed for xStocks,
  * PreStocks for PreStocks). A mirror gives every one of them to the stand-in
- * issuer key, which the Sheaf program accepts outside a `mainnet` build
+ * issuer key, which the Sheaf program accepts in a `devnet` build
  * (KNOWN_ISSUERS in programs/sheaf/src/lib.rs). Under any other key the
  * program refuses the mint as a basket component.
  *

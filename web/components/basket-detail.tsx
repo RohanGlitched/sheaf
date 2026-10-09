@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useBasket } from "@/lib/use-baskets";
@@ -21,6 +21,7 @@ import {
   sendSteps,
   explainError,
 } from "@/lib/tx";
+import { feeSplit } from "@/lib/desk";
 import { symbolForWriteMint } from "@/lib/mirror";
 import { PRESTOCK_SYMBOLS, BY_SYMBOL_PRESTOCKS } from "@/lib/prestocks";
 import { BasketLaunch } from "./launch-market";
@@ -36,7 +37,6 @@ import {
   quantity,
   signedPercent,
   shortAddress,
-  timeAgo,
   count,
 } from "@/lib/format";
 import type { Basket } from "@/lib/sheaf";
@@ -152,7 +152,11 @@ function Loaded({
               {basket.name}
             </h1>
             <p className="tnum mt-3 text-sm text-ink-3">
-              {basket.symbol} · created {timeAgo(basket.createdAt)} by{" "}
+              {basket.symbol} · created{" "}
+              <time dateTime={new Date(basket.createdAt * 1000).toISOString()}>
+                {new Date(basket.createdAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}
+              </time>{" "}
+              by{" "}
               <a
                 href={explorerAddress(basket.creator)}
                 target="_blank"
@@ -238,7 +242,11 @@ function Loaded({
           />
           <Figure
             label="Dividends inside"
-            value={percent(valuation.accruedSharePct)}
+            value={
+              valuation.components.length > 0 && valuation.components.every((c) => PRESTOCK_SYMBOLS.has(c.symbol))
+                ? "None, pre-IPO"
+                : percent(valuation.accruedSharePct)
+            }
             note="Share of the value that is dividends already paid onchain"
             tone={
               valuation.accruedSharePct && valuation.accruedSharePct > 0.005
@@ -300,7 +308,7 @@ function Loaded({
         <Backing basket={basket} onChain={onChain} />
       </div>
 
-      <BasketHistory basket={basket} />
+      <CappedHistory basket={basket} />
 
       <FillCostPanel components={valuation.components} nav={valuation.nav} />
 
@@ -700,8 +708,10 @@ function TradePanel({
     };
   });
 
-  const feeShares = (rawShares * BigInt(basket.creatorFeeBps)) / 10_000n;
-  const netShares = rawShares - feeShares;
+  const split = feeSplit(rawShares, basket.creatorFeeBps, basket.protocolFeeBps);
+  const feeShares = split.creator;
+  const protocolShares = split.protocol;
+  const netShares = rawShares - feeShares - protocolShares;
   const shortSymbols = connected
     ? rows.filter((r) => r.short).map((r) => r.symbol)
     : [];
@@ -861,13 +871,23 @@ function TradePanel({
           </ul>
         </div>
 
-        {mode === "create" && basket.creatorFeeBps > 0 && (
+        {mode === "create" && (basket.creatorFeeBps > 0 || basket.protocolFeeBps > 0) && (
           <p className="tnum mt-5 border-t border-line pt-5 text-xs leading-relaxed text-ink-3">
             You receive {quantity(Number(netShares) / ONE_SHARE, 6)}{" "}
-            {basket.symbol}. The creator receives{" "}
-            {quantity(Number(feeShares) / ONE_SHARE, 6)}, which is{" "}
-            {percent(basket.creatorFeeBps / 100)} of the shares created. The fee
-            never comes out of the vault, so backing per share is unchanged.
+            {basket.symbol}.
+            {basket.creatorFeeBps > 0 && (
+              <>
+                {" "}The creator receives {quantity(Number(feeShares) / ONE_SHARE, 6)} (
+                {percent(basket.creatorFeeBps / 100)}).
+              </>
+            )}
+            {basket.protocolFeeBps > 0 && (
+              <>
+                {" "}Sheaf receives {quantity(Number(protocolShares) / ONE_SHARE, 6)} (
+                {percent(basket.protocolFeeBps / 100)}).
+              </>
+            )}{" "}
+            Fees are paid in new shares and never come out of the vault, so backing per share is unchanged.
           </p>
         )}
 
@@ -950,6 +970,49 @@ function TradePanel({
             : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favor."}
         </p>
       </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The basket's history, first eight events only until asked for more. A busy
+ * basket otherwise runs to dozens of near-identical rows before the footer.
+ * The rows themselves come from the shared ledger table; this only folds them.
+ */
+const HISTORY_ROWS = 8;
+
+function CappedHistory({ basket }: { basket: Basket }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const recount = () =>
+      setRows(Math.max(el.querySelectorAll("ul > li").length, el.querySelectorAll("tbody > tr").length));
+    recount();
+    const watch = new MutationObserver(recount);
+    watch.observe(el, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, []);
+  return (
+    <div>
+      <div
+        ref={ref}
+        className={open ? undefined : "[&_tbody>tr:nth-child(n+9)]:hidden [&_ul>li:nth-child(n+9)]:hidden"}
+      >
+        <BasketHistory basket={basket} />
+      </div>
+      {rows > HISTORY_ROWS && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="mt-4 rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2.5 text-sm text-ink transition-colors hover:border-ink-3"
+        >
+          {open ? "Show the latest eight" : `Show all ${count(rows)} events`}
+        </button>
       )}
     </div>
   );

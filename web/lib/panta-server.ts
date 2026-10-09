@@ -1,4 +1,5 @@
 import "server-only";
+import { marketWindow, resolutionRule } from "./panta-window";
 
 /**
  * Panta (prediction markets on Solana, by Kaito) from the server side.
@@ -136,7 +137,8 @@ export function marketTrades(marketId: string) {
 
 // -------------------------------------------------------------------- creation
 
-export const basketQuestion = (name: string, symbol: string) => `Will ${name} (${symbol}) beat SPY this week?`;
+export const basketQuestion = (name: string, symbol: string) =>
+  `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
 export type CreateQuote = {
   createId: string;
@@ -149,10 +151,10 @@ export type CreateQuote = {
 
 /** The market Sheaf would open on a basket, exactly as it is sent to Panta. */
 export async function basketDraft(input: { wallet: string; basket: string; name: string; symbol: string }) {
-  const now = Math.floor(Date.now() / 1000);
-  // Panta requires the market to open at least an hour out. It runs a week.
-  const startTime = now + 2 * 3600;
-  const endTime = startTime + 7 * 24 * 3600;
+  // Panta requires trading to open at least an hour out. The week is measured
+  // between two Friday US closes (lib/panta-window.ts), and the market ends at
+  // the second one, so the rule, the window and the NAV reader all agree.
+  const w = marketWindow();
   const { category, preferred } = await basketCategory();
   const nav = `${PUBLIC_SITE}/api/nav/${input.basket}`;
   return {
@@ -160,14 +162,19 @@ export async function basketDraft(input: { wallet: string; basket: string; name:
       wallet: input.wallet,
       title: `${input.name} vs SPY`,
       question: basketQuestion(input.name, input.symbol),
-      description: `${input.symbol} is a Sheaf basket: a fixed recipe of tokenized stocks held in a vault on Solana. This market asks whether one share outgrows SPY over the week.`,
-      resolutionRule: `YES if the value of one ${input.symbol} share, read from its vault at the closing time (the JSON at ${nav}, recomputable from chain state), rose by more than SPY's close-to-close change over the same week. NO otherwise.`,
-      sourcesOfTruth: [nav, `${PUBLIC_SITE}/basket/${input.basket}`, "https://www.nasdaq.com/market-activity/etf/spy"],
+      description: `${input.symbol} is a Sheaf basket: a fixed recipe of tokenized stocks held in a vault on Solana. This market asks whether one share outgrows SPY, total return, between two Friday US closes.`,
+      resolutionRule: resolutionRule(input.symbol, nav, w),
+      sourcesOfTruth: [
+        `${nav}?at=${w.fromClose}`,
+        `${nav}?at=${w.toClose}`,
+        `${PUBLIC_SITE}/basket/${input.basket}`,
+        "https://finance.yahoo.com/quote/SPY/history",
+      ],
       category,
       imageUrl: `${PUBLIC_SITE}/api/panta/image/${input.basket}`,
-      startTime,
-      endTime,
-      resolutionTime: endTime + 3600,
+      startTime: w.opens,
+      endTime: w.toClose,
+      resolutionTime: w.resolves,
       marketType: "standard",
       region: "Global",
     },

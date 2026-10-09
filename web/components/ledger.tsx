@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
-import { useConnection } from "@solana/wallet-adapter-react";
-import { readLedger, type Ledger, type LedgerEntry } from "@/lib/ledger";
+import type { LedgerEntry } from "@/lib/ledger";
+import { useLedger } from "@/lib/use-ledger";
 import { useBaskets } from "@/lib/use-baskets";
 import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
-import { count, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
+import { count, duration, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
 import { isTeamWallet, teamTag, teamWallet, TEAM_WALLETS } from "@/lib/team-wallets";
@@ -19,47 +19,7 @@ import { isTeamWallet, teamTag, teamWallet, TEAM_WALLETS } from "@/lib/team-wall
  * creation made from a terminal with no website involved still shows up.
  */
 
-export function useLedger(basket?: string) {
-  const { connection } = useConnection();
-  const key = basket ?? "*";
-  // Keyed by what was asked for, so switching baskets shows nothing stale
-  // without resetting state inside the effect.
-  const [state, setState] = useState<{ key: string; ledger: Ledger | null; error: string | null }>({
-    key,
-    ledger: null,
-    error: null,
-  });
-
-  useEffect(() => {
-    const controller = new AbortController();
-    readLedger(connection, {
-      basket,
-      signal: controller.signal,
-      onProgress: (ledger) => !controller.signal.aborted && setState({ key, ledger, error: null }),
-    })
-      .then((ledger) => !controller.signal.aborted && setState({ key, ledger, error: null }))
-      .catch(
-        (err) =>
-          !controller.signal.aborted &&
-          // Keep whatever was decoded before the read failed; the rows are real.
-          setState((s) => ({
-            key,
-            ledger: s.key === key ? s.ledger : null,
-            error: err instanceof Error ? err.message : "read failed",
-          })),
-      );
-    return () => controller.abort();
-  }, [connection, basket, key]);
-
-  const ledger = state.key === key ? state.ledger : null;
-  const error = state.key === key ? state.error : null;
-  return {
-    ledger,
-    error,
-    loading: !ledger && !error,
-    decoding: ledger != null && !error && ledger.done < ledger.total,
-  };
-}
+export { useLedger };
 
 const KIND: Record<LedgerEntry["kind"], { label: string; color: string }> = {
   created: { label: "Basket created", color: "var(--color-bind)" },
@@ -244,7 +204,7 @@ export function LedgerTable({
 }
 
 export function LedgerPage() {
-  const { ledger, error, loading, decoding } = useLedger();
+  const { ledger, stats: served, error, loading, decoding } = useLedger();
   const { baskets } = useBaskets();
   const byAddress = useMemo(() => new Map((baskets ?? []).map((b) => [b.address, b])), [baskets]);
 
@@ -315,7 +275,7 @@ export function LedgerPage() {
         <>
           <p className="tnum mt-10 text-xs text-ink-3">
             {decoding
-              ? `Decoding ${count(ledger.done)} of ${count(ledger.total)} transactions in your browser…`
+              ? `Decoded ${count(ledger.done)} of ${count(ledger.total)} transactions so far…`
               : `${count(ledger.entries.length)} events on ${WRITE_CLUSTER}`}
             {!decoding && stats.first ? ` since ${new Date(stats.first * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}` : ""}
             {!decoding && (
@@ -326,6 +286,14 @@ export function LedgerPage() {
             )}
             {ledger.truncated ? " · showing the most recent 300 transactions" : ""}
           </p>
+          {served && served.orders > 0 && (
+            <p className="tnum mt-2 text-xs text-ink-3">
+              {count(served.fills)} {plural(served.fills, "fill")} for {money(served.dollarsFilled)}
+              {served.fillRate != null && ` · ${Math.round(served.fillRate * 100)}% of finished orders filled`}
+              {served.medianSecsToFill != null && ` · median ${duration(served.medianSecsToFill)} from order to fill`}
+              {` · ${count(served.plans)} ${plural(served.plans, "plan")} opened`}
+            </p>
+          )}
           {!decoding && (
             <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
               {stats.outside === 0
@@ -359,10 +327,10 @@ export function LedgerPage() {
             <code className="text-ink-2">SharesMinted</code>, <code className="text-ink-2">SharesRedeemed</code>,{" "}
             <code className="text-ink-2">OrderPlaced</code>, <code className="text-ink-2">OrderFilled</code> and the rest), decoded from
             the <code className="text-ink-2">Program data</code> lines of the
-            transaction log, in your browser, against the public RPC. The site
-            ships with what was decoded at the last release, and what this browser decodes
-            on top stays here, so a visit only reads the transactions that are new. Every
-            row links to its transaction, so neither is the source of truth: the chain is.
+            transaction log. The site&rsquo;s server reads the transactions and decodes them once for
+            every visitor (<code className="text-ink-2">/api/ledger</code>, at most 30 seconds old), so a
+            visit costs one request; anyone can run the same decoder against the public RPC. Every
+            row links to its transaction, so the page is never the source of truth: the chain is.
           </p>
         </>
       )}

@@ -2,7 +2,39 @@
 
 Every Sheaf basket carries one prediction market, run on [Panta](https://panta.market): **"Will {basket} ({symbol}) beat SPY this week?"**
 
-The market resolves from a number anyone can recompute from chain state: one share's value, read from its vault, against SPY's close-to-close change. Sheaf publishes that number as JSON at `/api/nav/<basket>` and names it as the market's first source of truth. Nobody has to trust Sheaf's price.
+The market resolves from a number anyone can recompute: one share's value at two Friday US closes, against SPY's over the same two closes. Sheaf publishes that number as JSON at `/api/nav/<basket>?at=<close>` and names those two URLs as the market's first sources of truth. Every input is public, and the JSON lists a command to fetch each one. The only off-chain inputs are Jupiter's prices and the daily closes.
+
+### The resolution rule, exactly
+
+The rule is built in one place (`web/lib/panta-window.ts`) and used by the market draft, the NAV route and the pages, so they cannot disagree.
+
+- **Window.** From one Friday's US regular-session close (16:00 New York) to the next Friday's close. Panta's `endTime` is the second close. `startTime` is when trading opens: at least an hour out, as Panta requires, and at least a day before `endTime`. Part of the measured week can already have passed when trading opens, and the rule states both closes as explicit times. `resolutionTime` is two hours after the close, once the close is final in Sheaf's history.
+- **Holidays.** If a Friday is a market holiday, the last close before it is used. The JSON reports the day actually used as `closeDay`.
+- **Numbers.** YES if `navPerShare.listed` at the later close divided by `navPerShare.listed` at the earlier close is greater than `spy.adjClose` divided the same way. Both values come from `/api/nav/<basket>?at=<unix>`. NO otherwise, including a tie.
+- **What `navPerShare.listed` means at a close.** The sum over components of `unitsPerShare / 10^decimals` x the listed share's adjusted close x the mint's multiplier today. Adjusted closes reinvest dividends, as the multiplier does, so the ratio between two closes is the share's total return. SPY's `adjClose` is on the same basis.
+
+The rule as sent to Panta, for BIG5 opened on Oct 9, 2026:
+
+> YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the US regular-session closes on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z); if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.
+
+### `/api/nav/<basket>`
+
+- **Without `at`:** the value right now, three ways: `recipe` (units x live Jupiter price x multiplier), `vault` (what the vault holds over shares outstanding) and `listed` (units x the listed share's last price x multiplier). The answer also carries `trailingWeek` (the last five closes against SPY; it was called `week`) and `resolution`, which gives the field names, the next window and the rule text.
+- **With `at=<unix seconds>`:** `navPerShare.listed` and `spy.adjClose` at the last US close at or before `at`, with `closeDay`, the inputs per component, and the method. Some requests are refused rather than answered with today's number:
+  - A time in the future, or before the one-year history, gets a 400.
+  - A close in the last hour gets a 503 with `Retry-After`. History is cached for an hour, so it is not final yet.
+  - A close not yet in the history also gets a 503.
+  
+  A basket holding a pre-IPO PreStock has no listed history, so it answers `listed: null` with the reason. Past closes are cached for a day.
+- **`recompute`** lists every input with a command to fetch it:
+  - the share supply (`getTokenSupply`)
+  - the basket account with the recipe (`getAccountInfo`)
+  - every vault balance (`getMultipleAccounts`, jsonParsed)
+  - every mainnet mint's multiplier (`getMultipleAccounts`, jsonParsed, `scaledUiAmountConfig`)
+  - Jupiter's prices
+  - Yahoo Finance's daily chart for each holding and SPY
+
+  `sources` names the history source and its date.
 
 "Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict` and `/portfolio`.
 
@@ -10,7 +42,7 @@ The market resolves from a number anyone can recompute from chain state: one sha
 
 | Panta product | Endpoint | Where in Sheaf |
 |---|---|---|
-| Discovery | `GET /markets/`, `GET /categories/` | Basket pages, `/predict` (`GET /api/panta`) |
+| Discovery | `GET /markets/`, `GET /categories/` | `/predict`, "Panta's catalog, as this key sees it" (read-only, labeled as the sandbox fixture under a `pk_test_` key); basket pages (`GET /api/panta`) |
 | Data | `GET /markets/{id}/`, `GET /markets/{id}/trades/` | Position values on `/portfolio` (`GET /api/panta/positions`) |
 | Creation: quote | `POST /markets/create/quote/` | Basket page, "Open it on Panta", step 1; `/predict` fee |
 | Creation: build | `POST /markets/create/build/` | Step 2 |
@@ -30,11 +62,13 @@ Each step in the UI names the endpoint it calls and shows the fields Panta actua
 
 The market Sheaf drafts includes:
 - `category`: finance when Panta offers it (it does live); the sandbox lists none, so the sandbox falls back to crypto
-- `sourcesOfTruth`: the NAV JSON, the basket page, and SPY on Nasdaq
+- `sourcesOfTruth`: the NAV JSON at both closes (`?at=`), the basket page, and SPY's daily history on Yahoo Finance
+- `startTime`, `endTime`, `resolutionTime`: from `marketWindow()`, as described above
 - `imageUrl`: a 1024×1024 PNG at `/api/panta/image/<basket>`, the basket's sheaf drawing under its question
 
 Code:
 - `web/lib/panta-server.ts`: every Panta call; holds the key.
+- `web/lib/panta-window.ts`: the Friday-close window and the rule text.
 - `web/app/api/panta/route.ts`: one `kind` per step.
 - `web/app/api/panta/positions/route.ts`
 - `web/app/api/panta/image/[address]/route.tsx`
@@ -54,8 +88,8 @@ Opening a market on Panta costs about 50 USDC (`paymentUsdc: 50000000`) plus SOL
 
 The UI tags every fixture value as "sandbox fixture" (Panta marks these answers with a `disclaimer` field). Three cases matter:
 - **Buy quotes.** The sandbox answers every buy with the same fixed quote, "$1.00 buys 2.00 shares". The panel shows the amount you asked for next to Panta's answer and says the answer is fixed.
-- **The market.** The sandbox has one fixture market, "Sandbox test market". It is labelled as standing in for the basket's market, never shown as if it were the basket's own.
-- **Signing.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash. Sheaf then compiles a memo-only stand-in on a fresh devnet blockhash, asks the wallet to sign it, and says so. The signed transaction is never sent anywhere. If a wallet declines, the sandbox flow can continue with a clearly labelled placeholder signature.
+- **The market.** The sandbox has one fixture market, "Sandbox test market". It is labeled as standing in for the basket's market, never shown as if it were the basket's own.
+- **Signing.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash. Sheaf then compiles a memo-only stand-in on a fresh devnet blockhash, asks the wallet to sign it, and says so. The signed transaction is never sent anywhere. If a wallet declines, the sandbox flow can continue with a clearly labeled placeholder signature.
 
 `POST /api/panta` has two throttles: 20 requests a minute per IP, and per-kind caps below Panta's own account limits (24 quotes, 16 builds, 30 reports and 90 reads a minute). Identical create quotes are reused for 60 s. In the sandbox, a buy or claim must name a market in Panta's catalog.
 
@@ -80,5 +114,8 @@ For a real sponsored market, the steps already in place carry over unchanged:
 
 ```bash
 curl -s https://sheaf-index.vercel.app/api/panta | jq '{mode, fixture, category}'
-curl -s https://sheaf-index.vercel.app/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ | jq '{question, navPerShare, week}'
+curl -s https://sheaf-index.vercel.app/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ | jq '{question, navPerShare, trailingWeek, resolution}'
+# The value at the Oct 8, 2026 close (any time after it and before the next close names the same day):
+curl -s 'https://sheaf-index.vercel.app/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ?at=1791489600' | jq '{closeDay, navPerShare, spy}'
+# {"closeDay":"2026-10-08","navPerShare":{"listed":100.15053},"spy":{"token":"SPYx","closeDay":"2026-10-08","close":…,"adjClose":773.93}}
 ```

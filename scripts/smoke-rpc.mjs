@@ -42,16 +42,22 @@ const CASES = [
   ["getProgramAccounts", [TOKEN_2022, { encoding: "base64" }], "refused"],
   ["getBlock", [1], "refused"],
   ["getLargestAccounts", [], "refused"],
+  ["getSignaturesForAddress", [SHEAF, { limit: 1000 }], "refused"],
+  ["getSignaturesForAddress", [SHEAF], "refused"],
+  // The origin allowlist: a look-alike Vercel host and a missing Origin are refused.
+  ["getSlot", [], "refused", "https://sheaf-evil.vercel.app"],
+  ["getSlot", [], "refused", null],
+  ["getSlot", [], "allowed", "https://sheaf-abc123-rohanglitcheds-projects.vercel.app"],
 ];
 
 let failures = 0;
-for (const [method, params, expected] of CASES) {
+for (const [method, params, expected, origin = base] of CASES) {
   let status = 0;
   let note = "";
   try {
     const res = await fetch(`${base}/api/rpc`, {
       method: "POST",
-      headers: { "content-type": "application/json", origin: base },
+      headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
     status = res.status;

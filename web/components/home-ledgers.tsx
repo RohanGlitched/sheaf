@@ -19,22 +19,26 @@ const SHARE_FEES = [
 
 /** The launch markets pay too, but they sit beside the backed share, not inside it. */
 const LAUNCH_FEES = [
-  { share: "½", title: "of every launch curve's trading fees", body: "The fee opens at 25% to make sniping expensive and falls to 1% over the first ten minutes (launches on the first curve opened at 4%). The basket's creator earns the other half." },
+  { share: "40%", title: "of every launch curve's trading fees", body: "Meteora keeps 20% and the rest splits evenly, so the basket's creator earns 40% too. The fee opens at 25% to make sniping expensive and falls to 1% over the first ten minutes (launches on the first curve opened at 4%)." },
   { share: "1%", title: "of the SOL raised at graduation", body: "Taken as the migration fee when the curve becomes a permanent Meteora pool." },
-  { share: "½", title: "of the graduated pool's fees", body: "Half the migrated liquidity is locked in a position the treasury owns, so it keeps paying." },
+  { share: "40%", title: "of the graduated pool's fees", body: "Half the migrated liquidity is locked in a position the treasury owns, so it keeps paying. Meteora keeps 20% of the pool's fees; the two locked positions split the rest." },
 ];
 
-/** Nothing is charged for a basket, a creation or a redemption. Fees sit where shares are made. */
+/** Holding and redeeming are free. Fees sit where shares are made. */
 export function Revenue() {
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
       <div className="max-w-[40ch]">
         <h2 className="display text-title text-ink">Paid where backed shares are made.</h2>
         <p className="mt-5 text-base leading-relaxed text-ink-2">
-          Nothing is charged for a basket. Creating one, creating shares in kind and redeeming them cost
-          nothing beyond Solana&rsquo;s fee. The money is in making shares: the creator&rsquo;s fee on
-          every creation, and the spread a filler earns delivering the stocks for a dollar order or a
-          monthly plan. Sheaf runs the house filler, so that spread is its first income.
+          Holding a share and redeeming it are free. The money is in making shares: Sheaf&rsquo;s 0.10%
+          protocol fee, fixed for each basket when it is created, the creator&rsquo;s fee on every
+          creation, and the spread a filler earns delivering the stocks for a dollar order or a monthly
+          plan. Sheaf&rsquo;s house filler waits for a 0.15% margin, so any filler willing to take less
+          fills first.{" "}
+          <Link href="/business" className="text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
+            How Sheaf makes money
+          </Link>
         </p>
         <p className="mt-4 text-sm leading-relaxed text-ink-3">
           Launch markets add a second, smaller line. Their fees go to the treasury{" "}
@@ -100,8 +104,8 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
   {
     what: "The house key (B8dL…U1L)",
     who: "Sheaf's server",
-    can: "Mint devnet mirror tokens for a visitor, fill dollar orders and plan runs like any other filler, and create shares in the baskets it seeded, which earns those baskets' creator fee.",
-    cannot: "Edit a recipe, fill outside an order's auction, take anything out of a vault, or touch anything on mainnet.",
+    can: "Mint devnet mirror tokens for a visitor, fill dollar orders and plan runs like any other filler, and create shares in the baskets it seeded, which earns those baskets' creator fee. On devnet it is also the stand-in issuer of the mirrors, so the program accepts issuer powers from it; today's mirrors carry no delegate or pause, so that power is unused.",
+    cannot: "Edit a recipe, fill outside an order's auction, or touch anything on mainnet. A mainnet build leaves it out: there, only Backed's and PreStocks' own keys are trusted issuers.",
   },
   {
     what: "The treasury key",
@@ -112,8 +116,8 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
   {
     what: "The program's upgrade authority",
     who: "The deploy wallet, on devnet",
-    can: "Ship a new build while the program is still changing.",
-    cannot: "Stay that way on mainnet: it moves to a multisig and is then burned, after an audit.",
+    can: "Ship a new build. Before mainnet it moves to a multisig, so new issuers can be added to the allowlist.",
+    cannot: "Be used to move funds. That is our promise, not a program rule: an upgrade key can change code, which is why it goes to a multisig.",
   },
 ];
 

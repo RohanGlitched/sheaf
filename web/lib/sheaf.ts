@@ -82,6 +82,14 @@ export type Basket = {
   createdAt: number;
   mintCount: bigint;
   redeemCount: bigint;
+  /**
+   * The protocol's creation fee, fixed when the basket was created: 10 bps
+   * (0.10% of shares created, minted to the treasury) for baskets created
+   * since it existed, 0 for older ones. Redemption is free either way.
+   */
+  protocolFeeBps: number;
+  /** Protocol-fee shares created and backed in the vault, not yet minted to the treasury. */
+  protocolFeeAccrued: bigint;
 };
 
 class Reader {
@@ -169,6 +177,10 @@ export function decodeBasket(address: PublicKey, data: Uint8Array): Basket | nul
     const createdAt = Number(r.i64());
     const mintCount = r.u64();
     const redeemCount = r.u64();
+    r.skip(1); // bump
+    // Appended into the account's headroom: an older basket reads zeros here.
+    const protocolFeeBps = r.u16();
+    const protocolFeeAccrued = r.u64();
 
     return {
       address: address.toBase58(),
@@ -182,6 +194,8 @@ export function decodeBasket(address: PublicKey, data: Uint8Array): Basket | nul
       createdAt,
       mintCount,
       redeemCount,
+      protocolFeeBps,
+      protocolFeeAccrued,
     };
   } catch {
     return null;

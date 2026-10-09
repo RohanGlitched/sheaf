@@ -17,6 +17,11 @@ import { ConnectButton } from "./connect-button";
 
 const AUCTION_SECS = 90;
 const BAND_BPS = 200;
+/**
+ * The house filler takes orders from $5 (keeper-server's fill filter). A smaller
+ * order would only wait out its auction and come back, so the form starts there.
+ */
+export const MIN_ORDER_DOLLARS = 5;
 
 type Stage =
   | { kind: "idle" }
@@ -47,7 +52,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   const [refunding, setRefunding] = useState(false);
 
   const amount = Number(dollars);
-  const valid = Number.isFinite(amount) && amount >= 1;
+  const tooSmall = Number.isFinite(amount) && amount > 0 && amount < MIN_ORDER_DOLLARS;
+  const valid = Number.isFinite(amount) && amount >= MIN_ORDER_DOLLARS;
   const fair = valid && navPerShare ? amount / navPerShare : null;
   const bounds = useMemo(() => {
     if (!fair) return null;
@@ -96,8 +102,9 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage.kind]);
 
-  // An expired order is still worth watching: the keeper returns the dollars on
-  // its next pass, and the page should say so the moment it does.
+  // An expired order is still worth watching: the keeper returns a buyer's
+  // dollars once a ten-minute grace has passed, and the page should say so the
+  // moment it does.
   useEffect(() => {
     if (stage.kind !== "expired") return;
     const order = stage.order;
@@ -241,6 +248,12 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
               />
             </div>
           </label>
+          {tooSmall && (
+            <p className="mt-2 border-l-2 border-line-strong pl-3 text-xs leading-relaxed text-ink-2" aria-live="polite">
+              The smallest order is {money(MIN_ORDER_DOLLARS)}. The house filler starts there, so a smaller order would only wait out
+              its auction and come back.
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2 text-xs text-ink-3">
             <span className="tnum">
               {cash.balance == null ? "Test dollars on devnet" : `You hold ${money(fromCashRaw(cash.balance))} in test dollars`}
@@ -277,7 +290,15 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
               disabled={!bounds || short || stage.kind === "signing"}
               className="mt-6 w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:bg-sunk disabled:text-ink-3"
             >
-              {stage.kind === "signing" ? "Approve in your wallet…" : short ? "Not enough test dollars" : `Place a ${money(amount)} order`}
+              {stage.kind === "signing"
+                ? "Approve in your wallet…"
+                : tooSmall
+                  ? `Enter at least ${money(MIN_ORDER_DOLLARS)}`
+                  : short
+                    ? "Not enough test dollars"
+                    : valid
+                      ? `Place a ${money(amount)} order`
+                      : "Enter an amount"}
             </button>
           )}
         </>
@@ -305,8 +326,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         <div className="mt-5 rounded-[var(--radius-control)] bg-raised p-4" aria-live="polite">
           <p className="text-sm text-ink">Nobody filled this one before the auction ended.</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-3">
-            The dollars are still in the order&apos;s escrow. Anyone may return them now; the keeper does on its next pass,
-            and this page will say so when it has.
+            The dollars are still in the order&apos;s escrow. Return them now with the button, or leave it: the keeper returns
+            them about ten minutes after the auction ended, and this page will say so when it has.
           </p>
           <button
             type="button"

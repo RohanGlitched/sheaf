@@ -43,19 +43,26 @@ export function TrackRecord({
     () => trackRecord(components, history, range),
     [components, history, range],
   );
+  // No listed share behind any holding: there is nothing to draw at any range,
+  // so the range buttons would only switch between empty panels.
+  const noHistory = !loading && !track;
+  const allUnlisted =
+    history != null && components.length > 0 && components.every((c) => !history.series[c.base]);
 
   return (
     <section className="mt-16">
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div>
           <h2 className="display text-title text-ink">What this recipe would have done</h2>
-          <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-            One {symbol} share is a fixed quantity of each holding, so its value on
-            any past day is those quantities times that day&rsquo;s prices. Dividends
-            are counted the way the tokens pay them, by compounding into the holding.
-          </p>
+          {!allUnlisted && (
+            <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
+              One {symbol} share is a fixed quantity of each holding, so its value on
+              any past day is those quantities times that day&rsquo;s prices. Dividends
+              are counted the way the tokens pay them, by compounding into the holding.
+            </p>
+          )}
         </div>
-        <div className="flex gap-2" role="group" aria-label="Range">
+        <div className={`flex gap-2 ${noHistory ? "hidden" : ""}`} role="group" aria-label="Range">
           {RANGES.map((r) => (
             <button
               key={r.key}
@@ -79,17 +86,17 @@ export function TrackRecord({
           Reading a year of closes…
         </div>
       ) : !track ? (
-        <div className="mt-7 border border-dashed border-line-strong/60 px-6 py-10 text-sm leading-relaxed text-ink-2 rounded-[var(--radius-control)]">
-          {components.length && components.every((c) => !history?.series[c.base]) ? (
+        <p className="mt-5 max-w-[66ch] border-l-2 border-line-strong pl-4 text-sm leading-relaxed text-ink-2">
+          {allUnlisted ? (
             <>
-              Every holding in this basket is a pre-IPO company. There is no listed
-              share behind it and so no history to draw; what it is worth is what its
-              tokens trade at on Solana today.
+              Nothing to draw: every holding in {symbol} is a pre-IPO company, with no
+              listed share and so no past closes. What a share is worth is what its
+              tokens trade at on Solana today, shown above.
             </>
           ) : (
-            <>No history could be read right now.</>
+            <>No history could be read right now. Reload in a minute to try again.</>
           )}
-        </div>
+        </p>
       ) : (
         <>
           <div className="mt-7 border border-line bg-surface p-4 sm:p-6 rounded-[var(--radius-panel)]">

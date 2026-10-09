@@ -1,0 +1,36 @@
+{
+  "note": "Sheaf's own buys on its launch curves, from the house key, so the curves show trades. Ours, labelled 'house buy' wherever trades are listed, and never counted as traction.",
+  "wallet": "B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L",
+  "buys": [
+    {
+      "label": "house buy",
+      "basket": "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+      "slot": 1,
+      "pool": "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV",
+      "sol": 0.02,
+      "feePercent": 1.05,
+      "signature": "3ijvbVH1HRzBb6Z5dwzuiAqTSu4w6EtVN8eWs7ALmGAyNgDBBWRNphdY92GqZDkAJvkAyLptPMnnHvE5dy6ZHMMP",
+      "at": "2026-10-09T10:02:42.259Z"
+    },
+    {
+      "label": "house buy",
+      "basket": "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+      "slot": 1,
+      "pool": "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV",
+      "sol": 0.015,
+      "feePercent": 1.2,
+      "signature": "46rr2T3iPEptUZQdZcCdCg7qrK6xtVZFhSx4RMaNXgJxZLv1muLxzUNQPNRnBcbPdzUqLUX5k5vy2pynj5sNSWLt",
+      "at": "2026-10-09T10:03:13.967Z"
+    },
+    {
+      "label": "house buy",
+      "basket": "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+      "slot": 1,
+      "pool": "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV",
+      "sol": 0.025,
+      "feePercent": 1.2,
+      "signature": "5mf7qu1we7SjxhgTVmVhgy3zxJSFD5rjQmaDtjCCrbfixBNLQ98sDMYrf5iXqsFQxskNuwEMn31BHNJxHKkXSA84",
+      "at": "2026-10-09T10:03:49.012Z"
+    }
+  ]
+}

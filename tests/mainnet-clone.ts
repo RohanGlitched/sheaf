@@ -78,10 +78,13 @@ const REAL = {
 const BACKED_ISSUER = new PublicKey("5aMNNLQJwAEeoemTEMkv5NVjqKwvvefRYCQ5Z67HFvEq");
 const BACKED_PAUSER = new PublicKey("JDq14BWvqCRFNu1krb12bcRpbGtJZ1FLEakMw6FdxJNs");
 const PRESTOCKS_ISSUER = new PublicKey("WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc");
+const TREASURY = new PublicKey("9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF");
 
 // Must match tests/fixtures/build.mjs.
 const SYMBOL = "XSTK";
 const LEGACY_PLAN = new PublicKey("GqH2ndNzTMG4BifGTeHAPTgQw5AGJRyFrr6zZHeWJaLV");
+const OLD_BASKET = new PublicKey("Fr4kNYmthH94hQ1k9nqwKVHp7mQNrDvaYuU5CubCfyKJ");
+const OLD_SHARE_MINT = new PublicKey("DWNhVoLpJJ3BoWRuEfbN4n6sVDpsvSeW4PWkifiGJ593");
 const SHORT_ORDER = new PublicKey("8bt3HAKTjXFFbxbqHmQdFBKZePT9StUafAGycFdygjgQ");
 
 describe("real xStocks and PreStocks (mainnet clones)", () => {
@@ -276,7 +279,12 @@ describe("real xStocks and PreStocks (mainnet clones)", () => {
       .signers([me])
       .rpc();
 
-    assert.equal((await raw(myShares())).toString(), shares.toString());
+    // No creator fee here; the 0.10% protocol fee (2,000 of 2,000,000) is
+    // accrued, backed by this deposit.
+    const protocol = (shares * 10n) / 10_000n;
+    assert.equal((await raw(myShares())).toString(), (shares - protocol).toString());
+    const b = await program.account.basket.fetch(basket, "processed");
+    assert.equal(b.protocolFeeAccrued.toString(), protocol.toString());
     for (let i = 0; i < components.length; i++) {
       const recipe = (units[i] * shares) / ONE_SHARE;
       assert.equal((await raw(ata(components[i], basket))).toString(), recipe.toString(), `vault ${i}`);
@@ -316,7 +324,7 @@ describe("real xStocks and PreStocks (mainnet clones)", () => {
       .signers([me])
       .rpc();
 
-    assert.equal((await raw(myShares())).toString(), ONE_SHARE.toString());
+    assert.equal((await raw(myShares())).toString(), (ONE_SHARE - 2_000n).toString());
     for (let i = 0; i < components.length; i++) {
       assert.equal((await raw(ata(components[i], basket))).toString(), units[i].toString(), `vault ${i} keeps one share`);
       const got = (await raw(ata(components[i], me.publicKey))) - before[i];
@@ -328,6 +336,57 @@ describe("real xStocks and PreStocks (mainnet clones)", () => {
         assert.equal(got.toString(), units[i].toString(), `component ${i} returned`);
       }
     }
+  });
+
+  it("never charges a protocol fee on a basket created before the fee existed", async () => {
+    // The fixture is a Basket exactly as the old release wrote it: its bytes
+    // end at `bump` and the headroom the new fields read from is zero.
+    const old = await program.account.basket.fetch(OLD_BASKET, "processed");
+    assert.equal(old.protocolFeeBps, 0);
+    assert.equal(old.protocolFeeAccrued.toString(), "0");
+    const mine = ata(OLD_SHARE_MINT, me.publicKey);
+    await send([
+      createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, mine, me.publicKey, OLD_SHARE_MINT, T22),
+      createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, ata(REAL.TSLAx, OLD_BASKET), OLD_BASKET, REAL.TSLAx, T22),
+    ]);
+    await program.methods
+      .mintShares(bn(ONE_SHARE))
+      .accountsPartial({
+        basket: OLD_BASKET,
+        shareMint: OLD_SHARE_MINT,
+        depositor: me.publicKey,
+        depositorShareAccount: mine,
+        creatorShareAccount: mine,
+        shareTokenProgram: T22,
+        componentTokenProgram: T22,
+      })
+      .remainingAccounts([
+        { pubkey: REAL.TSLAx, isSigner: false, isWritable: false },
+        { pubkey: ata(REAL.TSLAx, me.publicKey), isSigner: false, isWritable: true },
+        { pubkey: ata(REAL.TSLAx, OLD_BASKET), isSigner: false, isWritable: true },
+      ])
+      .signers([me])
+      .rpc();
+    assert.equal((await raw(mine)).toString(), ONE_SHARE.toString(), "every share created goes to the depositor");
+    const after = await program.account.basket.fetch(OLD_BASKET, "processed");
+    assert.equal(after.protocolFeeAccrued.toString(), "0");
+    assert.equal(after.mintCount.toString(), "1", "the rewritten account still decodes and counts");
+    await expectError(
+      program.methods
+        .claimProtocolFee()
+        .accountsPartial({
+          basket: OLD_BASKET,
+          shareMint: OLD_SHARE_MINT,
+          treasury: TREASURY,
+          treasuryShareAccount: ata(OLD_SHARE_MINT, TREASURY),
+          shareTokenProgram: T22,
+        })
+        .preInstructions([
+          createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, ata(OLD_SHARE_MINT, TREASURY), TREASURY, OLD_SHARE_MINT, T22),
+        ])
+        .rpc(),
+      "NothingToClaim",
+    );
   });
 
   it("refuses a look-alike whose issuer powers belong to the basket creator", async () => {

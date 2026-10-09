@@ -11,7 +11,9 @@
 // set an old fill against the price of its own moment, not today's.
 //
 // Usage: node scripts/tape-seed.mjs [baseUrl] [count]
-//   baseUrl defaults to http://localhost:3900, count to 40.
+//   baseUrl defaults to http://localhost:3900, count to 40. Against production:
+//   node scripts/tape-seed.mjs https://sheaf-index.vercel.app 40
+//   Run it during US market hours (it warns otherwise), then redeploy.
 // Plain fetch, no dependencies; works in Windows node or WSL.
 
 import { writeFileSync } from "node:fs";
@@ -20,7 +22,10 @@ import { fileURLToPath } from "node:url";
 
 const BASE = (process.argv[2] ?? "http://localhost:3900").replace(/\/$/, "");
 const WANT = Number(process.argv[3] ?? 40);
-const OUT = resolve(dirname(fileURLToPath(import.meta.url)), "../web/public/tape.seed.json");
+// TAPE_SEED_OUT writes elsewhere (for a dry run); the default is the file the page loads.
+const OUT = process.env.TAPE_SEED_OUT
+  ? resolve(process.env.TAPE_SEED_OUT)
+  : resolve(dirname(fileURLToPath(import.meta.url)), "../web/public/tape.seed.json");
 const DEADLINE = Date.now() + 6 * 60_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,6 +34,23 @@ const getJson = async (path) => {
   if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
   return res.json();
 };
+
+// The seed should look like a working market: capture while US markets are open
+// (09:30-16:00 New York, Monday to Friday; 19:00-01:30 IST in winter, an hour
+// earlier in summer). Outside those hours it still runs, with a warning.
+const ny = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  weekday: "short",
+  hour: "numeric",
+  minute: "numeric",
+  hourCycle: "h23",
+}).formatToParts(new Date());
+const part = (t) => ny.find((p) => p.type === t)?.value;
+const minutes = Number(part("hour")) * 60 + Number(part("minute"));
+if (["Sat", "Sun"].includes(part("weekday")) || minutes < 570 || minutes >= 960) {
+  console.warn(`US markets are closed (${part("weekday")} ${part("hour")}:${part("minute")} New York); trades will be sparse.`);
+}
+console.log(`Capturing from ${BASE} into ${OUT}`);
 
 const market = await getJson("/api/market");
 const quotes = new Map(market.quotes.map((q) => [q.symbol, q]));
@@ -61,7 +83,9 @@ while (rows.size < WANT && Date.now() < DEADLINE) {
         quote: p.quote,
         venue: p.venue,
         multiplier,
-        refPrice: q?.price ?? null,
+        // Jupiter's price when the server read the trade, if it says; else now.
+        refPrice: p.refPrice ?? q?.price ?? null,
+        refAt: p.refAt ?? Math.round(Date.now() / 1000),
       });
     }
     process.stdout.write(`\r${rows.size}/${WANT} trades captured (read via ${via})   `);

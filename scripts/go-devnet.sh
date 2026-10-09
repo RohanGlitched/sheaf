@@ -41,7 +41,9 @@ if (( $(echo "$BALANCE < $NEEDED_SOL" | bc -l) )); then
 fi
 
 step "Building and deploying the program to devnet"
-anchor build
+# The devnet build adds the write cluster's stand-in issuer keys to
+# KNOWN_ISSUERS; the default build knows only the real stock issuers.
+anchor build -- --features devnet
 anchor deploy --provider.cluster "$RPC" --provider.wallet "$WALLET"
 PROGRAM_ID=$(solana address -k target/deploy/sheaf-keypair.json)
 echo "Program $PROGRAM_ID"

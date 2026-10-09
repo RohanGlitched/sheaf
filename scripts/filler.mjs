@@ -167,6 +167,9 @@ function decodeBasket(address, data) {
     r.skip(5);
     if (i < count) basket.components.push(c);
   }
+  r.skip(8 + 8 + 8 + 1); // created_at, mint_count, redeem_count, bump
+  // The protocol fee sits in the account's headroom: older baskets read 0.
+  basket.protocolFeeBps = r.u16();
   return basket;
 }
 
@@ -231,7 +234,11 @@ function required(o, t) {
   return o.startShares - ((o.startShares - o.endShares) * BigInt(t - o.startTs)) / BigInt(o.endTs - o.startTs);
 }
 
-/** The gross shares whose creator fee leaves exactly `net`, as the program computes it. */
+/**
+ * The gross shares whose fees leave exactly `net`, as the program computes it.
+ * `feeBps` is the creator fee plus the basket's protocol fee: the program
+ * floors the pair once, so the gross depends only on their sum.
+ */
 function gross(net, feeBps) {
   const netOf = (g) => g - (g * BigInt(feeBps)) / 10_000n;
   let g = (net * 10_000n + BigInt(10_000 - feeBps) - 1n) / BigInt(10_000 - feeBps);
@@ -384,7 +391,7 @@ async function tick() {
     // Defence 4: the stocks the program will pull, from the on-chain recipe, grossed up for their own fees.
     const t = Math.floor(Date.now() / 1000) + 3;
     const shares = required(order, t);
-    const g = gross(shares, basket.creatorFeeBps);
+    const g = gross(shares, basket.creatorFeeBps + basket.protocolFeeBps);
     const tag = `${id} ${basket.symbol} $${dollars.toFixed(2)} net`;
     let cost = 0;
     const deliver = [];

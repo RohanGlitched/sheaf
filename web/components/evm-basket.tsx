@@ -215,7 +215,7 @@ export function EvmBasket({
             <div>
               <p className="flex items-center gap-1.5 text-xs text-gain">
                 <span className="live-dot size-1.5 rounded-full bg-gain" aria-hidden />
-                Live on {d.label}
+                Testnet · {d.label}
               </p>
               <h1 className="display mt-3 text-hero leading-[0.95] text-ink">{basket.name}</h1>
               <p className="tnum mt-3 text-sm text-ink-3">
@@ -270,7 +270,7 @@ export function EvmBasket({
                 note={supply === 0n ? "No shares exist yet" : "Held against owed, every component"}
                 tone={fullyBacked === false ? "loss" : fullyBacked ? "gain" : undefined}
               />
-              <Cell label="Cash desk" value={d.stable.symbol} note={d.stable.isMirror ? "A labeled test dollar" : d.network === "tempoTestnet" ? "Tempo's own TIP-20 dollar" : "Paxos Global Dollar, testnet"} />
+              <Cell label="Dollar desk" value={d.stable.symbol} note={d.stable.isMirror ? "A labeled test dollar" : d.network === "tempoTestnet" ? "Tempo's own TIP-20 dollar" : "Paxos Global Dollar, testnet"} />
             </dl>
           </div>
           {error && <p className="mt-3 text-sm text-loss">Could not read the chain just now: {error}</p>}
@@ -314,7 +314,7 @@ export function EvmBasket({
                   <tr key={r.token} className="border-b border-line/60 last:border-0">
                     <td className="px-3 py-3 sm:px-4">
                       <div className="flex items-center gap-2.5">
-                        <span aria-hidden className="size-2.5 shrink-0" style={{ background: slotColor(r.i) }} />
+                        <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: slotColor(r.i) }} />
                         <a href={`${d.explorer}/address/${r.token}`} target="_blank" rel="noreferrer" className="text-ink hover:underline">
                           {r.symbol}
                         </a>
@@ -402,7 +402,7 @@ export function EvmBasket({
             </>
           )}
           <details className="mt-6 border border-line">
-            <summary className="cursor-pointer px-4 py-3 text-sm text-ink-2 marker:text-bind hover:text-ink">Check it without this page</summary>
+            <summary className="cursor-pointer px-4 py-3 text-sm text-ink-2 marker:text-bind hover:text-ink">Verify it yourself</summary>
             <div className="space-y-3 border-t border-line px-4 py-4 text-sm leading-relaxed text-ink-2">
               <p>Two reads against the public RPC, no key:</p>
               <pre className="overflow-x-auto rounded-[var(--radius-control)] border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed">

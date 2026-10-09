@@ -20,37 +20,45 @@ type Print = {
   venue: string | null;
   /** Landed after the server last read its mint: block-to-screen time is meaningful. */
   live?: boolean;
+  /** Jupiter's price when the trade was read, and when that price was fetched (unix s). */
+  refPrice?: number | null;
+  refAt?: number | null;
 };
 /** A row from web/public/tape.seed.json: captured earlier, with the price of its own moment. */
-type SeedPrint = Print & { multiplier: number; refPrice: number | null };
+type SeedPrint = Print & { multiplier: number };
 type Seed = { capturedAt: number; source: string; note: string; prints: SeedPrint[] };
 
 type RaceSide = { medianMs: number | null; slot: number | null; answered: number; rateLimited: number };
-type Upstream = { calls: number; ok: number; rateLimited: number; failed: number };
+type Proof = {
+  instance: string;
+  since: number;
+  rpcMs: number | null;
+  compare: {
+    slot: { samples: number; solami: RaceSide; public: RaceSide; slotLead: number | null; at: number } | null;
+    freshTx: { tried: number; solami: number; public: number };
+    upstreams: { reads: { wanted: number; solami: number } };
+  };
+  calls: number;
+  pollMs: number;
+};
 type Tape = {
   slot: number;
   via: "solami" | "public";
   fallback: string | null;
   stale: boolean;
+  warming?: boolean;
   prints: Print[];
   polledAt: number;
   watching: string[];
   backlog: number;
-  proof: {
-    rpcMs: number | null;
-    compare: {
-      slot: { samples: number; solami: RaceSide; public: RaceSide; slotLead: number | null; at: number } | null;
-      freshTx: { tried: number; solami: number; public: number };
-      upstreams: { solami: Upstream; public: Upstream };
-    };
-    calls: number;
-    pollMs: number;
-  };
+  proof: Proof;
 };
 
 const KEEP = 40;
-/** Earlier trades fill the list until this many live rows have arrived. */
+/** Earlier trades fill the list until this many rows have come from the server. */
 const SEED_UNTIL = 8;
+/** A fill is set against Jupiter only when the price was read this close to the trade. */
+const PRICE_WINDOW_S = 120;
 
 const ago = (p: Print, now: number) => {
   const s = Math.max(0, Math.round(now / 1000 - p.time));
@@ -76,35 +84,31 @@ const median = (xs: number[]) => {
 const stamp = (unix: number) =>
   new Date(unix * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-/** One plain sentence on how the two RPCs compared, whichever way it went. */
-function verdict(c: Tape["proof"]["compare"]): string | null {
-  const r = c.slot;
-  if (!r || r.solami.medianMs == null || r.public.medianMs == null) return null;
-  const s = r.solami.medianMs;
-  const p = r.public.medianMs;
-  const speed =
-    s === p
-      ? `Solami and the public RPC answered getSlot equally fast (${s} ms median over ${r.samples} paired calls)`
-      : s < p
-        ? `Solami answered getSlot faster (${s} vs ${p} ms median over ${r.samples} paired calls)`
-        : `The public RPC answered getSlot faster from this server (${p} vs ${s} ms median over ${r.samples} paired calls)`;
-  const g = r.slotLead;
-  const ahead = (who: string, n: number) => `${who} slot was ${n} ahead`;
-  const lead =
-    g == null
-      ? ""
-      : g === 0
-        ? ", and both reported the same slot"
-        : // Who was ahead on the chain tip, joined to who was faster.
-          (g > 0) === (s < p) && s !== p
-          ? `, and ${ahead("its", Math.abs(g))} too`
-          : `${s === p ? ";" : ", but"} ${ahead(g > 0 ? "Solami's" : "the public RPC's", Math.abs(g))}`;
-  const u = c.upstreams;
-  const limits = `Solami has rate-limited ${u.solami.rateLimited} of ${u.solami.calls} calls from this server, the public RPC ${u.public.rateLimited} of ${u.public.calls}`;
-  const tx = c.freshTx.tried
-    ? `; of ${c.freshTx.tried} transaction${c.freshTx.tried === 1 ? "" : "s"} asked for seconds after landing, Solami served ${c.freshTx.solami} and the public RPC ${c.freshTx.public}`
-    : "";
-  return `${speed}${lead}. ${limits}${tx}.`;
+/**
+ * Proofs from every server instance that has answered, merged. Each instance
+ * keeps its own counters, so a younger instance's small totals never replace an
+ * older one's: per instance the latest answer wins, and the page sums them.
+ */
+function merge(proofs: Map<string, Proof>) {
+  const all = [...proofs.values()];
+  const race = all
+    .map((p) => p.compare.slot)
+    .filter((r): r is NonNullable<typeof r> => r != null)
+    .sort((a, b) => b.at - a.at)[0] ?? null;
+  const sum = (f: (p: Proof) => number) => all.reduce((n, p) => n + f(p), 0);
+  return {
+    instances: all.length,
+    race,
+    fresh: {
+      tried: sum((p) => p.compare.freshTx.tried),
+      solami: sum((p) => p.compare.freshTx.solami),
+      public: sum((p) => p.compare.freshTx.public),
+    },
+    reads: {
+      wanted: sum((p) => p.compare.upstreams.reads?.wanted ?? 0),
+      solami: sum((p) => p.compare.upstreams.reads?.solami ?? 0),
+    },
+  };
 }
 
 /**
@@ -118,7 +122,11 @@ function verdict(c: Tape["proof"]["compare"]): string | null {
  * Until enough rows have come from the server, trades captured earlier
  * (public/tape.seed.json, written by scripts/tape-seed.mjs) fill the list
  * under an "Earlier trades" divider, with their real block times. They are
- * never highlighted, never counted as live, and never feed the latency figures.
+ * never highlighted, never counted as live, and never feed the figures.
+ *
+ * The Solami figures sit in a disclosure under the trades: what the tape
+ * depends on first (slot freshness, just-landed transactions, reads answered,
+ * block to screen), and the raw round trip stated plainly in the note.
  */
 export function LiveTape() {
   const { bySymbol } = useMarket();
@@ -131,6 +139,8 @@ export function LiveTape() {
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const lags = useRef<number[]>([]);
   const [screenLag, setScreenLag] = useState<{ ms: number; n: number } | null>(null);
+  const proofs = useRef<Map<string, Proof>>(new Map());
+  const [stats, setStats] = useState<ReturnType<typeof merge> | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -146,6 +156,12 @@ export function LiveTape() {
         if (res.ok) {
           const t = (await res.json()) as Tape;
           if (!live) return;
+          // A cold server instance still backfilling: nothing to show yet, and
+          // the seed stays on screen. Ask again soon.
+          if (t.warming) {
+            timer = setTimeout(tick, 2_500);
+            return;
+          }
           const first = known.current.size === 0;
           const at = Date.now();
           const arrived = new Set<string>();
@@ -160,7 +176,15 @@ export function LiveTape() {
           setRows(merged.slice(0, KEEP));
           // Only a newer server tape replaces the header line, so an older cached
           // answer cannot move the slot backwards.
-          setTape((prev) => (!prev || t.slot >= prev.slot ? t : { ...prev, proof: t.proof }));
+          setTape((prev) => (!prev || t.slot >= prev.slot ? t : prev));
+          if (t.proof?.instance) {
+            const prev = proofs.current.get(t.proof.instance);
+            // A CDN copy can be older than one already seen from the same instance.
+            if (!prev || t.proof.compare.upstreams.reads.wanted >= prev.compare.upstreams.reads.wanted) {
+              proofs.current.set(t.proof.instance, t.proof);
+              setStats(merge(proofs.current));
+            }
+          }
           setLastOk(at);
           if (!first && arrived.size) {
             setFresh(arrived);
@@ -189,18 +213,26 @@ export function LiveTape() {
 
   const price = (p: Print, seeded: boolean) => {
     const q = bySymbol(p.symbol);
-    const s = seeded ? (p as SeedPrint) : null;
-    const multiplier = s ? s.multiplier : (q?.multiplier ?? 1);
-    // An earlier trade is set against Jupiter's price when it was captured.
-    const ref = s ? s.refPrice : (q?.price ?? null);
+    const multiplier = seeded ? (p as SeedPrint).multiplier : (q?.multiplier ?? 1);
+    // Jupiter's price from the moment the trade was read, never today's: a fill
+    // is only set against it when that price is within two minutes of the trade.
+    const ref = p.refPrice ?? null;
+    const near = ref != null && p.refAt != null && Math.abs(p.refAt - p.time) <= PRICE_WINDOW_S;
     const ui = p.raw * multiplier;
-    const value = p.usd ?? (ref != null ? ui * ref : null);
+    const value = p.usd ?? (ref != null ? ui * ref : q ? ui * q.price : null);
     const fill = p.usd != null && ui > 0 ? p.usd / ui : null;
-    const vsJup = fill != null && ref ? (fill / ref - 1) * 100 : null;
+    const vsJup = fill != null && near ? (fill / ref! - 1) * 100 : null;
     // A fill more than 15% off the market is a decode we do not trust (a
     // multi-leg route, a mint-and-swap): show the trade, not a price.
-    const trusted = vsJup != null && Math.abs(vsJup) < 15;
-    return { p, ui, value, fill: trusted ? fill : null, vsJup: trusted ? vsJup : null, seeded };
+    const trusted = vsJup == null || Math.abs(vsJup) < 15;
+    return {
+      p,
+      ui,
+      value,
+      fill: trusted ? fill : null,
+      vsJup: trusted ? vsJup : null,
+      seeded,
+    };
   };
   // Dust: under a dollar is a route's rounding, not a trade.
   const worth = (r: ReturnType<typeof price>) => r.value == null || r.value >= 1;
@@ -212,15 +244,13 @@ export function LiveTape() {
     seed && view.length < SEED_UNTIL
       ? seed.prints
           .filter((p) => p.side in SIDE && !onScreen.has(p.signature) && p.slot < oldestLive)
-          .map((p) => price(p, true))
+          .map((p) => price({ ...p, refAt: p.refAt ?? seed.capturedAt }, true))
           .filter(worth)
           .slice(0, KEEP - view.length)
       : [];
 
   const reconnecting = lastOk != null && now - lastOk > 20_000;
-  const compare = tape?.proof.compare;
-  const race = compare?.slot ?? null;
-  const said = compare ? verdict(compare) : null;
+  const race = stats?.race ?? null;
   const lead = race?.slotLead;
 
   const cell = (label: string, value: string, note?: string) => (
@@ -232,7 +262,7 @@ export function LiveTape() {
   );
 
   const grid =
-    "grid grid-cols-[3.75rem_minmax(0,1fr)_4.5rem] gap-3 px-4 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5rem_5.5rem] sm:px-5";
+    "grid grid-cols-[4rem_minmax(0,1fr)_4.5rem] gap-3 px-4 sm:grid-cols-[4.5rem_minmax(0,1fr)_6.5rem_5rem_5.5rem] sm:px-5";
 
   const row = ({ p, ui, value, fill, vsJup, seeded }: ReturnType<typeof price>) => (
     <li
@@ -241,30 +271,41 @@ export function LiveTape() {
         !seeded && fresh.has(p.signature) ? "bg-bind-wash" : "bg-transparent"
       } ${seeded ? "opacity-75" : ""}`}
     >
-      <span
-        className="tnum text-xs text-ink-3"
-        title={`${stamp(p.time)}, slot ${p.slot.toLocaleString("en-US")}${p.timeSource === "slot" ? ", time estimated from slot" : ""}`}
+      <a
+        href={`https://solscan.io/tx/${p.signature}`}
+        target="_blank"
+        rel="noreferrer"
+        className="tnum text-xs text-ink-3 underline decoration-line-strong decoration-dotted underline-offset-4 hover:text-ink sm:no-underline"
+        title={`${stamp(p.time)}, slot ${p.slot.toLocaleString("en-US")}${p.timeSource === "slot" ? ", time estimated from slot" : ""}. Open on Solscan.`}
       >
         {ago(p, now)}
+      </a>
+      <span className="min-w-0 text-ink">
+        <span className="block">
+          <span className={p.side === "buy" ? "text-gain" : p.side === "sell" ? "text-loss" : "text-ink-2"}>
+            {SIDE[p.side]}
+          </span>{" "}
+          <span className="tnum">{ui < 0.01 ? ui.toFixed(4) : ui < 100 ? ui.toFixed(3) : ui.toFixed(1)}</span>{" "}
+          <span className="font-medium">{p.base}</span>
+        </span>
+        {p.venue && <span className="block text-xs leading-snug text-ink-3">{p.venue}</span>}
       </span>
-      <span className="min-w-0 truncate text-ink">
-        <span className={p.side === "buy" ? "text-gain" : p.side === "sell" ? "text-loss" : "text-ink-2"}>
-          {SIDE[p.side]}
-        </span>{" "}
-        <span className="tnum">{ui < 0.01 ? ui.toFixed(4) : ui < 100 ? ui.toFixed(3) : ui.toFixed(1)}</span>{" "}
-        <span className="font-medium">{p.base}</span>
-        {p.venue && <span className="ml-1.5 hidden text-xs text-ink-3 md:inline">{p.venue}</span>}
-      </span>
-      <span className="tnum hidden truncate text-right text-ink-2 sm:block">
+      <span className="tnum hidden text-right text-ink-2 sm:block">
         {fill != null ? (
           <>
-            {money(fill)}{" "}
-            <span
-              className={`text-xs ${Math.abs(vsJup!) < 0.05 ? "text-ink-3" : vsJup! > 0 ? "text-gain" : "text-loss"}`}
-            >
-              {vsJup! >= 0 ? "+" : "−"}
-              {Math.abs(vsJup!).toFixed(2)}%
-            </span>
+            {money(fill)}
+            {vsJup != null ? (
+              <span
+                className={`block text-xs ${Math.abs(vsJup) < 0.05 ? "text-ink-3" : vsJup > 0 ? "text-gain" : "text-loss"}`}
+              >
+                {vsJup >= 0 ? "+" : "−"}
+                {Math.abs(vsJup).toFixed(2)}%
+              </span>
+            ) : (
+              <span className="block text-xs text-ink-3" title="No Jupiter price from within two minutes of this trade">
+                no price then
+              </span>
+            )}
           </>
         ) : (
           <span className="text-ink-3">—</span>
@@ -283,6 +324,9 @@ export function LiveTape() {
     </li>
   );
 
+  const reads = stats?.reads;
+  const fx = stats?.fresh;
+
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-14">
       <div>
@@ -290,9 +334,9 @@ export function LiveTape() {
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
           Real trades in tokenized stocks on Solana mainnet, read from the chain seconds after they land:
           the newest few on two of ten stock mints each poll, so a sample, not every fill. Plain transfers
-          are left out. The fill price is decoded from what the pool was paid, set against Jupiter&apos;s
-          price for the same token. These are the tokens a Sheaf basket holds, and the market that keeps
-          its share price honest.
+          are left out. The fill price is decoded from what the pool was paid, and set against
+          Jupiter&apos;s price for the same token at the time of the trade. These are the tokens a Sheaf
+          basket holds, and the market that keeps its share price honest.
         </p>
         <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-3">
           <span
@@ -304,93 +348,109 @@ export function LiveTape() {
           </span>
           {tape && (
             <span>
-              read through {tape.via === "solami" ? "Solami" : "a public RPC"}
+              · read through {tape.via === "solami" ? "Solami" : "a public RPC"}
               {reconnecting ? ", reconnecting" : tape.stale ? ", last good tape" : ""}
             </span>
           )}
         </p>
         {tape?.fallback && <p className="mt-2 max-w-[48ch] text-xs leading-relaxed text-ink-3">{tape.fallback}.</p>}
-
-        {tape && compare && (
-          <dl className="mt-7 grid max-w-[30rem] grid-cols-2 gap-px border border-line bg-line text-sm">
-            {cell(
-              `${tape.via === "solami" ? "Solami" : "RPC"} round trip`,
-              tape.proof.rpcMs != null ? `${tape.proof.rpcMs} ms` : "—",
-              "this poll's getSlot",
-            )}
-            {cell(
-              "Block to this screen",
-              screenLag ? seconds(screenLag.ms) : "next live trade",
-              screenLag ? `median of ${screenLag.n} live trade${screenLag.n === 1 ? "" : "s"}` : undefined,
-            )}
-            {cell(
-              "getSlot median, Solami / public",
-              race ? `${race.solami.medianMs ?? "—"} / ${race.public.medianMs ?? "—"} ms` : "measuring",
-              race ? `${race.samples} paired calls, warm connections` : "runs once a minute",
-            )}
-            {cell(
-              "Chain tip",
-              lead == null ? "—" : lead > 0 ? `Solami +${lead} slot${lead === 1 ? "" : "s"}` : lead < 0 ? `Public +${-lead} slot${lead === -1 ? "" : "s"}` : "Same slot",
-              "median slot gap, same instant",
-            )}
-            {cell(
-              "Just-landed tx served",
-              compare.freshTx.tried
-                ? `${compare.freshTx.solami}/${compare.freshTx.tried} · ${compare.freshTx.public}/${compare.freshTx.tried}`
-                : "—",
-              "Solami · public, getTransaction",
-            )}
-            {cell(
-              "Rate-limited (429)",
-              `${compare.upstreams.solami.rateLimited}/${compare.upstreams.solami.calls} · ${compare.upstreams.public.rateLimited}/${compare.upstreams.public.calls}`,
-              "Solami · public, calls from this server",
-            )}
-          </dl>
-        )}
-        {said && <p className="mt-3 max-w-[48ch] text-xs leading-relaxed text-ink-2">{said}</p>}
-        {tape && (
-          <p className="mt-3 max-w-[48ch] text-xs leading-relaxed text-ink-3">
-            Calls are sent one at a time, about 240 ms apart, so a poll stays under the free tier&apos;s five
-            requests a second; the last one was {tape.proof.calls} calls in {seconds(tape.proof.pollMs)}.
-            &ldquo;~&rdquo; marks a time placed by slot distance when the node had not yet reported the
-            block&apos;s time.
-          </p>
-        )}
       </div>
 
-      <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
-        <div className={`${grid} border-b border-line py-3 text-xs text-ink-3`}>
-          <span>When</span>
-          <span>Trade</span>
-          <span className="hidden text-right sm:block">Fill vs Jupiter</span>
-          <span className="text-right">Value</span>
-          <span className="hidden text-right sm:block">Wallet</span>
-        </div>
-        <ol className="max-h-[440px] overflow-y-auto" aria-live="polite" aria-label="Recent trades">
-          {view.length === 0 &&
-            (tape ? (
-              <li className="px-5 py-8 text-center text-sm leading-relaxed text-ink-3">
-                Waiting for the next xStock trade on mainnet. Trades usually land every few seconds during US
-                market hours.
-                {tape.backlog > 0 && " Reading the last few minutes of trades first."}
-              </li>
-            ) : (
-              !earlier.length &&
-              Array.from({ length: 6 }, (_, i) => <li key={i} className="mx-5 my-3 h-6 rounded skeleton" />)
-            ))}
-          {view.map(row)}
-        </ol>
-        {earlier.length > 0 && seed && (
-          <div className="border-t border-line" aria-label="Earlier trades, not live">
-            <p
-              className="flex flex-wrap items-baseline justify-between gap-x-3 bg-page/60 px-4 py-2 text-xs text-ink-3 sm:px-5"
-              title={seed.source}
-            >
-              <span className="text-ink-2">Earlier trades, not live</span>
-              <span className="tnum">captured {stamp(seed.capturedAt)}, fills against Jupiter then</span>
-            </p>
-            <ol className="max-h-[300px] overflow-y-auto">{earlier.map(row)}</ol>
+      <div className="order-first min-w-0 self-start lg:order-none">
+        <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
+          <div className={`${grid} border-b border-line py-3 text-xs text-ink-3`}>
+            <span>When</span>
+            <span>Trade</span>
+            <span className="hidden text-right sm:block" title="Against Jupiter's price within two minutes of the trade">
+              Fill vs Jupiter
+            </span>
+            <span className="text-right">Value</span>
+            <span className="hidden text-right sm:block">Wallet</span>
           </div>
+          <ol className="max-h-[440px] overflow-y-auto" aria-live="polite" aria-label="Recent trades">
+            {view.length === 0 &&
+              (tape ? (
+                <li className="px-5 py-8 text-center text-sm leading-relaxed text-ink-3">
+                  Waiting for the next xStock trade on mainnet. Trades usually land every few seconds during US
+                  market hours.
+                  {tape.backlog > 0 && " Reading the last few minutes of trades first."}
+                </li>
+              ) : (
+                !earlier.length &&
+                Array.from({ length: 6 }, (_, i) => <li key={i} className="mx-5 my-3 h-6 rounded skeleton" />)
+              ))}
+            {view.map(row)}
+          </ol>
+          {earlier.length > 0 && seed && (
+            <div className="border-t border-line" aria-label="Earlier trades, not live">
+              <p
+                className="flex flex-wrap items-baseline justify-between gap-x-3 bg-page/60 px-4 py-2 text-xs text-ink-3 sm:px-5"
+                title={seed.source}
+              >
+                <span className="text-ink-2">Earlier trades, not live</span>
+                <span className="tnum">captured {stamp(seed.capturedAt)}</span>
+              </p>
+              <ol className="max-h-[300px] overflow-y-auto">{earlier.map(row)}</ol>
+            </div>
+          )}
+        </div>
+
+        {tape && (
+          <details className="group mt-4 text-sm">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-ink-2 hover:text-ink">
+              <span aria-hidden className="text-ink-3 transition-transform group-open:rotate-90">
+                ›
+              </span>
+              How fresh is this? Solami against the public RPC
+            </summary>
+            <dl className="mt-3 grid grid-cols-1 gap-px border border-line bg-line sm:grid-cols-2">
+              {cell(
+                "Chain tip, same instant",
+                lead == null
+                  ? "measured once a minute"
+                  : lead > 0
+                    ? `Solami ahead by ${lead} slot${lead === 1 ? "" : "s"}`
+                    : lead < 0
+                      ? `Public RPC ahead by ${-lead} slot${lead === -1 ? "" : "s"}`
+                      : "Same slot on both",
+                race ? `median gap over ${race.samples} paired getSlot calls` : undefined,
+              )}
+              {cell(
+                "Just-landed transactions served",
+                fx?.tried ? `Solami ${fx.solami} of ${fx.tried} · public ${fx.public} of ${fx.tried}` : "measured once a minute",
+                "getTransaction for a trade seconds old, asked of both at once",
+              )}
+              {cell(
+                "Block to this screen",
+                screenLag ? seconds(screenLag.ms) : "at the next live trade",
+                screenLag
+                  ? `median of ${screenLag.n} live trade${screenLag.n === 1 ? "" : "s"}, including the mint rotation`
+                  : "from the trade's block time to this page",
+              )}
+              {cell(
+                "Tape reads answered by Solami",
+                reads?.wanted ? `${reads.solami} of ${reads.wanted}` : "—",
+                stats
+                  ? `${stats.instances} server instance${stats.instances === 1 ? "" : "s"}, after one retry on a 429`
+                  : undefined,
+              )}
+            </dl>
+            <p className="mt-3 text-xs leading-relaxed text-ink-3">
+              {race?.solami.medianMs != null && race.public.medianMs != null
+                ? race.solami.medianMs <= race.public.medianMs
+                  ? `On raw round trip Solami was also quicker in the latest paired run: getSlot in ${race.solami.medianMs} ms against the public RPC's ${race.public.medianMs} ms (median of ${race.samples}, warm connections). `
+                  : `Raw round trip is left off this list because Solami does not win it here: in the latest paired run the public RPC answered getSlot in ${race.public.medianMs} ms against Solami's ${race.solami.medianMs} ms (median of ${race.samples}, warm connections), since it sits a few milliseconds from the server. `
+                : "Raw round trip is measured too, once a minute, and appears here after the first run. "}
+              What the tape needs is a key it can call every few seconds without being cut off, a fresh slot,
+              and transactions served moments after they land; the public endpoint is documented as not meant
+              for production traffic. Calls go out one at a time, 500 ms apart, so two server instances
+              together stay under the free tier&apos;s five requests a second. Every figure is in{" "}
+              <a href="/api/tape" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
+                /api/tape
+              </a>{" "}
+              under <code>proof</code>. &ldquo;~&rdquo; marks a time placed by slot distance.
+            </p>
+          </details>
         )}
       </div>
     </div>

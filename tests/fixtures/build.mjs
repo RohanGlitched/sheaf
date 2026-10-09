@@ -20,6 +20,9 @@
  *                     close_legacy_plan success path
  *   short-order.json  an open Order recording more cash than its escrow will
  *                     hold, for the EscrowShort guard in fill_order
+ *   old-basket.json   a Basket written before the protocol fee existed (its
+ *                     tail after `bump` is zero), with its share mint in
+ *   old-share-mint.json, to show such a basket never charges one
  *
  * Anchor.toml loads every file through [[test.validator.account]]. The
  * program-state fixtures need the IDL, so run `anchor build` first.
@@ -185,4 +188,68 @@ function writeProgramAccount(name, address, data) {
   const data = Buffer.alloc(258);
   enc.copy(data);
   writeProgramAccount("short-order", order, data);
+}
+
+// A basket from before the protocol fee: everything up to `bump` as the old
+// release wrote it, then the zeroed headroom the new fields are read from.
+export const OLD_SYMBOL = "OLDB";
+{
+  const [oldBasket, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("basket"), authority.toBuffer(), Buffer.from(OLD_SYMBOL)],
+    programId,
+  );
+  // The share mint: a bare Token-2022 mint (82 bytes), 6 decimals, no supply,
+  // mint authority = the basket, no freeze authority.
+  const shareMint = PublicKey.findProgramAddressSync([Buffer.from("old-share-mint")], programId)[0];
+  const mint = Buffer.alloc(82);
+  mint.writeUInt32LE(1, 0);
+  oldBasket.toBuffer().copy(mint, 4);
+  mint[44] = 6;
+  mint[45] = 1;
+  fs.writeFileSync(
+    path.join(DIR, "old-share-mint.json"),
+    JSON.stringify(
+      {
+        pubkey: shareMint.toBase58(),
+        account: {
+          lamports: rentExempt(82),
+          data: [mint.toString("base64"), "base64"],
+          owner: TOKEN_2022.toBase58(),
+          executable: false,
+          rentEpoch: 0,
+          space: 82,
+        },
+      },
+      null,
+      1,
+    ) + "\n",
+  );
+  console.log(`old-share-mint ${shareMint.toBase58()}  82 bytes`);
+
+  const empty = { mint: PublicKey.default, units_per_share: BN(0), weight_bps: 0, decimals: 0, _padding: [0, 0, 0, 0, 0] };
+  const enc = await coder.encode("Basket", {
+    creator: authority,
+    share_mint: shareMint,
+    token_program: TOKEN_2022,
+    name: "Old Basket",
+    symbol: OLD_SYMBOL,
+    creator_fee_bps: 0,
+    component_count: 1,
+    components: [
+      { mint: tsla, units_per_share: BN(1_000_000), weight_bps: 10_000, decimals: 8, _padding: [0, 0, 0, 0, 0] },
+      ...Array(7).fill(empty),
+    ],
+    created_at: BN(0),
+    mint_count: BN(0),
+    redeem_count: BN(0),
+    bump,
+    protocol_fee_bps: 0,
+    protocol_fee_accrued: BN(0),
+  });
+  const SPACE = 630;
+  const data = Buffer.alloc(SPACE);
+  enc.copy(data);
+  // What the old release wrote ends at `bump`; the 10 new bytes must be zero.
+  if (!data.subarray(enc.length - 10, enc.length).every((b) => b === 0)) throw new Error("old basket tail not zero");
+  writeProgramAccount("old-basket", oldBasket, data);
 }

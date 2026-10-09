@@ -1,6 +1,6 @@
 {
   "id": "sheaf-nav-shelf-v2",
-  "title": "NAV shelf: open at 0.5x NAV, graduate at 5x NAV",
+  "title": "NAV-anchored curve: open at 0.5x NAV, graduate at 5x NAV",
   "description": "A Meteora DBC curve for anything with an onchain-verifiable net asset value. Market caps are multiples of a NAV you supply in the quote token; the four segments and weights fix the shape. Built with buildCurveWithCustomSqrtPrices.",
   "program": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
   "openMultipleOfNav": 0.5,
@@ -28,8 +28,18 @@
       "startingFeeBps": 2500,
       "endingFeeBps": 100,
       "numberOfPeriod": 60,
-      "totalDurationSeconds": 600
+      "totalDurationSeconds": 600,
+      "reductionFactor": 522
     }
+  },
+  "feeSplit": {
+    "note": "creatorTradingFeePercentage splits what is left after Meteora's share. The DBC program keeps 20% of every curve fee (PROTOCOL_FEE_PERCENT); DAMM v2 keeps 20% of every graduated-pool fee, and the two locked LP positions split the rest by liquidity, 50/50. Read from devnet: BIG5A curve protocol 3502678 / trading 14010721 lamports; its DAMM v2 pool protocol 1175360 / LP 4701444.",
+    "meteoraProtocolPercent": 20,
+    "creatorPercentOfEveryCurveFee": 40,
+    "treasuryPercentOfEveryCurveFee": 40,
+    "creatorPercentOfEveryGraduatedPoolFee": 40,
+    "treasuryPercentOfEveryGraduatedPoolFee": 40,
+    "treasuryPercentOfMigrationFee": 100
   },
   "migration": {
     "option": "MET_DAMM_V2",
@@ -62,7 +72,8 @@
     "capMultiplesOfOpen": [1, 1.26, 2, 6.3, 40],
     "liquidityWeights": [16, 6, 2, 1],
     "activationType": "Slot",
-    "antiSnipe": { "startingFeeBps": 400, "endingFeeBps": 100, "numberOfPeriod": 60, "totalDurationSlots": 3600, "realDurationMinutes": 24 },
+    "antiSnipe": { "startingFeeBps": 400, "endingFeeBps": 100, "numberOfPeriod": 60, "totalDurationSlots": 3600, "reductionFactor": 228, "realDurationMinutes": 24 },
+    "migratedPoolFeeBps": 100,
     "measured": {
       "thresholdSolPerNavSol": 1.219,
       "supplySoldOnCurvePercent": 93.0,

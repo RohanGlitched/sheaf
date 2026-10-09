@@ -165,17 +165,6 @@ export default function Home() {
       {/* ---------------------------------------------------------- launch */}
       <section id="launch" className="scroll-mt-24 border-t border-line py-20">
         <LaunchMarket />
-        <p className="mt-8 max-w-[62ch] text-sm leading-relaxed text-ink-3">
-          To see a launch on the current curve, open{" "}
-          <Link
-            href="/basket/FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8#launch"
-            className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
-          >
-            Bitcoin, by proxy
-          </Link>
-          : it opened at half its NAV with a 25% fee that fell to 1% over ten minutes, and graduates at five
-          times NAV.
-        </p>
       </section>
 
       {/* ------------------------------------------------------ prediction */}

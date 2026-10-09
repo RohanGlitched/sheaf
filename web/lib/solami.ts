@@ -6,9 +6,10 @@ import { MAINNET_RPC } from "./config";
  *
  * Solami's RPC answers when SOLAMI_API_KEY is set. The free tier allows five
  * requests a second per key, and a burst past that answers 429 with
- * `Retry-After: 1`, so this module paces every call it sends (one slot every
- * 240 ms per server instance, about 4.2 a second) and leaves the remainder of
- * the budget as headroom for a second warm instance. A 429 waits out its
+ * `Retry-After: 1`, so this module paces every call it sends: one slot every
+ * 500 ms per server instance, two a second, so two warm instances together
+ * still fit under the key's five (Vercel keeps more than one warm, and at
+ * 240 ms three of them together drew 429s). A 429 waits out its
  * Retry-After once and tries again; a second failure puts Solami on a short
  * cool-down and the call is answered by the public RPC instead, and the caller
  * is told so. Nothing here ever reports "solami" for an answer Solami did not give.
@@ -24,7 +25,8 @@ import { MAINNET_RPC } from "./config";
 export type Via = "solami" | "public";
 
 const SOLAMI_BASE = "https://rpc.solami.dev/solana";
-const SPACING_MS = 240;
+/** Gap between calls to one upstream from one instance. */
+const SPACING_MS: Record<Via, number> = { solami: 500, public: 240 };
 const COOL_DOWN_MS = 8_000;
 
 export function solamiKey(): string | null {
@@ -44,7 +46,7 @@ const nextSlot: Record<Via, number> = { solami: 0, public: 0 };
 async function pace(via: Via) {
   const now = Date.now();
   const at = Math.max(now, nextSlot[via]);
-  nextSlot[via] = at + SPACING_MS;
+  nextSlot[via] = at + SPACING_MS[via];
   if (at > now) await sleep(at - now);
 }
 
@@ -68,19 +70,40 @@ export class RpcError extends Error {
   }
 }
 
-/** Every request this instance sent to an upstream, and how it ended. */
+/**
+ * Every request this instance sent to an upstream for the tape and the market
+ * reads, and how it ended. The comparison's own calls are kept out of it (they
+ * are reported inside the comparison), so race traffic never reads as the tape
+ * being throttled.
+ */
 export type UpstreamStats = { calls: number; ok: number; rateLimited: number; failed: number };
+export type ReadStats = {
+  /** Reads that went to Solami first. */
+  wanted: number;
+  /** Of those, how many Solami answered (after its one patient retry on a 429). */
+  solami: number;
+};
 const stats: Record<Via, UpstreamStats> = {
   solami: { calls: 0, ok: 0, rateLimited: 0, failed: 0 },
   public: { calls: 0, ok: 0, rateLimited: 0, failed: 0 },
 };
-export function upstreamStats(): Record<Via, UpstreamStats> {
-  return { solami: { ...stats.solami }, public: { ...stats.public } };
+const reads: ReadStats = { wanted: 0, solami: 0 };
+export function upstreamStats(): Record<Via, UpstreamStats> & { reads: ReadStats } {
+  return { solami: { ...stats.solami }, public: { ...stats.public }, reads: { ...reads } };
 }
 
-async function send<T>(via: Via, method: string, params: unknown[], timeoutMs: number): Promise<{ result: T; ms: number }> {
-  await pace(via);
-  const tally = stats[via];
+async function send<T>(
+  via: Via,
+  method: string,
+  params: unknown[],
+  timeoutMs: number,
+  /** Counted in upstreamStats (the comparison's own calls are not). */
+  counted = true,
+  /** False when the caller has already waited its turn in the queue. */
+  paced = true,
+): Promise<{ result: T; ms: number }> {
+  if (paced) await pace(via);
+  const tally = counted ? stats[via] : { calls: 0, ok: 0, rateLimited: 0, failed: 0 };
   tally.calls++;
   const started = performance.now();
   let res: Response;
@@ -132,22 +155,31 @@ export async function mainnetCall<T>(
   const timeoutMs = opts.timeoutMs ?? 8_000;
   const keyed = solamiKey() != null;
   const cooling = solamiCooling();
+  if (keyed && opts.prefer !== "public") reads.wanted++;
   if (keyed && opts.prefer !== "public" && !cooling) {
     try {
       const out = await send<T>("solami", method, params, timeoutMs);
+      reads.solami++;
       return { ...out, via: "solami", fallback: null };
     } catch (err) {
       const e = err as RpcError;
       // Solami answered, and the answer is about this request: asking the
       // public RPC the same thing would get the same error.
-      if (e.answered) throw e;
+      if (e.answered) {
+        reads.solami++;
+        throw e;
+      }
       if (e.rateLimited) {
         await sleep(Math.min(2_000, e.retryAfterMs));
         try {
           const out = await send<T>("solami", method, params, timeoutMs);
+          reads.solami++;
           return { ...out, via: "solami", fallback: null };
         } catch (again) {
-          if ((again as RpcError).answered) throw again;
+          if ((again as RpcError).answered) {
+            reads.solami++;
+            throw again;
+          }
           lastFailure = (again as Error).message;
         }
       } else {
@@ -167,7 +199,7 @@ export async function mainnetCall<T>(
 type Outcome<T> = { ok: true; result: T; ms: number } | { ok: false; limited: boolean };
 async function attempt<T>(via: Via, method: string, params: unknown[]): Promise<Outcome<T>> {
   try {
-    return { ok: true, ...(await send<T>(via, method, params, 5_000)) };
+    return { ok: true, ...(await send<T>(via, method, params, 5_000, false, false)) };
   } catch (err) {
     return { ok: false, limited: err instanceof RpcError && err.rateLimited };
   }
@@ -208,13 +240,17 @@ export type SlotRace = {
  * The same call, getSlot at "confirmed", sent to both upstreams at the same
  * instant, `samples` times over warm connections (one pair first, discarded,
  * opens the keep-alive sockets). Each pair goes out together, so neither side
- * gains from going second and the two slots describe the same moment. Solami's
- * half waits its turn in the paced queue like any other call.
+ * gains from going second and the two slots describe the same moment. Each
+ * pair first waits for a turn in both paced queues, then fires both at once.
+ * These calls are kept out of upstreamStats.
  */
-export async function raceSlot(samples = 5): Promise<SlotRace | null> {
+export async function raceSlot(samples = 3): Promise<SlotRace | null> {
   if (!solamiKey()) return null;
   const params = [{ commitment: "confirmed" }];
-  const pair = () => Promise.all([attempt<number>("solami", "getSlot", params), attempt<number>("public", "getSlot", params)]);
+  const pair = async () => {
+    await Promise.all([pace("solami"), pace("public")]);
+    return Promise.all([attempt<number>("solami", "getSlot", params), attempt<number>("public", "getSlot", params)]);
+  };
   await pair();
   const rows: Awaited<ReturnType<typeof pair>>[] = [];
   for (let i = 0; i < samples; i++) rows.push(await pair());
@@ -252,6 +288,7 @@ export type TxCheck = {
 export async function raceTransaction(signature: string): Promise<TxCheck | null> {
   if (!solamiKey()) return null;
   const params = [signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }];
+  await Promise.all([pace("solami"), pace("public")]);
   const [a, b] = await Promise.all([attempt<unknown>("solami", "getTransaction", params), attempt<unknown>("public", "getTransaction", params)]);
   return { solami: a.ok ? a.result != null : null, public: b.ok ? b.result != null : null };
 }

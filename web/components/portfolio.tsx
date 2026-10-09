@@ -32,6 +32,8 @@ import { money, percent, quantity, signedPercent, count } from "@/lib/format";
 
 const TOKEN_PROGRAM = TOKEN_2022_PROGRAM_ID.toBase58();
 const TOP_SLOTS = 7;
+/** The folded-in tail is "everything else", so it gets no palette color of its own. */
+const REST_COLOR = "var(--color-line-strong)";
 
 /**
  * The look-through as bars, in value order with the folded-in tail last, the same
@@ -48,7 +50,7 @@ function LookThroughBars({ tiles }: { tiles: BasketTile[] }) {
     <div className="flex items-center gap-4 sm:gap-6">
       <div className="aspect-square shrink-0" style={{ width: "min(234px, 38%)" }}>
         <SheafMark
-          stalks={tiles.map((t) => ({ key: t.key, weight: t.weightBps / total, color: slotColor(t.slot) }))}
+          stalks={tiles.map((t) => ({ key: t.key, weight: t.weightBps / total, color: t.key === "rest" ? REST_COLOR : slotColor(t.slot) }))}
           className="h-full w-full"
           title={`${tiles.length} holdings bound into one view`}
         />
@@ -65,13 +67,13 @@ function LookThroughBars({ tiles }: { tiles: BasketTile[] }) {
                   {t.sub && <span className="ml-2 text-ink-3">{t.sub}</span>}
                 </span>
                 <span className="tnum shrink-0 text-sm text-ink-2">
-                  {(share * 100).toFixed(share < 0.1 ? 1 : 0)}%
+                  {(share * 100).toFixed(1)}%
                 </span>
               </div>
               <div className="mt-1 h-1.5 rounded-full bg-sunk">
                 <div
                   className="h-full rounded-full"
-                  style={{ width: `${(t.weightBps / max) * 100}%`, background: slotColor(t.slot) }}
+                  style={{ width: `${(t.weightBps / max) * 100}%`, background: isRest ? REST_COLOR : slotColor(t.slot) }}
                 />
               </div>
             </li>
@@ -270,7 +272,7 @@ export function Portfolio() {
       <div>
         <div className="py-16 text-center">
           <h1 className="display text-hero leading-[0.95] text-ink">
-            Your side of it
+            Everything you own, unwrapped
           </h1>
           <p className="mx-auto mt-5 max-w-[52ch] text-base leading-relaxed text-ink-2">
             Connect a wallet and this page reads your baskets, values them from
@@ -316,11 +318,9 @@ export function Portfolio() {
                     <span className="flex items-baseline gap-2.5">
                       <span
                         aria-hidden
-                        className="size-2.5 shrink-0 translate-y-px"
+                        className="size-2 shrink-0 -translate-y-px rounded-full"
                         style={{
-                          background: slotColor(
-                            index < TOP_SLOTS ? index : TOP_SLOTS,
-                          ),
+                          background: index < TOP_SLOTS ? slotColor(index) : REST_COLOR,
                         }}
                       />
                       <span className="text-ink">{row.base}</span>
@@ -368,7 +368,7 @@ export function Portfolio() {
       <div className="flex flex-wrap items-end justify-between gap-8">
         <div>
           <h1 className="display text-hero leading-[0.95] text-ink">
-            Your side of it
+            Everything you own, unwrapped
           </h1>
           <p className="mt-4 max-w-[52ch] text-base leading-relaxed text-ink-2">
             Balances read from the chain, valued at live mainnet prices.
@@ -509,11 +509,9 @@ export function Portfolio() {
                         <div className="flex items-center gap-3">
                           <span
                             aria-hidden
-                            className="size-2.5 shrink-0"
+                            className="size-2 shrink-0 rounded-full"
                             style={{
-                              background: slotColor(
-                                index < TOP_SLOTS ? index : TOP_SLOTS,
-                              ),
+                              background: index < TOP_SLOTS ? slotColor(index) : REST_COLOR,
                             }}
                           />
                           <span>

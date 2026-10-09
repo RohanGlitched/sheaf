@@ -10,8 +10,31 @@ import { pantaGet, pantaPost, short, usdcBase, type PantaMode } from "@/lib/pant
 type Nav = {
   navPerShare: { recipe: number | null; vault: number | null; listed: number | null };
   sharesOutstanding: number | null;
-  week: { from: number; to: number; navReturnPct: number; spyReturnPct: number | null; beatsSpy: boolean | null } | null;
+  trailingWeek: { from: number; to: number; navReturnPct: number; spyReturnPct: number | null; beatsSpy: boolean | null } | null;
+  resolution?: { rule: string; nextWindow: { from: string; to: string; fromClose: number; toClose: number } };
 };
+
+type CatalogMarket = {
+  marketId: string;
+  title: string;
+  description?: string;
+  category: string;
+  phase: string;
+  endTime: string;
+  volumeUsdc: string;
+  yesPrice: string | null;
+  noPrice: string | null;
+};
+type Catalog = {
+  mode: PantaMode;
+  fixture?: boolean;
+  markets: CatalogMarket[];
+  category?: { category: string; offered: string[]; preferred: boolean };
+};
+
+/** BIG5 leads: the basket with the longest listed history, so its trailing week and JSON are complete. */
+const LEAD = "BIG5";
+const question = (name: string, symbol: string) => `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
 type Fee = { paymentUsdc?: string; liquidityInjectionUsdc?: string; platformRevenueUsdc?: string; fixture?: boolean };
 
@@ -26,7 +49,7 @@ const dayLabel = (d: number) =>
   });
 
 const LIFECYCLE: { verb: string; endpoint: string; where: string }[] = [
-  { verb: "Discovery", endpoint: "GET /markets/, GET /categories/", where: "This page and every basket page" },
+  { verb: "Discovery", endpoint: "GET /markets/, GET /categories/", where: "“Panta's catalog” on this page, and every basket page" },
   { verb: "Data", endpoint: "GET /markets/{id}/, GET /markets/{id}/trades/", where: "Positions on /portfolio" },
   { verb: "Creation", endpoint: "POST /markets/create/quote/ → /markets/create/build/ → wallet signs → POST /markets/register/", where: "Basket page, “Open it on Panta”" },
   { verb: "Trading", endpoint: "POST /primaryorderquote/ → /primaryorderbuild/ → wallet signs → /primaryordersubmit/ → /primaryorderverify/ → POST /trades/", where: "Basket page, “Take a side”" },
@@ -43,13 +66,26 @@ const LIFECYCLE: { verb: string; endpoint: string; where: string }[] = [
 export function PredictIndex() {
   const { baskets: all, error } = useBaskets();
   // Baskets our QA runs made stay reachable by URL but are left out of the list.
-  const baskets = useMemo(() => (all ? all.filter((b) => !isTestBasket(b)) : null), [all]);
+  // BIG5 first, then the most-minted: a basket with history and holders leads.
+  const baskets = useMemo(
+    () =>
+      all
+        ? all
+            .filter((b) => !isTestBasket(b))
+            .sort((a, b) => Number(b.symbol === LEAD) - Number(a.symbol === LEAD) || Number(b.mintCount ?? 0) - Number(a.mintCount ?? 0))
+        : null,
+    [all],
+  );
   const [mode, setMode] = useState<PantaMode | null>(null);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [fee, setFee] = useState<Fee | null>(null);
   const [navs, setNavs] = useState<Record<string, Nav | "error">>({});
 
   useEffect(() => {
-    void pantaGet<{ mode: PantaMode }>("/api/panta").then((r) => setMode(r.ok ? r.data.mode : "off"));
+    void pantaGet<Catalog>("/api/panta").then((r) => {
+      setMode(r.ok ? r.data.mode : "off");
+      if (r.ok) setCatalog(r.data);
+    });
   }, []);
 
   useEffect(() => {
@@ -74,11 +110,17 @@ export function PredictIndex() {
   }, [baskets]);
 
   const rows = baskets ?? [];
-  const firstNav = rows[0] ? navs[rows[0].address] : undefined;
+  // The JSON sample is the first basket whose answer has a trailing week, so
+  // the fields a market resolves from are filled in, not null.
+  const sampleBasket = rows.find((b) => {
+    const n = navs[b.address];
+    return n && n !== "error" && n.trailingWeek != null && n.navPerShare.listed != null;
+  });
+  const sampleNav = sampleBasket ? (navs[sampleBasket.address] as Nav) : undefined;
   const sample =
-    firstNav && firstNav !== "error"
+    sampleNav
       ? (() => {
-          const j = firstNav as Nav & Record<string, unknown>;
+          const j = sampleNav as Nav & Record<string, unknown>;
           const comps = (j.components as Record<string, unknown>[] | undefined) ?? [];
           const sources = (j.sources as Record<string, unknown> | undefined) ?? {};
           return JSON.stringify(
@@ -87,7 +129,7 @@ export function PredictIndex() {
               at: j.at,
               navPerShare: j.navPerShare,
               sharesOutstanding: j.sharesOutstanding,
-              week: j.week,
+              trailingWeek: j.trailingWeek,
               components: [
                 ...comps.slice(0, 2).map((c) => ({
                   base: c.base,
@@ -108,11 +150,11 @@ export function PredictIndex() {
       : null;
   const leading = rows.filter((b) => {
     const n = navs[b.address];
-    return n && n !== "error" && n.week?.beatsSpy;
+    return n && n !== "error" && n.trailingWeek?.beatsSpy;
   }).length;
   const measured = rows.filter((b) => {
     const n = navs[b.address];
-    return n && n !== "error" && n.week?.beatsSpy != null;
+    return n && n !== "error" && n.trailingWeek?.beatsSpy != null;
   }).length;
 
   return (
@@ -122,10 +164,10 @@ export function PredictIndex() {
           <p className="text-sm text-bind">Predict</p>
           <h1 className="display mt-2 text-hero leading-[0.95] text-ink">A market on every basket.</h1>
           <p className="mt-6 max-w-[58ch] text-lg leading-relaxed text-ink-2">
-            Every Sheaf basket carries one question: will it beat SPY this week? Because a basket&apos;s
-            value is held in a vault anyone can read, the answer can be computed from chain state and public
-            prices, with no one&apos;s say-so. Panta runs the market: a USDC bonding curve on Solana, opened,
-            traded and claimed through its API.
+            Every Sheaf basket carries one question: will it beat SPY this week? A basket&apos;s recipe is
+            on chain, so the answer can be recomputed by anyone from public accounts and two public price
+            sources, between two Friday US closes. Panta runs the market: a USDC bonding curve on Solana,
+            opened, traded and claimed through its API.
           </p>
           <PoweredByPanta className="mt-7" />
         </div>
@@ -172,7 +214,7 @@ export function PredictIndex() {
           {rows.map((b) => {
             const n = navs[b.address];
             const nav = n && n !== "error" ? n : null;
-            const w = nav?.week ?? null;
+            const w = nav?.trailingWeek ?? null;
             return (
               <div
                 key={b.address}
@@ -180,7 +222,7 @@ export function PredictIndex() {
               >
                 <div className="min-w-0">
                   <Link href={`/basket/${b.address}`} className="text-ink hover:underline hover:underline-offset-4">
-                    Will {b.name} ({b.symbol}) beat SPY this week?
+                    {question(b.name, b.symbol)}
                   </Link>
                   <p className="mt-0.5 text-xs text-ink-3">
                     {b.components.length} holdings · created by {short(b.creator, 4, 4)}
@@ -236,24 +278,111 @@ export function PredictIndex() {
       <section className="mt-24 grid grid-cols-1 gap-10 border-t border-line pt-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16">
         <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">How a market resolves.</h2>
-          <p className="mt-5 max-w-[48ch] text-base leading-relaxed text-ink-2">
-            YES if one share, valued from its vault at the closing time, rose more than SPY&apos;s
-            close-to-close change over the same week. NO otherwise. The value is published as JSON at{" "}
-            <code className="text-sm">/api/nav/&lt;basket&gt;</code>, and the market names that URL as its
-            first source of truth.
+          <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
+            The week runs between two US closes: 16:00 New York time on a Friday, and on the Friday after.
+            Stock tokens trade around the clock, but SPY only has a close at the close, so both sides are
+            read there. If a Friday is a market holiday, the last close before it counts.
           </p>
-          <p className="mt-4 max-w-[48ch] text-sm leading-relaxed text-ink-3">
-            Nothing in it needs trusting Sheaf. The recipe (units of each stock per share) and the vault
-            balances are public accounts; each stock&apos;s dividend multiplier sits on its mainnet mint; the
-            prices are Jupiter&apos;s public API. The JSON lists every input and the curl commands to fetch
-            them yourself.
+          <ol className="mt-5 max-w-[50ch] list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink-2">
+            <li>
+              Read <code className="text-xs">navPerShare.listed</code> and <code className="text-xs">spy.adjClose</code>{" "}
+              from <code className="text-xs">/api/nav/&lt;basket&gt;?at=&lt;close&gt;</code> at both closes.
+            </li>
+            <li>Divide the later value by the earlier one, for the basket and for SPY.</li>
+            <li>YES if the basket&apos;s ratio is greater. NO otherwise, including a tie.</li>
+          </ol>
+          {sampleNav?.resolution && (
+            <p className="mt-5 max-w-[50ch] text-sm leading-relaxed text-ink-3">
+              A market opened on {sampleBasket?.symbol} now would measure {sampleNav.resolution.nextWindow.from}{" "}
+              to {sampleNav.resolution.nextWindow.to}. Both are total return: adjusted closes reinvest
+              dividends, the way an xStock&apos;s multiplier does. A close is served once it is final, an hour
+              after the bell; a time in the future is refused, never answered with today&apos;s number.
+            </p>
+          )}
+          <p className="mt-5 max-w-[50ch] text-sm leading-relaxed text-ink-3">
+            Every input is public, and the JSON lists a command to fetch each one. The only off-chain inputs
+            are Jupiter&apos;s prices and the daily closes:
           </p>
+          <ul className="mt-3 max-w-[50ch] space-y-1.5 text-sm leading-relaxed text-ink-3">
+            <li>• The recipe, units of each stock per share: the basket account on Solana.</li>
+            <li>• Shares outstanding and what each vault holds: the share mint and vault token accounts.</li>
+            <li>• Each stock&apos;s dividend multiplier: the Token-2022 config on its mainnet mint.</li>
+            <li>• Daily closes and adjusted closes for every holding and SPY: Yahoo Finance&apos;s chart API.</li>
+            <li>• Live prices for the &ldquo;now&rdquo; figures: Jupiter&apos;s price API.</li>
+          </ul>
         </div>
         <div className="min-w-0 rounded-[var(--radius-panel)] border border-line bg-vault p-6 text-vault-ink">
           <p className="text-xs opacity-70">
-            What /api/nav answers for {rows[0] ? rows[0].symbol : "a basket"}, live, trimmed
+            What /api/nav answers for {sampleBasket ? sampleBasket.symbol : "a basket"}, live, trimmed
           </p>
           <pre className="mt-3 max-h-[26rem] overflow-auto text-[12px] leading-relaxed">{sample ?? "Reading…"}</pre>
+          {sampleBasket && sampleNav?.resolution && (
+            <p className="mt-4 text-xs leading-relaxed opacity-70">
+              Read a past close:{" "}
+              <a
+                href={`/api/nav/${sampleBasket.address}?at=${sampleNav.resolution.nextWindow.fromClose - 7 * 86_400}`}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all underline underline-offset-4"
+              >
+                /api/nav/{short(sampleBasket.address, 4, 4)}?at={sampleNav.resolution.nextWindow.fromClose - 7 * 86_400}
+              </a>
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-24 border-t border-line pt-16">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h2 className="display text-title max-w-[22ch] text-ink">Panta&apos;s catalog, as this key sees it.</h2>
+          {catalog?.fixture && (
+            <span className="rounded-full border border-line px-3 py-1 text-xs text-ink-3">
+              Sandbox fixture · not mainnet markets
+            </span>
+          )}
+        </div>
+        <p className="mt-4 max-w-[62ch] text-sm leading-relaxed text-ink-2">
+          Read live from <code className="text-xs">GET /markets/</code> and <code className="text-xs">GET /categories/</code>{" "}
+          through Sheaf&apos;s server, read-only.{" "}
+          {catalog?.mode === "sandbox"
+            ? "With a pk_test_ key Panta answers with its sandbox fixture, so this is the one test market it serves, shown as it comes back. With a pk_live_ key the same list is Panta's mainnet catalog."
+            : catalog?.mode === "live"
+              ? "This is Panta's mainnet catalog."
+              : ""}
+        </p>
+        {catalog?.category && (
+          <p className="mt-3 text-xs text-ink-3">
+            Categories offered: {catalog.category.offered.join(", ") || "—"}. A basket&apos;s market is filed
+            under {catalog.category.category}
+            {catalog.category.preferred ? "." : ", since finance is not offered on this key."}
+          </p>
+        )}
+        <div className="mt-6 divide-y divide-line border border-line">
+          {!catalog && <div className="mx-5 my-4 h-10 rounded skeleton" />}
+          {catalog && catalog.markets.length === 0 && (
+            <p className="px-5 py-5 text-sm text-ink-3">Panta returned no markets for this key.</p>
+          )}
+          {catalog?.markets.slice(0, 8).map((m) => (
+            <div
+              key={m.marketId}
+              className="grid grid-cols-1 gap-2 px-5 py-4 text-sm md:grid-cols-[minmax(0,1.6fr)_7rem_8rem_9rem] md:items-baseline md:gap-4"
+            >
+              <div className="min-w-0">
+                <p className="text-ink">{m.title}</p>
+                {m.description && <p className="mt-0.5 text-xs text-ink-3">{m.description}</p>}
+              </div>
+              <span className="text-ink-3">
+                {m.category} · {m.phase}
+              </span>
+              <span className="tnum text-ink-2">
+                Yes {m.yesPrice ?? "—"} · No {m.noPrice ?? "—"}
+              </span>
+              <span className="tnum text-xs text-ink-3 md:text-right">
+                {Number(m.volumeUsdc).toLocaleString("en-US")} USDC traded · ends{" "}
+                {new Date(m.endTime).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -281,7 +410,7 @@ export function PredictIndex() {
             Opening a market on Panta costs about 50 USDC plus SOL, and Sheaf spends no real money. A{" "}
             <code className="text-sm">pk_test_</code> key runs the identical flow against Panta&apos;s
             fixtures: same endpoints, same request bodies, canned answers, nothing on mainnet. Those answers
-            are labelled wherever they appear, so a fixed sandbox quote is never passed off as this
+            are labeled wherever they appear, so a fixed sandbox quote is never passed off as this
             basket&apos;s price.
           </p>
         </div>
