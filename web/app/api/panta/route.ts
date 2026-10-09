@@ -21,6 +21,7 @@ import { clientIp, throttle, type Budget } from "@/lib/panta-throttle";
 import { fetchBasketAt } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
 import { HISTORY_SYMBOLS } from "@/lib/history";
+import { originAllowed } from "@/lib/server-origin";
 
 /**
  * The basket as the chain has it: its own name and symbol (never the request's),
@@ -112,6 +113,8 @@ async function knownMarket(marketId: string) {
 }
 
 export async function POST(req: Request) {
+  // Only this site's pages spend the partner key's rate limit; a browser always sends Origin on a POST.
+  if (!originAllowed(req)) return NextResponse.json({ error: "This endpoint serves this site only." }, { status: 403 });
   const mode = pantaMode();
   if (mode === "off") return NextResponse.json({ error: "Panta is not configured." }, { status: 503 });
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

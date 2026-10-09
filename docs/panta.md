@@ -1,14 +1,14 @@
 ## Panta
 
-Every Sheaf basket carries one prediction market, run on [Panta](https://panta.market): **"Will {basket} ({symbol}) beat SPY this week?"**
+Every listed Sheaf basket carries one prediction market, run on [Panta](https://panta.market): **"Will {basket} ({symbol}) beat SPY this week?"** A drafted market names its week: "Will the Big Five (BIG5) beat SPY in the week ending Oct 23?"
 
-The market resolves from a number anyone can recompute: one share's value at two Friday US closes, against SPY's over the same two closes. Sheaf publishes that number as JSON at `/api/nav/<basket>?at=<close>` and names those two URLs as the market's first sources of truth. Every input is public, and the JSON lists a command to fetch each one. The only off-chain inputs are Jupiter's prices and the daily closes.
+The market resolves from a number anyone can recompute: one share's value at two week-ending US closes, against SPY's over the same two closes. Sheaf publishes that number as JSON at `/api/nav/<basket>?at=<close>` and names those two URLs as the market's first sources of truth. Every input is public, and the JSON lists a command to fetch each one. The only off-chain inputs are Jupiter's prices and the daily closes.
 
 ### The resolution rule, exactly
 
 The rule is built in one place (`web/lib/panta-window.ts`) and used by the market draft, the NAV route and the pages, so they cannot disagree.
 
-- **Window.** `startTime` is when trading opens: two hours out (Panta requires at least one). The measured week runs between two **week-ending NYSE closes**: the first one at or after `startTime`, and the next week's, which is Panta's `endTime`. Nothing of the measured week is known when the first share is bought, and trading stops the moment the week is decided. `resolutionTime` is two hours after the second close, once that close is final in Sheaf's history.
+- **Window.** `startTime` is when trading opens: two hours out (Panta requires at least one). The measured week runs between two **week-ending NYSE closes**: the first one at least a day after `startTime`, and the next week's. **Trading closes at the first close: Panta's `endTime` is `fromClose`.** Every share is therefore bought before anything of the measured week is known, and nobody can buy the near-certain side of a week that is under way. The day of trading keeps a market drafted on a Friday afternoon from being an hour wide: it measures the following week. `resolutionTime` is two hours after the second close, once that close is final in Sheaf's history. The draft's question names the week by its last close ("in the week ending Oct 23"), since that is not the week it is drafted in.
 - **Real sessions, not "Friday 16:00".** A week-ending close is the last regular-session close on or before that Friday, from the exchange calendar. Sheaf uses the schedule Pyth publishes for SPY (`web/lib/universe.ts`, parsed by `web/lib/clock.ts`), with dated holidays and early closes. So:
   - Christmas (Fri Dec 25, 2026) ends its week at Thursday Dec 24's 13:00 early close.
   - New Year (Fri Jan 1, 2027) ends its week at Thu Dec 31, 16:00.
@@ -16,8 +16,8 @@ The rule is built in one place (`web/lib/panta-window.ts`) and used by the marke
   - Good Friday (Mar 26, 2027) ends its week at Thu Mar 25, 16:00.
   - A market opened after a holiday week's Thursday close starts a week later.
   
-  `node scripts/panta-window-test.mjs` checks all of these: 10 cases, all passing. The dated overrides cover Sept 2026 to Sept 2027. Re-run `scripts/gen-universe.mjs` to extend them.
-- **History.** An earlier version ended at the first Friday at least a day out and measured from the Friday before. A market opened midweek then already knew most of its week, and on a holiday Friday trading ran on after Thursday's close had decided it. Both are fixed.
+  `node scripts/panta-window-test.mjs` checks all of these, that `endTime` is `fromClose`, the Friday-afternoon case, and the last decided week `/predict` works (below): 17 cases, all passing. The dated overrides cover Sept 2026 to Sept 2027. Re-run `scripts/gen-universe.mjs` to extend them.
+- **History.** An earlier version ended at the first Friday at least a day out and measured from the Friday before. A market opened midweek then already knew most of its week, and on a holiday Friday trading ran on after Thursday's close had decided it. The next version set `endTime` to the second close, so trading ran through the measured week: on a bonding curve, a buyer late in the week could buy the side that was already ahead at the curve's price. Trading now closes at the first close. All three are fixed.
 - **When to read.** Both `?at=` URLs are read at or after `resolutionTime`. The rule says so, because Yahoo re-adjusts past closes after an ex-dividend date. Read at the same time, both closes use the same adjustment. `?at=` answers are cached for an hour, not a day, for the same reason.
 - **Which baskets.** Only baskets whose every holding has a listed close. A basket holding a pre-IPO company (FRNTR holds Anthropic, OpenAI, SpaceX and Anduril) has no `navPerShare.listed`, so no market is offered on it:
   - `/api/nav` answers `resolution: { offered: false, reason }`.
@@ -30,7 +30,7 @@ The rule is built in one place (`web/lib/panta-window.ts`) and used by the marke
 - **The recipe is in the rule.** The basket lives on Solana devnet today, so the rule and the market description carry the units per share themselves. A resolver can recompute the answer from public closes and mainnet multipliers even if the devnet account is reset.
 - **Times.** Every time `/predict` shows is New York time, labeled as such. The rule gives each close in New York time and in UTC.
 
-The rule as sent to Panta, for BIG5 opened on Oct 9, 2026 (trading from 12:59 New York that Friday, before the first close):
+The rule as sent to Panta, for BIG5 opened on Oct 9, 2026 (trading from 12:59 New York that Friday, before the first close). It is quoted as that market carries it. It was drafted under the earlier window, which let trading run until the second close, and while the site lived at sheaf-index.vercel.app. The site has since moved to https://sheaf.world, and rules drafted now carry sheaf.world URLs, close trading at the first close and add a sentence saying so:
 
 > YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the NYSE regular-session closes ending each week, on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z), taken from the exchange calendar (a holiday Friday uses Thursday's close, an early close its 13:00 close); the JSON states the day used as closeDay. navPerShare.listed is the sum over one BIG5 share's fixed recipe (NVDA 0.1127068, AAPL 0.05857223, MSFT 0.03816584, GOOGL 0.05164414, META 0.02217572 shares) of units x that day's adjusted close x the token's Token-2022 multiplier on Solana mainnet; anyone can recompute it from those units without the page. Both URLs are read at or after the resolution time, 2026-10-16T22:00:00Z, so both closes use the same data. NO otherwise, including a tie. Every input is listed in the JSON.
 
@@ -41,7 +41,8 @@ The rule as sent to Panta, for BIG5 opened on Oct 9, 2026 (trading from 12:59 Ne
   - `resolution` gives the field names, the next window (with New York times) and the rule text.
 - **With `at=<unix seconds>` or `at=YYYY-MM-DD`:** `navPerShare.listed` and `spy.adjClose` at the last NYSE close at or before `at`, with `closeDay`, `asOf` (the date of the newest close in the data used), the inputs per component, and the method. A date means that day's close, or the last close before it if the exchange was shut that day.
 - **Frozen answers, exact replay.** Every `?at=` answer is stored once in the project's GCS bucket under its close day and data date (`nav/<basket>/<closeDay>@<asOf>.json`, `web/lib/panta-freeze.ts`).
-  - The write is create-only, so the first answer wins and every later read for that pair returns the same bytes. The answer carries `frozen: {key, storedAt, replay}`.
+  - The write is create-only, so the first answer wins and every later read for that pair returns the same values. The answer carries `frozen: {key, storedAt, replay}`.
+  - The stored answer's `at` is the close itself, so it does not depend on who asked first. Every reply echoes the caller's own `at`.
   - `&asOf=YYYY-MM-DD` replays a stored answer exactly, even after Yahoo has re-adjusted past closes. A resolution read at resolution time can be re-checked byte for byte later.
   - With no bucket configured, `frozen` is null and nothing is stored.
 - **Refusals.** Some requests are refused rather than answered with today's number:
@@ -59,11 +60,11 @@ The rule as sent to Panta, for BIG5 opened on Oct 9, 2026 (trading from 12:59 Ne
   - Jupiter's prices
   - Yahoo Finance's daily chart for each holding and SPY
 
-  `sources` names the history source and its date.
+  `sources` names the history source and its date. `sources.multipliers` names the RPC that read the mainnet multipliers ("… read at slot N through Solami"), and `sources.via` gives it as a field (`solami`, or `public` when Solami did not answer), with or without `at`.
 
 "Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict`, and `/portfolio`. Without a wallet, `/portfolio`'s Predictions section previews what it reads (`GET /positions/?wallet=`) and offers "Use a wallet in this browser".
 
-`/predict` also works the rule once on the last full week, from the same two `?at=` reads a resolver makes ("Last week, resolved the way a market would be").
+`/predict` also works the rule once on the last decided week, from the same two `?at=` reads a resolver makes ("Last week, resolved the way a market would be"). The week comes from `lastSettledWeek(now)` in `web/lib/panta-window.ts`: the latest week-ending close that is already final, on the exchange calendar, and the week-ending close before it. On a Friday afternoon that is last week, not the day's close before the bell, so the page never asks for a close in the future. If `/api/nav` cannot answer yet, the card says it is waiting for the close and asks again two minutes later.
 
 ### Endpoint → product mapping
 
@@ -90,7 +91,8 @@ Each step in the UI names the endpoint it calls and shows the fields Panta actua
 The market Sheaf drafts includes:
 - `category`: finance when Panta offers it (it does live); the sandbox lists none, so the sandbox falls back to crypto
 - `sourcesOfTruth`: the NAV JSON at both closes (`?at=`), the basket page, and SPY's daily history on Yahoo Finance
-- `startTime`, `endTime`, `resolutionTime`: from `marketWindow()`, as described above
+- `question`: dated by the measured week's last close ("… beat SPY in the week ending Oct 23?")
+- `startTime`, `endTime`, `resolutionTime`: from `pantaTimes(marketWindow())`, as described above (`endTime` is the first close)
 - `imageUrl`: a 1024×1024 PNG at `/api/panta/image/<basket>`, the basket's sheaf drawing under its question
 
 Code:

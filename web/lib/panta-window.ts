@@ -3,12 +3,13 @@
  *
  * Tokens trade around the clock, but SPY's close-to-close change only exists at
  * US closes, so both sides of the comparison are read at the same two closes:
- * the last NYSE regular-session close of the first week whose close is at or
- * after trading opens, and of the week after, when the market ends. Closes come
- * from the exchange calendar: normally Friday 16:00 New York, Thursday's close
- * when Friday is a holiday, 13:00 on an early-close Friday. Nothing of the
- * measured week is known when trading opens, and trading ends at the second
- * close, so nobody trades a decided week.
+ * the last NYSE regular-session close of the first week whose close is at
+ * least a day after trading opens, and of the week after. Closes come from the
+ * exchange calendar: normally Friday 16:00 New York, Thursday's close when
+ * Friday is a holiday, 13:00 on an early-close Friday. Trading closes at the
+ * first of the two closes, when the measured week starts, so every share is
+ * bought before anything of that week is known, and nobody trades a week that
+ * is under way or decided.
  *
  * Shared by the market draft (lib/panta-server.ts), the NAV route's `?at=`
  * reader and the /predict page, so the rule, the window and the numbers can
@@ -121,12 +122,15 @@ function weekCloseOnOrAfter(unix: number): { friday: { y: number; m: number; d: 
   return { friday, close: lastCloseOnOrBefore(friday.y, friday.m, friday.d).close };
 }
 
+/** Trading runs at least this long before it closes at the first close, so a Friday-afternoon market is not an hour wide. */
+export const MIN_TRADING_S = 24 * 3600;
+
 export type MarketWindow = {
   /** When trading opens on Panta: at least an hour out, as Panta requires. */
   opens: number;
-  /** The week-ending close the week is measured from. */
+  /** The week-ending close the week is measured from. Trading closes here: Panta's endTime. */
   fromClose: number;
-  /** The week-ending close it ends at: Panta's endTime. */
+  /** The week-ending close the measured week ends at. */
   toClose: number;
   /** When it can be resolved: once history has refreshed after the close. Panta's resolutionTime. */
   resolves: number;
@@ -134,20 +138,62 @@ export type MarketWindow = {
 
 /**
  * The window for a market opened at `now`. The measured week starts at the
- * first week-ending close at or after trading opens, and ends at the next
- * week's, so nothing of the week is known when the first share is bought.
- * Both are real NYSE closes: a holiday Friday (Dec 25 2026, Jan 1 2027) uses
- * Thursday's close, and an early-close Friday (Nov 27 2026) its 13:00 close.
- * Panta's endTime is that close, so trading stops the moment the week is
- * decided.
+ * first week-ending close at least a day after trading opens, and ends at the
+ * next week's. Both are real NYSE closes: a holiday Friday (Dec 25 2026, Jan 1
+ * 2027) uses Thursday's close, and an early-close Friday (Nov 27 2026) its
+ * 13:00 close. Trading closes at the first close (`pantaTimes`), so every share
+ * is bought before any of the measured week is known.
  */
 export function marketWindow(now = Math.floor(Date.now() / 1000)): MarketWindow {
   const opens = now + 2 * 3600;
-  const from = weekCloseOnOrAfter(opens);
+  const from = weekCloseOnOrAfter(opens + MIN_TRADING_S);
   const nextFriday = shift(from.friday.y, from.friday.m, from.friday.d, 7);
   const toClose = lastCloseOnOrBefore(nextFriday.y, nextFriday.m, nextFriday.d).close;
   return { opens, fromClose: from.close, toClose, resolves: toClose + CLOSE_SETTLE_S + 59 * 60 };
 }
+
+/**
+ * The times Panta is sent for a window: trading opens at `opens` and closes at
+ * the first close, when the measured week starts (endTime = fromClose); the
+ * market resolves once the second close is final.
+ */
+export function pantaTimes(w: MarketWindow): { startTime: number; endTime: number; resolutionTime: number } {
+  return { startTime: w.opens, endTime: w.fromClose, resolutionTime: w.resolves };
+}
+
+/**
+ * The last full week that is already decided at `now`: its week-ending close
+ * (`toClose`) is final (`CLOSE_SETTLE_S` after the bell), and `fromClose` is
+ * the week-ending close before it. Both come from the exchange calendar, so a
+ * holiday week ends at Thursday's close and the week before it at its own
+ * Friday's. This is the week /predict resolves as a worked example; on a
+ * Friday afternoon it is last week, not today's unsettled close.
+ */
+export function lastSettledWeek(now = Math.floor(Date.now() / 1000)): { fromClose: number; toClose: number } {
+  const p = nyParts(now);
+  const ahead = (5 - p.weekday + 7) % 7;
+  for (let week = 0; week < 6; week++) {
+    const friday = shift(p.y, p.m, p.d, ahead - 7 * week);
+    const { close } = lastCloseOnOrBefore(friday.y, friday.m, friday.d);
+    if (close + CLOSE_SETTLE_S <= now) {
+      const before = shift(friday.y, friday.m, friday.d, -7);
+      return { fromClose: lastCloseOnOrBefore(before.y, before.m, before.d).close, toClose: close };
+    }
+  }
+  const friday = shift(p.y, p.m, p.d, ahead - 42);
+  const before = shift(friday.y, friday.m, friday.d, -7);
+  return {
+    fromClose: lastCloseOnOrBefore(before.y, before.m, before.d).close,
+    toClose: lastCloseOnOrBefore(friday.y, friday.m, friday.d).close,
+  };
+}
+
+/** The close that ends the last decided week at `now` (see `lastSettledWeek`). */
+export const lastSettledWeekClose = (now = Math.floor(Date.now() / 1000)) => lastSettledWeek(now).toClose;
+
+/** "Oct 23": a week-ending close as its New York date, for the dated question. */
+export const weekEndingLabel = (unix: number) =>
+  new Date(unix * 1000).toLocaleDateString("en-US", { timeZone: NY, month: "short", day: "numeric" });
 
 /**
  * The trading day (YYYYMMDD, New York) of the last regular-session close at or
@@ -210,6 +256,7 @@ export function resolutionRule(
     `is greater than spy.adjClose divided the same way (the same two URLs). ` +
     `Those times are the NYSE regular-session closes ending each week, on ${fmtClose(w.fromClose)} and ${fmtClose(w.toClose)}, ` +
     `taken from the exchange calendar (a holiday Friday uses Thursday's close, an early close its 13:00 close); the JSON states the day used as closeDay. ` +
+    `Trading closes at the first of the two closes, before any of the measured week is known. ` +
     (recipe?.length
       ? `navPerShare.listed is the sum over one ${symbol} share's fixed recipe (${recipeText(recipe)} shares) of units x that day's adjusted close x the token's Token-2022 multiplier on Solana mainnet; anyone can recompute it from those units without the page. `
       : "") +

@@ -13,9 +13,17 @@
 export const REF_PARAM = "ref";
 export const REF_MAX = 44;
 
-/** Where an invite link may land. Anything else lands on /voices. */
+/** The pages the invite maker on /voices offers. */
 export const INVITE_TARGETS = ["/voices", "/", "/plans", "/explore", "/compose", "/ledger", "/portfolio"] as const;
 export type InviteTarget = (typeof INVITE_TARGETS)[number];
+
+/**
+ * Where else an invite link may land: the other top-level pages, the chain pages
+ * (/chains/robinhoodTestnet/hood5, for a Robinhood or Tempo group) and one basket's page.
+ * Anything else lands on /voices.
+ */
+const MORE_TARGETS = ["/chains", "/predict", "/live", "/business", "/method"];
+const TARGET_PATTERNS = [/^\/chains\/[A-Za-z0-9-]{1,32}\/[A-Za-z0-9-]{1,32}$/, /^\/basket\/[1-9A-HJ-NP-Za-km-z]{32,44}$/];
 
 const BASE58_KEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -35,12 +43,15 @@ export function cleanRef(raw: unknown): string | null {
   return lower || null;
 }
 
-export function cleanTarget(raw: unknown): InviteTarget {
-  return typeof raw === "string" && (INVITE_TARGETS as readonly string[]).includes(raw) ? (raw as InviteTarget) : "/voices";
+/** A page path an invite link may land on, or /voices. Paths only: never another host. */
+export function cleanTarget(raw: unknown): string {
+  if (typeof raw !== "string") return "/voices";
+  if ((INVITE_TARGETS as readonly string[]).includes(raw) || MORE_TARGETS.includes(raw)) return raw;
+  return TARGET_PATTERNS.some((p) => p.test(raw)) ? raw : "/voices";
 }
 
 /** The link to share: it counts one open, then lands on `to` with the code in the URL. */
-export function inviteLink(origin: string, ref: string, to: InviteTarget = "/voices"): string {
+export function inviteLink(origin: string, ref: string, to: string = "/voices"): string {
   const q = new URLSearchParams({ [REF_PARAM]: ref });
   if (to !== "/voices") q.set("to", to);
   return `${origin.replace(/\/$/, "")}/api/invite?${q}`;

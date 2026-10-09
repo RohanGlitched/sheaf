@@ -12,8 +12,13 @@ import { Anatomy } from "@/components/home-anatomy";
 import { Dividends, Premiums } from "@/components/home-market-facts";
 import { Keys, Revenue } from "@/components/home-ledgers";
 
-/** The hero basket: five listed megacaps, so the first basket a visitor opens has a history and dividends. */
-const BIG_FIVE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+/**
+ * The hero basket: the Magnificent Seven, seven listed megacaps with dividends
+ * inside. It was created after the protocol fee, so every share created in it
+ * carries Sheaf's 0.10%. The Big Five, from before the fee, is taken apart
+ * further down and listed beside it.
+ */
+const HERO = "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x";
 
 /**
  * The story in the order it happens to a basket. The first five are the share
@@ -39,8 +44,8 @@ const LIFE = [
     n: "3",
     title: "Or buy with dollars",
     on: "Dollar order",
-    href: "/basket/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
-    body: "Escrow dollars for a number of shares that falls over ninety seconds. The first filler to deliver the stocks gets paid. Competition sets the price, and the vault still receives the real stocks.",
+    href: `/basket/${HERO}`,
+    body: "Escrow dollars for a number of shares that falls over ninety seconds. The first filler to deliver the stocks gets paid. The auction caps the price, any filler can compete, and the vault still receives the real stocks.",
   },
   {
     n: "4",
@@ -54,7 +59,7 @@ const LIFE = [
     title: "Then every month",
     on: "Monthly plan",
     href: "#plans",
-    body: "Set a monthly amount and the plan places that dollar order on schedule, as the same auction stretched to 30 minutes so any filler has time. Anyone can run it when due. The habit behind India's SIPs, onchain.",
+    body: "Set a monthly amount and the plan places that dollar order on schedule, as the same auction stretched to 30 minutes so any filler has time. Anyone can run it when due. The habit behind India's SIPs, onchain, for Indians abroad first.",
   },
   {
     n: "6",
@@ -99,10 +104,10 @@ export default function Home() {
           <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
             <ComposeCta>Create a basket</ComposeCta>
             <Link
-              href={`/basket/${BIG_FIVE}`}
+              href={`/basket/${HERO}`}
               className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-5 py-3 text-sm text-ink transition-colors hover:border-ink-3"
             >
-              Open the Big Five
+              Open the Magnificent Seven
             </Link>
           </div>
           <p className="rise mt-8 max-w-[52ch] text-sm leading-relaxed text-ink-3" style={{ "--i": 4 } as React.CSSProperties}>

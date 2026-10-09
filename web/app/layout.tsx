@@ -28,6 +28,9 @@ const host = Host_Grotesk({
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  // "./" is each page's own path on sheaf.world, so the old Vercel address and any
+  // ?ref= or other query never count as a second copy of a page.
+  alternates: { canonical: "./" },
   title: {
     default: "Sheaf: baskets of tokenized stocks",
     template: "%s | Sheaf",
@@ -39,6 +42,7 @@ export const metadata: Metadata = {
     description:
       "Fixed baskets of tokenized stocks: one share, backed by the stocks in its vault, redeemable for them any time.",
     type: "website",
+    url: "./",
   },
   twitter: { card: "summary_large_image" },
 };

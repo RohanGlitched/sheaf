@@ -9,8 +9,8 @@ import { signedPercent, money } from "@/lib/format";
 import { useMarket } from "./market-provider";
 import { SheafMark, type Stalk } from "./sheaf-mark";
 
-/** The basket the hero draws, when it can be read; otherwise the first one. */
-const HERO_BASKET = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+/** The basket the hero draws (the Magnificent Seven, which the hero button opens), when it can be read; otherwise the first one. */
+const HERO_BASKET = "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x";
 
 /** Drawn while the chain is being read, so the hero is never empty. */
 const PLACEHOLDER: Stalk[] = [

@@ -6,6 +6,7 @@ import { useBaskets } from "@/lib/use-baskets";
 import { isTestBasket } from "@/lib/hidden";
 import { PoweredByPanta } from "./panta-steps";
 import { pantaGet, pantaPost, short, usdcBase, type PantaMode } from "@/lib/panta-client";
+import { lastSettledWeek } from "@/lib/panta-window";
 
 type Nav = {
   navPerShare: { recipe: number | null; vault: number | null; listed: number | null };
@@ -55,6 +56,10 @@ const LEAD = "BIG5";
 const question = (name: string, symbol: string) => `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
 type Fee = { paymentUsdc?: string; liquidityInjectionUsdc?: string; platformRevenueUsdc?: string; fixture?: boolean };
+
+/** "Fri, Oct 9, 16:00 New York": a close, for prose. */
+const fmtCloseShort = (unix: number) =>
+  `${new Date(unix * 1000).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} New York`;
 
 /** "Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z)" without the UTC echo, for prose. */
 const nyOnly = (s: string) => s.replace(/ \([^)]*\)$/, "");
@@ -139,24 +144,44 @@ export function PredictIndex() {
   });
   const sampleNav = sampleBasket ? (navs[sampleBasket.address] as Nav) : undefined;
   const win = sampleNav?.resolution?.nextWindow;
-  // Two past closes a week apart, the way a resolver reads them: the last two
-  // Fridays before the next window starts.
-  const pastTo = win ? win.fromClose - 7 * 86_400 : null;
-  const pastFrom = pastTo != null ? pastTo - 7 * 86_400 : null;
-  const [past, setPast] = useState<{ from: AtNav; to: AtNav } | null>(null);
+  // The last decided week, the way a resolver reads it: two week-ending closes
+  // from the exchange calendar, the later one already final. On a Friday
+  // afternoon that is last week, never today's close before it settles.
+  const [past, setPast] = useState<
+    | { state: "ready"; fromClose: number; toClose: number; from: AtNav; to: AtNav }
+    | { state: "waiting"; fromClose: number; toClose: number; error: string }
+    | null
+  >(null);
   useEffect(() => {
-    if (!sampleBasket || pastFrom == null || pastTo == null) return;
+    if (!sampleBasket) return;
     let live = true;
-    void Promise.all([
-      pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${pastFrom}`),
-      pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${pastTo}`),
-    ]).then(([a, b]) => live && a.ok && b.ok && setPast({ from: a.data, to: b.data }));
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const run = () => {
+      const { fromClose, toClose } = lastSettledWeek();
+      void Promise.all([
+        pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${fromClose}`),
+        pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${toClose}`),
+      ]).then(([a, b]) => {
+        if (!live) return;
+        if (a.ok && b.ok) {
+          setPast({ state: "ready", fromClose, toClose, from: a.data, to: b.data });
+          return;
+        }
+        setPast({ state: "waiting", fromClose, toClose, error: !a.ok ? a.error : !b.ok ? b.error : "" });
+        // The close becomes final within the hour; ask again in two minutes.
+        retry = setTimeout(run, 120_000);
+      });
+    };
+    run();
     return () => {
       live = false;
+      clearTimeout(retry);
     };
-  }, [sampleBasket, pastFrom, pastTo]);
+  }, [sampleBasket]);
+  const pastFrom = past?.fromClose ?? null;
+  const pastTo = past?.toClose ?? null;
   const pastRatio =
-    past && past.from.navPerShare.listed && past.to.navPerShare.listed
+    past?.state === "ready" && past.from.navPerShare.listed && past.to.navPerShare.listed
       ? {
           basket: (past.to.navPerShare.listed / past.from.navPerShare.listed - 1) * 100,
           spy: (past.to.spy.adjClose / past.from.spy.adjClose - 1) * 100,
@@ -201,6 +226,10 @@ export function PredictIndex() {
     const n = navs[b.address];
     return n && n !== "error" && n.trailingWeek?.beatsSpy != null;
   }).length;
+  // Only baskets whose every holding has a listed close carry a market; a pre-IPO one does not.
+  const read = rows.filter((b) => navs[b.address] && navs[b.address] !== "error");
+  const offered = read.filter((b) => (navs[b.address] as Nav).resolution?.offered !== false);
+  const unlisted = read.filter((b) => (navs[b.address] as Nav).resolution?.offered === false).map((b) => b.symbol);
 
   return (
     <>
@@ -209,7 +238,7 @@ export function PredictIndex() {
           <p className="text-sm text-bind">Predict</p>
           <h1 className="display mt-2 text-hero leading-[0.95] text-ink">A market on every listed basket.</h1>
           <p className="mt-6 max-w-[58ch] text-lg leading-relaxed text-ink-2">
-            Every Sheaf basket carries one question: will it beat SPY this week? A basket&apos;s recipe is
+            Every listed basket carries one question: will it beat SPY this week? A basket&apos;s recipe is
             on chain, so the answer can be recomputed by anyone from public accounts and two public price
             sources, between two week-ending US closes. Panta runs the market: a USDC bonding curve on Solana,
             opened, traded and claimed through its API.
@@ -218,8 +247,15 @@ export function PredictIndex() {
         </div>
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line">
           <div className="bg-surface p-5">
-            <dt className="text-xs text-ink-3">Baskets with a question</dt>
-            <dd className="display tnum mt-2 text-3xl text-ink">{baskets ? rows.length : "—"}</dd>
+            <dt className="text-xs text-ink-3">Baskets with a market</dt>
+            <dd className="display tnum mt-2 text-3xl text-ink">
+              {baskets && read.length === rows.length && rows.length > 0 ? `${offered.length} of ${rows.length}` : "—"}
+            </dd>
+            {unlisted.length > 0 && read.length === rows.length && (
+              <dd className="mt-1 text-xs text-ink-3">
+                {unlisted.join(", ")} {unlisted.length === 1 ? "is" : "are"} pre-IPO: nothing listed to resolve from
+              </dd>
+            )}
           </div>
           <div className="bg-surface p-5">
             <dt className="text-xs text-ink-3">Opening one on Panta</dt>
@@ -334,8 +370,8 @@ export function PredictIndex() {
           <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
             The week runs between two NYSE closes, each the last close of its week: normally Friday 16:00
             New York time, Thursday&apos;s close when Friday is a holiday, 13:00 on an early-close day. The
-            first is the first such close after trading opens, and trading stops at the second. So nobody
-            trades a week that has started or one that is decided. Stock tokens trade around the clock, but SPY
+            first is the first such close at least a day after trading opens, and trading closes there, so
+            nobody trades once the measured week has started. Stock tokens trade around the clock, but SPY
             only has a close at the close, so both sides are read there.
           </p>
           <ol className="mt-5 max-w-[50ch] list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink-2">
@@ -354,7 +390,7 @@ export function PredictIndex() {
                 win.opensText ??
                   `${new Date(win.opens).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} New York`,
               )}{" "}
-              until {nyOnly(win.to)}, and measure {nyOnly(win.from)} to {nyOnly(win.to)}. Every time here is New
+              until {nyOnly(win.from)}, and measure {nyOnly(win.from)} to {nyOnly(win.to)}. Every time here is New
               York time. Both are total return: adjusted closes reinvest dividends, the
               way an xStock&apos;s multiplier does. A close is served once it is final, an hour after the bell; a
               time in the future is refused, never answered with today&apos;s number. A basket holding a company
@@ -386,7 +422,7 @@ export function PredictIndex() {
             <p className="text-xs text-ink-3">
               Last week, resolved the way a market would be{sampleBasket ? ` (${sampleBasket.symbol})` : ""}
             </p>
-            {past && pastRatio && sampleBasket && pastFrom != null && pastTo != null ? (
+            {past?.state === "ready" && pastRatio && sampleBasket && pastFrom != null && pastTo != null ? (
               <>
                 <dl className="mt-4 grid grid-cols-3 gap-4 text-sm">
                   <div>
@@ -424,6 +460,12 @@ export function PredictIndex() {
                   .
                 </p>
               </>
+            ) : past?.state === "waiting" ? (
+              <p className="mt-4 text-sm leading-relaxed text-ink-2">
+                Waiting for the close: the {nyOnly(fmtCloseShort(past.toClose))} close is not final at /api/nav yet, so
+                this week is not worked here until it is. A close is served an hour after the bell.
+                {past.error && <span className="mt-1 block text-xs text-ink-3">/api/nav said: {past.error}</span>}
+              </p>
             ) : (
               <div className="mt-4 h-24 rounded skeleton" />
             )}

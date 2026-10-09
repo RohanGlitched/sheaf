@@ -708,6 +708,8 @@ function TradePanel({
   const [step, setStep] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  /** What the in-kind faucet just sent: its block stays up with the Sent line after the shortfall clears. */
+  const [faucetSent, setFaucetSent] = useState<string[] | null>(null);
 
   const shares = Number(amount);
   const valid = Number.isFinite(shares) && shares > 0;
@@ -848,10 +850,12 @@ function TradePanel({
 
         <p className="tnum mt-2 text-xs text-ink-3">
           {connected
-            ? `You hold ${quantity(Number(shareBalance) / ONE_SHARE, 6)} ${basket.symbol}`
-            : `${basket.symbol} shares`}
+            ? `You hold ${quantity(Number(shareBalance) / ONE_SHARE, 6)} ${basket.symbol}.`
+            : `${basket.symbol} shares.`}
           {navPerShare != null && valid
-            ? ` · about ${money(navPerShare * shares)} of components`
+            ? mode === "redeem"
+              ? ` Redeeming ${quantity(shares, 6)} hands back about ${money(navPerShare * shares)} of components.`
+              : ` Creating ${quantity(shares, 6)} takes about ${money(navPerShare * shares)} of components.`
             : ""}
         </p>
 
@@ -923,15 +927,20 @@ function TradePanel({
           </p>
         )}
 
-        {mode === "create" && shortSymbols.length > 0 && (
+        {mode === "create" && (shortSymbols.length > 0 || faucetSent != null) && (
           <div className="mt-5 border border-line bg-surface p-4 rounded-[var(--radius-panel)]">
             <p className="text-sm leading-relaxed text-ink-2">
-              Short on {shortSymbols.map((s) => s.replace(/x$/, "")).join(", ")}.
+              {shortSymbols.length > 0
+                ? `Short on ${shortSymbols.map((s) => s.replace(/x$/, "")).join(", ")}.`
+                : "You now hold enough of every component to create these shares."}
             </p>
             <div className="mt-3">
               <FaucetButton
-                symbols={shortSymbols}
-                onDone={() => void balances.reload()}
+                symbols={faucetSent ?? shortSymbols}
+                onDone={() => {
+                  setFaucetSent((prev) => prev ?? shortSymbols);
+                  void balances.reload();
+                }}
               />
             </div>
           </div>

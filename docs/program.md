@@ -138,7 +138,18 @@ no fill can move. The owner also picks `trail_step_bps` (0 to 5,000):
 - **0, fixed bounds.** The working bounds stay at the hard limits. A plan
   stops filling once the market leaves them (a ±6% window is left within a
   month about half the time at 30% volatility); Re-centre to continue.
-- **A step `s` (the UI's choice is `PLAN_STEP_BPS = 600`).** After every fill
+- **A step `s`.** The site opens every plan trailing, with the step equal to
+  the plan's band and hard limits set from today's price (`CADENCE` in
+  `web/components/plan-form.tsx`):
+
+  | Cadence | Band and step `s` | Hard limits (price either side of the opening price) |
+  |---|---|---|
+  | Every month | ±15% (1,500 bps) | ±25% |
+  | Every week | ±10% (1,000 bps) | ±15% |
+  | Every 5 minutes (demo) | ±2% (200 bps) | ±10% |
+
+  `PLAN_STEP_BPS = 600` in `lib.rs` is the step the tests use, not the
+  site's. After every fill
   `apply_plan_fill` clamps the filled rate into the working bounds, makes it
   the reference, and moves the working bounds to
   `[max(floor(ref × (1 − s)), hard_min), min(floor(ref × (1 + s)), hard_max)]`.
@@ -678,7 +689,7 @@ shares. A unit test checks exactness and minimality for every `net` in
 | `PlanOpened` | plan, basket, owner, cash_mint, cash_account, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, allowance, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanUpdated` | plan, owner, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanRun` | plan, order, run (1-based), cash, start_shares, end_shares, start_ts, end_ts, ref_shares_per_cash_e9, runs_left, next_run_ts |
-| `PlanTrail` | plan, step_bps. Emitted by `open_plan` (600) |
+| `PlanTrail` | plan, step_bps (the owner's chosen step). Emitted by `open_plan` |
 | `SellOrderPlaced` | sell_order, basket, seller, cash_mint, nonce, shares, start_cash, end_cash, start_ts, end_ts |
 | `SellOrderFilled` | sell_order, basket, seller, filler, shares, cash (the seller received), cash_paid (the filler sent, fee-grossed), price (raw cash per whole share), filled_at |
 | `SellOrderCancelled` | sell_order, basket, seller, by, shares_returned, expired |
@@ -985,15 +996,17 @@ count into a cash account the filler opens, and the filler redeems the
 shares in kind in the same transaction (component deltas checked); both
 accounts close with the rent back to the seller; a fill after expiry fails;
 the seller cancels any time, a stranger only after expiry and only into the
-seller's ATA. **Trailing plans:** a new plan is 304 bytes with step 600, and
-after its first fill the bounds are exactly ±6% of the filled rate.
+seller's ATA. **Trailing plans:** the test plan is opened with step 600; it
+is 320 bytes with the owner's hard limits in its tail, and after its first
+fill the working bounds are ±6% of the filled rate, intersected with those
+limits.
 
 **CI.** The GitHub job runs the same `anchor test` from a clean clone. It
 used to run `anchor keys sync` first, which rewrote `declare_id` to a fresh
 key while the validator loads the program at the Anchor.toml address, so
 every test failed with `DeclaredProgramIdMismatch` (exit 8 = 8 failing
 suites). Reproduced from a clean clone with a throwaway wallet: without the
-sync, 67 of 67 passed.
+sync, every test passed (67 at the time; the suite is 74 now).
 
 **Protocol fee.** Every desk fill and mint checks the buyer's or depositor's
 shares, the creator's fee and the protocol's accrual exactly (`feeSplit`

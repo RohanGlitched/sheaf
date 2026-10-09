@@ -15,10 +15,11 @@ export function HomePlans() {
       <div className="self-center">
         <h2 className="display text-title max-w-[16ch] text-ink">A year of buying is a full sheaf.</h2>
         <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-ink-2">
-          India&apos;s investors run about 100 million monthly plans into mutual funds. A Sheaf plan does the same
-          onchain: a fixed amount of dollars into a basket every month. The plan can spend exactly that much per run
-          and nothing more, anyone can run it when it is due, and each run is filled by fillers competing to deliver
-          the stocks.
+          A Sheaf plan is India&apos;s monthly SIP habit onchain, for Indians abroad first, where xStocks are already
+          sold, and for the wallets that serve them. A fixed amount of dollars goes into a basket every month. The plan
+          can spend exactly that much per run and nothing more, anyone can run it when it is due, and each run is filled
+          by fillers competing to deliver the stocks. Residents, who already run about 100 million SIPs at home, come
+          once FEMA and tax treatment are clear.
         </p>
         <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-ink-3">
           The program reads no price. Each fill moves the plan&apos;s reference to where the market cleared, so next

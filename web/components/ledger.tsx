@@ -77,11 +77,21 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
     const n = e.shares ?? 0;
     main = `${quantity(n, 4)} ${plural(n, "share")}`;
     if ((e.kind === "filled" || e.kind === "sold") && e.cash != null) notes.push(`for ${money(e.cash)}`);
+    if ((e.kind === "filled" || e.kind === "sold") && e.vsFairBps != null) notes.push(vsFairText(e.vsFairBps));
   }
   if (e.kind === "feeAccrued") notes.push("Sheaf's 0.10%");
   if (e.kind === "feeClaimed") notes.push("to the treasury");
   if (e.feeShares) notes.push(`+${quantity(e.feeShares, e.feeShares < 0.01 ? 6 : 4)} to the creator`);
   return { main, notes };
+}
+
+/**
+ * A fill's price against fair at the moment of filling, from the buyer's or
+ * seller's side: "0.17% over fair", "0.15% under fair", "at fair".
+ */
+function vsFairText(bps: number): string {
+  if (Math.abs(bps) < 0.5) return "at fair";
+  return `${(Math.abs(bps) / 100).toFixed(2)}% ${bps > 0 ? "over" : "under"} fair`;
 }
 
 /** "53 s" or "2 min 29 s": the same short form /business uses. */
@@ -94,7 +104,11 @@ function waitFor(seconds: number): string {
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-/** Distinct wallets behind a set of events, and how many of them are not ours. */
+/**
+ * Distinct wallets behind a set of events, and how many of them are not ours.
+ * `actions` here counts the events in view; pages show the API's `stats.actions`
+ * (every event over the whole history) when they have it.
+ */
 export function walletCounts(entries: LedgerEntry[]) {
   // Fee events name a basket or the treasury's share account, not a person; they are not wallets that acted.
   const wallets = new Set(entries.filter((e) => e.kind !== "feeAccrued" && e.kind !== "feeClaimed").map((e) => e.actor));
@@ -294,6 +308,16 @@ export function LedgerPage() {
   const { ledger, stats: served, error, loading, decoding } = useLedger();
   const { baskets } = useBaskets();
   const byAddress = useMemo(() => new Map((baskets ?? []).map((b) => [b.address, b])), [baskets]);
+  // QA and demo baskets stay on the ledger but out of the default view, like the switch on Explore.
+  const [showTest, setShowTest] = useState(false);
+  const testRows = useMemo(
+    () => (ledger?.entries ?? []).filter((e) => isTestBasket({ address: e.basket, creator: byAddress.get(e.basket)?.creator })).length,
+    [ledger, byAddress],
+  );
+  const shown = useMemo(
+    () => (showTest ? ledger?.entries ?? [] : (ledger?.entries ?? []).filter((e) => !isTestBasket({ address: e.basket, creator: byAddress.get(e.basket)?.creator }))),
+    [ledger, byAddress, showTest],
+  );
 
   const stats = useMemo(() => {
     const entries = ledger?.entries ?? [];
@@ -313,12 +337,13 @@ export function LedgerPage() {
       redemptions: entries.filter((e) => e.kind === "redeemed").length,
       wallets,
       outside,
-      actions: entries.length,
+      // One definition everywhere: every event the program emitted, over the whole history (the API's stats.actions).
+      actions: served?.actions ?? entries.length,
       created,
       redeemed,
       first: entries.length ? entries[entries.length - 1].time : null,
     };
-  }, [ledger]);
+  }, [ledger, served]);
 
   return (
     <div>
@@ -337,7 +362,7 @@ export function LedgerPage() {
           <dl className="tnum grid grid-cols-2 gap-x-8 gap-y-4 text-sm sm:flex">
             {([
               ["Actions", count(stats.actions), null],
-              ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} demo` : null],
+              ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} test` : null],
               ["Creations", count(stats.creations), null],
               ["Redemptions", count(stats.redemptions), null],
             ] as [string, string, string | null][]).map(([label, value, note]) => (
@@ -381,19 +406,19 @@ export function LedgerPage() {
           {served && served.orders > 0 && (
             <p className="tnum mt-2 text-xs text-ink-3">
               {count(served.fills)} {plural(served.fills, "fill")} for {money(served.dollarsFilled)}
-              {served.byCause
+              {served.byCauseAtLeast5 ?? served.byCause
                 ? (
                     [
-                      ["dollar orders", served.byCause.dollar],
-                      ["plan runs", served.byCause.plan],
+                      ["dollar orders of $5 or more", (served.byCauseAtLeast5 ?? served.byCause).dollar],
+                      ["plan runs of $5 or more", (served.byCauseAtLeast5 ?? served.byCause).plan],
                     ] as const
                   )
                     .filter(([, f]) => f.orders > 0)
                     .map(
                       ([label, f]) =>
-                        ` · ${label}: ${f.fillRate != null ? `${Math.round(f.fillRate * 100)}% filled` : "none finished"}${
-                          f.medianSecsToFill != null ? `, median ${waitFor(f.medianSecsToFill)} to fill` : ""
-                        }`,
+                        ` · ${served.byCauseAtLeast5 ? label : label.replace(" of $5 or more", "")}: ${
+                          f.fillRate != null ? `${(f.fillRate * 100).toFixed(1)}% filled (${count(f.fills)} of ${count(f.fills + f.returned)} finished)` : "none finished"
+                        }${f.medianSecsToFill != null ? `, median ${waitFor(f.medianSecsToFill)} to fill` : ""}`,
                     )
                     .join("")
                 : `${served.fillRate != null ? ` · ${Math.round(served.fillRate * 100)}% of finished orders filled` : ""}${
@@ -423,7 +448,18 @@ export function LedgerPage() {
                 The program has not settled anything yet.
               </p>
             ) : (
-              <LedgerTable entries={ledger.entries} baskets={byAddress} />
+              <>
+                {testRows > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTest((v) => !v)}
+                    className="mb-3 text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink"
+                  >
+                    {showTest ? "Hide test baskets" : `Show test baskets (${testRows} rows)`}
+                  </button>
+                )}
+                <LedgerTable entries={shown} baskets={byAddress} />
+              </>
             )}
           </div>
           <p className="mt-6 max-w-[62ch] text-xs leading-relaxed text-ink-3">
@@ -435,6 +471,12 @@ export function LedgerPage() {
             every visitor (<code className="text-ink-2">/api/ledger</code>, at most 30 seconds old), so a
             visit costs one request; anyone can run the same decoder against the public RPC. Every
             row links to its transaction, so the page is never the source of truth: the chain is.
+          </p>
+          <p className="mt-3 max-w-[62ch] text-xs leading-relaxed text-ink-3">
+            &ldquo;Over fair&rdquo; on a fill compares the dollars with what the stocks cost at the filler&rsquo;s live
+            Jupiter prices at the moment it filled, transfer fees included, from the fill log the site&rsquo;s two fillers
+            keep. The chain records the trade, not a price, so fills by anyone else, and ours from before that log began,
+            show none. Neither filler fills more than 1% over fair.
           </p>
         </>
       )}

@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { SHEAF_PROGRAM_ID, serverRpcUrl } from "@/lib/config";
 import { clientIp, faucetKeypair } from "@/lib/faucet-server";
 import { rememberOidc } from "@/lib/gcs-store";
-import { ledgerStats, type Ledger, type LedgerStats } from "@/lib/ledger";
+import { ledgerStats, type Ledger, type LedgerEntry, type LedgerStats } from "@/lib/ledger";
 import { decodeBasket } from "@/lib/sheaf";
 import { historyEntries, syncLedgerHistory } from "@/lib/server-ledger-history";
 import { isTeamWallet } from "@/lib/team-wallets";
@@ -112,8 +112,18 @@ export async function GET(request: Request) {
     const history = await syncLedgerHistory(connection, fresh ? 0 : 40_000);
     if (!fresh) synced = Date.now();
     const view = historyEntries(history, basket);
+    const fillLog = await readFillLog().catch(() => []);
+    // Each logged fill's price against fair, from the buyer's or seller's side, on its ledger row.
+    const vsFair = new Map(
+      fillLog.filter((f) => f.fair > 0).map((f) => [`${f.side}:${f.order}`, Math.round(((f.cash - f.fair) / f.fair) * 100_000) / 10]),
+    );
+    const withFair = (e: LedgerEntry): LedgerEntry => {
+      const side = e.kind === "filled" ? "buy" : e.kind === "sold" ? "sell" : null;
+      const bps = side && e.order ? vsFair.get(`${side}:${e.order}`) : undefined;
+      return bps != null ? { ...e, vsFairBps: bps } : e;
+    };
     const answer: Answer = {
-      entries: view.entries.slice(0, limit),
+      entries: view.entries.slice(0, limit).map(withFair),
       done: view.decoded,
       total: view.total,
       truncated: view.entries.length > limit,
@@ -123,9 +133,7 @@ export async function GET(request: Request) {
           house: faucetKeypair()?.publicKey.toBase58(),
           second: filler2Address() ?? undefined,
         }),
-        realizedMarginBps: realizedMargins(
-          (await readFillLog().catch(() => [])).filter((f) => !basket || view.entries.some((e) => e.order === f.order)),
-        ),
+        realizedMarginBps: realizedMargins(fillLog.filter((f) => !basket || view.entries.some((e) => e.order === f.order))),
       },
       asOf: Date.now(),
     };

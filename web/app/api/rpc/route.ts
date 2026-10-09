@@ -10,8 +10,12 @@ import { originAllowed } from "@/lib/server-origin";
  * Forwards JSON-RPC to the server's endpoint (Helius when a key is set) so the
  * key stays here. Only the read and send methods the app uses are allowed, and a
  * batch is capped, so the proxy cannot be turned into a general-purpose RPC.
- * When that endpoint fails (429, 5xx or no answer), reads fall back to the public
- * devnet RPC; the x-sheaf-rpc response header says which one answered.
+ * When that endpoint fails (429, 5xx or no answer), calls fall back to the public
+ * devnet RPC, sends included; the x-sheaf-rpc response header says which one answered.
+ *
+ * Only this site's pages may call it: the Origin must be the site's, and the
+ * browser's own Sec-Fetch-Site must say the call came from the same site.
+ * Program scans must carry a filter and are counted heavier than other calls.
  */
 
 /**
@@ -60,8 +64,11 @@ function overLimit(ip: string, weight: number): boolean {
   if (seen.size > 5000) seen.clear();
   return recent.reduce((a, h) => a + h.w, 0) > PER_MINUTE;
 }
-/** A page decoding history reads many transactions; each counts a quarter of a call. */
-const weightOf = (calls: Call[]) => calls.reduce((a, c) => a + (c.method === "getTransaction" ? 0.25 : 1), 0);
+const SCAN_WEIGHT = 4;
+/** A page decoding history reads many transactions; each counts a quarter of a call. A program scan counts as four. */
+const weightOf = (calls: Call[]) => calls.reduce((a, c) => a + (c.method === "getTransaction" ? 0.25 : c.method === "getProgramAccounts" ? SCAN_WEIGHT : 1), 0);
+/** The most program scans one request may carry; a page loads a few at a time. */
+const MAX_SCANS = 4;
 /** Signature lists are capped: the app asks for at most a hundred, a scan for a thousand is a script. */
 const MAX_SIGNATURES = 100;
 
@@ -106,23 +113,53 @@ function refusedPrograms(params: unknown): string | null {
   return other ? `not ${other}` : null;
 }
 
+/**
+ * True when a program scan narrows itself: at least one memcmp or dataSize filter.
+ * Every scan the app and its SDKs make filters on an account's discriminator; an
+ * unfiltered scan returns every account of the program at once.
+ */
+function filteredScan(params: unknown): boolean {
+  const config = (Array.isArray(params) ? params[1] : undefined) as { filters?: unknown } | undefined;
+  const filters = Array.isArray(config?.filters) ? (config.filters as Record<string, unknown>[]) : [];
+  return filters.some((f) => f && typeof f === "object" && ((f.memcmp != null && typeof f.memcmp === "object") || typeof f.dataSize === "number"));
+}
+
+/** A browser marks every fetch with where it came from; a page of this site sends same-origin. */
+function sameSite(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  return site === "same-origin" || site === "same-site";
+}
+
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Call | Call[] | null;
   const calls = Array.isArray(body) ? body : body ? [body] : [];
   if (!calls.length || calls.length > MAX_BATCH) {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } }, { status: 400 });
   }
-  // Only this site's pages may use the proxy; a browser always sends Origin on a POST.
-  if (!originAllowed(req)) {
+  // Only this site's pages may use the proxy; a browser always sends Origin on a
+  // POST, and Sec-Fetch-Site, which a page cannot set, on every fetch.
+  if (!originAllowed(req) || !sameSite(req)) {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "This endpoint serves this site only" } }, { status: 403 });
   }
   if (overLimit(clientIp(req), weightOf(calls))) {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: 429, message: "Too many requests" } }, { status: 429, headers: { "retry-after": "20" } });
   }
-  // Program scans are the expensive call: only Sheaf's own program may be scanned.
-  const scan = calls.find((c) => c.method === "getProgramAccounts" && (c.params as unknown[] | undefined)?.[0] !== SHEAF_PROGRAM_ID);
+  // Program scans are the expensive call: only Sheaf's own program may be scanned,
+  // with a filter, and only a few per request.
+  const scans = calls.filter((c) => c.method === "getProgramAccounts");
+  const scan = scans.find((c) => (c.params as unknown[] | undefined)?.[0] !== SHEAF_PROGRAM_ID);
   if (scan) {
     return Response.json({ jsonrpc: "2.0", id: scan.id ?? null, error: { code: -32602, message: "Only the Sheaf program can be scanned here" } }, { status: 403 });
+  }
+  const unfiltered = scans.find((c) => !filteredScan(c.params));
+  if (unfiltered) {
+    return Response.json(
+      { jsonrpc: "2.0", id: unfiltered.id ?? null, error: { code: -32602, message: "getProgramAccounts needs a memcmp or dataSize filter here" } },
+      { status: 403 },
+    );
+  }
+  if (scans.length > MAX_SCANS) {
+    return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32602, message: `At most ${MAX_SCANS} program scans per request` } }, { status: 403 });
   }
   // Sends and simulations are decoded: every program a transaction calls must be
   // one the site's own flows use, so the proxy is no free relay for anything else.
@@ -165,11 +202,12 @@ export async function POST(req: Request) {
   const primary = serverRpcUrl();
   let res = await forward(primary, 20_000);
   let via = primary === PUBLIC_WRITE_RPC ? "public" : "primary";
-  // When the paid endpoint is out of quota, down or slow, reads go to the public
-  // devnet RPC instead, and the response says so. A send is never retried
-  // elsewhere: it may already have landed.
+  // When the paid endpoint is out of quota, down or slow, the call goes to the
+  // public devnet RPC instead, and the response says so. Sends too: a signed
+  // transaction is deduplicated by its signature, so the same bytes sent twice
+  // land at most once, even if the first send did reach the cluster.
   const failed = !res || res.status === 429 || res.status >= 500;
-  if (failed && via === "primary" && !calls.some((c) => c.method === "sendTransaction")) {
+  if (failed && via === "primary") {
     const fallback = await forward(PUBLIC_WRITE_RPC, 20_000);
     if (fallback) {
       res = fallback;

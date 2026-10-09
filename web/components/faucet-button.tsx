@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { FAUCET_TOKENS_PER_CLAIM } from "@/lib/mirror";
 import { explorerTx } from "@/lib/config";
@@ -54,6 +54,23 @@ export function FaucetButton({
   const [signature, setSignature] = useState<string | null>(() =>
     lastSent && Date.now() - lastSent.at < SENT_MS ? lastSent.signature : null,
   );
+  // Seconds until the faucet takes the same claim again (its cooldown); counts down, then retries.
+  const [wait, setWait] = useState<number | null>(null);
+  const [waitNote, setWaitNote] = useState("");
+  const claimRef = useRef<() => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    if (wait == null) return;
+    const timer = setTimeout(() => {
+      if (wait <= 1) {
+        setWait(null);
+        void claimRef.current();
+      } else {
+        setWait(wait - 1);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
 
   // Clear the confirmation once it has been up for its five seconds, counted from the claim.
   useEffect(() => {
@@ -67,14 +84,22 @@ export function FaucetButton({
     if (!publicKey) return;
     setBusy(true);
     setError(null);
+    setWait(null);
     setSignature(null);
     try {
       const response = await fetch("/api/faucet", faucetRequest({ owner: publicKey.toBase58(), symbols }, { basket: true }));
       const body = (await response.json()) as {
         signature?: string;
         error?: string;
+        retryAfter?: number;
       };
       if (!response.ok || !body.signature) {
+        // A short wait (the cooldown, or a busy moment) counts down and retries by itself.
+        if (typeof body.retryAfter === "number" && body.retryAfter > 0 && body.retryAfter <= 120) {
+          setWaitNote((body.error ?? "").replace(/\s*Try again in.*$/, ""));
+          setWait(Math.ceil(body.retryAfter));
+          return;
+        }
         setError(body.error ?? "The faucet did not answer.");
         return;
       }
@@ -87,6 +112,10 @@ export function FaucetButton({
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    claimRef.current = claim;
+  });
 
   if (!connected) {
     return (
@@ -109,6 +138,11 @@ export function FaucetButton({
           : (label ??
             `Send me ${FAUCET_TOKENS_PER_CLAIM} of each`)}
       </button>
+      {wait != null && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-3 tnum" aria-live="polite">
+          {waitNote || "The faucet asks for a short wait."} Trying again in {wait}s…
+        </p>
+      )}
       {error && (
         <p className="mt-2 text-xs leading-relaxed text-loss">{error}</p>
       )}

@@ -11,13 +11,13 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { clientIp, faucetKeypair } from "@/lib/faucet-server";
-import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
+import { faucetHasOwnKey, faucetPayerKeypair, filler2Keypair } from "@/lib/server-keys";
 import { WRITE_RPC, WRITE_CLUSTER } from "@/lib/config";
 import { COMPOSABLE, FAUCET_TOKENS_PER_CLAIM, writeMint } from "@/lib/mirror";
 import { CASH_MINT, CASH_DECIMALS } from "@/lib/cash.generated";
 import { rememberOidc } from "@/lib/gcs-store";
-import { budgetMessage, reserve as reserveBudget } from "@/lib/server-faucet-budget";
-import { cleanRef } from "@/lib/invite-ref";
+import { LIMITS, budgetRefusal, faucetInvite, reserve as reserveBudget } from "@/lib/server-faucet-budget";
+import { originAllowed } from "@/lib/server-origin";
 import { fetchBasketAt } from "@/lib/sheaf";
 
 /** Test dollars per claim: enough for a few cash orders and a plan. */
@@ -42,7 +42,10 @@ const MAX_TICKERS_PER_REQUEST = 8;
 
 const DECIMALS_BY_SYMBOL = new Map(COMPOSABLE.map((s) => [s.symbol, s.decimals]));
 
-/** Last claim per address. Per-instance and deliberately simple. */
+/**
+ * Last claim per address and set of tickers asked for, so test dollars and a
+ * basket's stocks a minute apart are two claims. Per-instance and deliberately simple.
+ */
 const lastClaim = new Map<string, number>();
 
 /**
@@ -90,14 +93,15 @@ export async function POST(request: Request) {
 
   rememberOidc(request);
   // `basket`: the basket the visitor is looking at; new accounts open only for its stocks.
-  // `ref` (or the x-sheaf-ref header): an invite code, counted instead of the network.
+  // `ref` (or the x-sheaf-ref header): an invite code. Only a founder-issued one
+  // (lib/server-faucet-budget.ts faucetInvite) raises the network's cap; any other is ignored here.
   let body: { owner?: string; symbols?: string[]; basket?: string; ref?: string };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Expected a JSON body." }, { status: 400 });
   }
-  const invite = cleanRef(body.ref) ?? cleanRef(request.headers.get("x-sheaf-ref"));
+  const invite = faucetInvite(body.ref, request.headers.get("x-sheaf-ref"));
 
   let owner: PublicKey;
   try {
@@ -109,18 +113,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const previous = lastClaim.get(owner.toBase58());
-  if (previous && Date.now() - previous < COOLDOWN_MS) {
-    const wait = Math.ceil((COOLDOWN_MS - (Date.now() - previous)) / 1000);
-    return Response.json(
-      { error: `Already claimed. Try again in ${wait}s.` },
-      { status: 429 },
-    );
+  // Only this site's pages may claim; a browser always sends Origin on a POST. The
+  // site's own second filler tops up from the server, with no Origin, for its own key only.
+  const ownFiller = !request.headers.get("origin") && filler2Keypair()?.publicKey.equals(owner);
+  if (!ownFiller && !originAllowed(request)) {
+    return Response.json({ error: "This faucet serves this site's pages only." }, { status: 403 });
   }
 
   const ip = clientIp(request);
   const fromIp = recentClaims(ip);
-  if (!invite && fromIp.length >= IP_MAX_CLAIMS) {
+  if (fromIp.length >= IP_MAX_CLAIMS * (invite ? LIMITS.inviteNetFactor : 1)) {
     const wait = Math.ceil((IP_WINDOW_MS - (Date.now() - fromIp[0])) / 60_000);
     return Response.json(
       { error: `Too many claims from this network. Try again in ${wait} min.` },
@@ -148,16 +150,29 @@ export async function POST(request: Request) {
     );
   }
 
+  // The cooldown is per wallet and per set of tickers: test dollars just claimed
+  // never block a basket's stocks. `retryAfter` lets the page count down.
+  const wallet = owner.toBase58();
+  const claimKey = `${wallet}:${entries.map((e) => e.symbol).sort().join(",")}`;
+  const previous = lastClaim.get(claimKey);
+  if (previous && Date.now() - previous < COOLDOWN_MS) {
+    const wait = Math.ceil((COOLDOWN_MS - (Date.now() - previous)) / 1000);
+    return Response.json(
+      { error: `Already sent these a moment ago. Try again in ${wait}s.`, retryAfter: wait },
+      { status: 429, headers: { "retry-after": String(wait) } },
+    );
+  }
+
   // Claim the slot before the first network call, so parallel requests cannot all
   // pass the checks above; give it back if nothing is sent.
-  const wallet = owner.toBase58();
   const claimedAt = Date.now();
-  lastClaim.set(wallet, claimedAt);
+  if (lastClaim.size > 5_000) lastClaim.clear();
+  lastClaim.set(claimKey, claimedAt);
   fromIp.push(claimedAt);
   const release = () => {
-    if (lastClaim.get(wallet) === claimedAt) {
-      if (previous) lastClaim.set(wallet, previous);
-      else lastClaim.delete(wallet);
+    if (lastClaim.get(claimKey) === claimedAt) {
+      if (previous) lastClaim.set(claimKey, previous);
+      else lastClaim.delete(claimKey);
     }
     const list = claimsByIp.get(ip) ?? [];
     const at = list.lastIndexOf(claimedAt);
@@ -218,7 +233,7 @@ export async function POST(request: Request) {
   const budget = await reserveBudget({ kind: "token", net: ip, invite, accounts: claimable.filter((x) => !x.exists).length });
   if (!budget.ok) {
     release();
-    return Response.json({ error: budgetMessage(budget.refused) }, { status: budget.refused === "global" ? 503 : 429 });
+    return budgetRefusal(budget.refused);
   }
 
   const tx = new Transaction({ feePayer: payer.publicKey });

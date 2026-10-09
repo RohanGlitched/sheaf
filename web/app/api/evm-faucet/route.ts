@@ -1,6 +1,9 @@
 import { isAddress, parseUnits, type Address, type Hex } from "viem";
 import { ERC20_ABI, ONE_SHARE, mintAmounts, publicClientFor, isTempo, fromRaw } from "@/lib/evm";
 import { clientIp, deploymentFor, dripGas, houseAccount, rateLimiter, walletFor, withChainLock } from "@/lib/evm-server";
+import { LIMITS, budgetRefusal, faucetInvite, reserve as reserveBudget } from "@/lib/server-faucet-budget";
+import { rememberOidc } from "@/lib/gcs-store";
+import { originAllowed } from "@/lib/server-origin";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,7 +20,11 @@ export const maxDuration = 60;
  *  - Tempo: the public Tempo faucet (pathUSD for fees, AlphaUSD for orders). No key.
  *  - Ethereum Sepolia: nothing. The house is nearly out of Sepolia ETH.
  *
- * Limited per address and per IP. Amounts are tiny on purpose.
+ * Limited per address and per IP in memory, and by the durable daily budget the
+ * Solana faucets share (lib/server-faucet-budget.ts): claims per chain and per
+ * network, and the house's finite Robinhood test stock slices per chain, split
+ * between visitors with a founder's invite code and those without. Amounts are
+ * tiny on purpose.
  *
  * Two requests for one address at once (the browser wallet's automatic drip and
  * a click on "Send me test tokens") share one claim: the second waits for the
@@ -27,8 +34,7 @@ export const maxDuration = 60;
 
 const perAddress = rateLimiter(6 * 60 * 60_000, 1);
 const perIp = rateLimiter(60 * 60_000, 6);
-/** Robinhood test stock tokens are finite; cap what one instance hands out per day. */
-const realDaily = rateLimiter(24 * 60 * 60_000, 40);
+const perInvitedIp = rateLimiter(60 * 60_000, 6 * LIMITS.inviteNetFactor);
 
 const REAL_SHARE_SLICE = ONE_SHARE / 4n;
 const REAL_CASH = "3";
@@ -41,6 +47,9 @@ const recentlySent = new Map<string, Answer>();
 const SAME_ANSWER_MS = 2 * 60_000;
 
 export async function POST(request: Request) {
+  // Only this site's pages may claim; a browser always sends Origin on a POST.
+  if (!originAllowed(request)) return Response.json({ error: "This faucet serves this site's pages only." }, { status: 403 });
+  rememberOidc(request);
   const text = await request.text();
   let key: string | null = null;
   try {
@@ -70,7 +79,7 @@ export async function POST(request: Request) {
 }
 
 async function claim(request: Request): Promise<Response> {
-  let body: { network?: string; address?: string; basket?: string };
+  let body: { network?: string; address?: string; basket?: string; ref?: string };
   try {
     body = await request.json();
   } catch {
@@ -82,6 +91,9 @@ async function claim(request: Request): Promise<Response> {
   const to = body.address as Address;
 
   const ip = clientIp(request);
+  // A founder-issued invite code raises the network's caps; any other code is ignored here.
+  const invite = faucetInvite(body.ref, request.headers.get("x-sheaf-ref"));
+  const ipLimit = invite ? perInvitedIp : perIp;
   const addrKey = `${d.network}:${to.toLowerCase()}`;
   const a = perAddress.check(addrKey);
   if (!a.ok) {
@@ -90,15 +102,23 @@ async function claim(request: Request): Promise<Response> {
       { status: 429 },
     );
   }
-  const i = perIp.check(ip);
+  const i = ipLimit.check(ip);
   if (!i.ok) return Response.json({ error: `Too many claims from here. Try again in ${Math.ceil(i.retryInSec / 60)} minutes.` }, { status: 429 });
   // Claim the slots before the first await, so parallel requests cannot all pass
   // the checks above; give them back if nothing is sent.
   perAddress.hit(addrKey);
-  perIp.hit(ip);
+  ipLimit.hit(ip);
+  // The durable day, shared by every instance: reserved now, given back if nothing is sent.
+  const budget = await reserveBudget({ kind: "evm", chain: d.network, net: ip, invite });
+  if (!budget.ok) {
+    perAddress.undo(addrKey);
+    ipLimit.undo(ip);
+    return budgetRefusal(budget.refused, { evm: d.label });
+  }
   const release = () => {
     perAddress.undo(addrKey);
-    perIp.undo(ip);
+    ipLimit.undo(ip);
+    void budget.release();
   };
 
   // Tempo: the chain's own faucet, keyless.
@@ -136,11 +156,14 @@ async function claim(request: Request): Promise<Response> {
       else notes.push(gas.note);
 
       if (d.tokenSource === "real") {
-        // Checked and taken inside the chain lock, so queued requests see each other's claims.
-        const r = realDaily.check(d.network);
-        if (r.ok) realDaily.hit(d.network);
-        if (!r.ok) {
-          notes.push("Today's share of Robinhood test tokens is spent. Robinhood's own faucet gives 5 of each daily.");
+        // Taken from the durable day inside the chain lock; given back below if nothing was sent.
+        const slice = await reserveBudget({ kind: "evm-real", chain: d.network, invite });
+        if (!slice.ok) {
+          notes.push(
+            slice.refused === "busy"
+              ? "The Robinhood test tokens could not be counted just now. Try again in a minute."
+              : "Today's share of Robinhood test tokens is spent. Robinhood's own faucet gives 5 of each daily.",
+          );
         } else {
           const basket = d.baskets.find((b) => b.symbol.toLowerCase() === (body.basket ?? "").toLowerCase()) ?? d.baskets[0];
           const need = mintAmounts(basket, REAL_SHARE_SLICE);
@@ -165,7 +188,7 @@ async function claim(request: Request): Promise<Response> {
           } else {
             notes.push(`The house is low on ${d.stable.symbol}; skipped it.`);
           }
-          if (txs.length === before) realDaily.undo(d.network);
+          if (txs.length === before) await slice.release();
           // Wait for the lot, so the page can read the new balances straight away.
           await Promise.all(txs.map((t) => client.waitForTransactionReceipt({ hash: t.hash, timeout: 60_000 })));
           notes.push(`Enough for a quarter share of ${basket.symbol}. Robinhood's faucet gives 5 of each token a day.`);

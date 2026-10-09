@@ -6,7 +6,7 @@ import { IndiaWaitlist } from "@/components/india-waitlist";
 
 export const metadata: Metadata = {
   title: "Plans",
-  description: "Monthly plans into Sheaf baskets: a fixed amount on a schedule, run by anyone, each run filled by a filler auction. India's SIP habit, onchain.",
+  description: "Monthly plans into Sheaf baskets: a fixed amount on a schedule, run by anyone, each run filled by a filler auction. India's SIP habit, onchain, for Indians abroad first.",
 };
 
 type Source = { label: string; href: string };
@@ -61,10 +61,14 @@ export default function PlansPage() {
       <section className="max-w-[46rem] pt-16 pb-12">
         <h1 className="display text-hero text-ink">A little, every month.</h1>
         <p className="mt-6 max-w-[56ch] text-lg leading-relaxed text-ink-2">
-          In August 2026, 10 crore (100 million) Indian SIP accounts paid a fixed amount into mutual funds, as they do every
-          month. A Sheaf monthly plan is the same habit onchain: a fixed amount of dollars into a basket of tokenized US
-          stocks on a schedule. Each run places a dollar order that fillers compete to fill, and every fill moves the
-          plan&apos;s reference price to where the market cleared, so the program never reads a price.
+          A Sheaf monthly plan is India&apos;s SIP habit onchain, offered first to Indians abroad, where xStocks are
+          already sold, and to the wallets and apps that serve them. A fixed amount of dollars goes into a basket of
+          tokenized US stocks on a schedule. Each run places a dollar order that fillers compete to fill, and every fill
+          moves the plan&apos;s reference price to where the market cleared, so the program never reads a price.
+        </p>
+        <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-3">
+          The habit is proven at home: in August 2026, 10 crore (100 million) Indian SIP accounts paid into mutual funds.
+          Residents come later, once FEMA and tax treatment are clear.
         </p>
         <p className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm">
           <a href="#india" className="text-bind underline decoration-bind/40 underline-offset-4">

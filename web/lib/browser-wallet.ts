@@ -37,8 +37,9 @@ import { removalMessage, voiceMessage } from "./voices-message";
  * every instruction calls a program on the allow-list below, and the two /voices
  * messages. System and token instructions are read one by one as well, since
  * those programs can move funds on their own: a plain SOL or token transfer to
- * another address, an approval, a burn, or closing an account to someone else
- * all ask first (see `concern`). Anything else goes to a confirm step that names
+ * another address, an approval, a burn, closing an account to someone else, a
+ * token account opened for someone else, or more SOL in a new account than its
+ * rent all ask first (see `concern`). Anything else goes to a confirm step that names
  * the programs or the destination (or shows the message) and is refused unless
  * the person agrees. Sheaf writes to a
  * test cluster (devnet, or localnet in development) and the funds are test funds,
@@ -113,6 +114,13 @@ const LOOKUP_TABLE = "AddressLookupTab1e1111111111111111111111111";
 const NATIVE_MINT = "So11111111111111111111111111111111111111112";
 /** A new mint or token account costs well under this in rent; more than this is not rent. */
 const MAX_NEW_ACCOUNT_LAMPORTS = 50_000_000;
+/**
+ * Rent-exempt minimum for an account of `space` bytes (128 bytes of header, 3,480
+ * lamports a byte-year, two years). A new share mint is funded for the metadata
+ * Token-2022 reallocs into it later, so a kilobyte past the declared space is allowed.
+ */
+const rentFor = (space: bigint) => (128n + space) * 6_960n;
+const RENT_HEADROOM_BYTES = 1_024n;
 /** spl_token_metadata_interface:initialize_account, the metadata a new share mint carries. */
 const METADATA_INITIALIZE = [210, 225, 30, 162, 88, 184, 77, 141];
 
@@ -159,10 +167,13 @@ function concern(ix: Ix, self: string): string | null {
   if (program === SYSTEM) {
     const tag = u32(data, 0);
     if (tag === 0) {
-      // CreateAccount: rent for a new mint or token account, owned by a token program or Sheaf.
+      // CreateAccount: rent for a new mint or token account, owned by a token program or Sheaf,
+      // and no more than rent for the space it declares.
       const owner = data.length >= 52 ? bs58.encode(data.subarray(20, 52)) : "";
       const lamports = u64(data, 4);
-      if ((owner === TOKEN || owner === TOKEN_2022 || owner === SHEAF_PROGRAM_ID) && lamports <= BigInt(MAX_NEW_ACCOUNT_LAMPORTS)) return null;
+      const space = u64(data, 12);
+      const rent = lamports <= BigInt(MAX_NEW_ACCOUNT_LAMPORTS) && lamports <= rentFor(space + RENT_HEADROOM_BYTES);
+      if ((owner === TOKEN || owner === TOKEN_2022 || owner === SHEAF_PROGRAM_ID) && rent) return null;
       return `Create an account holding ${sol(lamports)}, owned by ${owner || "an unknown program"}`;
     }
     if (tag === 2) {
@@ -178,21 +189,28 @@ function concern(ix: Ix, self: string): string | null {
     const tag = data[0];
     switch (tag) {
       case 0: // InitializeMint
-      case 1: // InitializeAccount
       case 7: // MintTo
       case 14: // MintToChecked
-      case 16: // InitializeAccount2
       case 17: // SyncNative
-      case 18: // InitializeAccount3
       case 20: // InitializeMint2
       case 22: // InitializeImmutableOwner
         return null;
+      case 1: // InitializeAccount (owner in the accounts)
+      case 16: // InitializeAccount2 (owner in the data)
+      case 18: {
+        // InitializeAccount3. Sheaf's flows open token accounts through the ATA program,
+        // so a token account made here may belong only to this wallet: one owned by
+        // anyone else would hold the rent this wallet just paid, for them to close and keep.
+        const owner = tag === 1 ? keys[2] : data.length >= 33 ? bs58.encode(data.subarray(1, 33)) : null;
+        return owner === self ? null : `Open a token account owned by ${owner ?? "an address from a lookup table"}`;
+      }
       case 39: // MetadataPointer extension: only its Initialize
         return data[1] === 0 ? null : "Change a token's metadata pointer";
       case 6: {
-        // SetAuthority: a new share mint hands its mint authority to the basket. Nothing else.
-        if (data[1] === 0) return null;
+        // SetAuthority: a new share mint hands its mint authority to the basket, a
+        // program address that no key can sign for. Nothing else, and never to a key.
         const to = data[2] === 1 && data.length >= 35 ? bs58.encode(data.subarray(3, 35)) : "nobody";
+        if (data[1] === 0 && to !== "nobody" && !PublicKey.isOnCurve(bs58.decode(to))) return null;
         return `Hand a token account's ${["mint", "freeze", "owner", "close"][data[1]] ?? "an"} authority to ${to}`;
       }
       case 9: {

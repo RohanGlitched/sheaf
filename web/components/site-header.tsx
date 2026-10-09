@@ -28,10 +28,12 @@ export function SiteHeader() {
   const pathname = usePathname();
   const strip = useRef<HTMLElement>(null);
   const [atEnd, setAtEnd] = useState(false);
+  const [atStart, setAtStart] = useState(true);
 
   /* On a phone the destinations scroll sideways. Bring the current one into
-     view, and fade the right edge while there is more to scroll to, so the
-     last two never look like they are missing. */
+     view, and fade each edge while there is more to scroll to that way, with a
+     chevron on the right, so a clipped label reads as "more this way" and never
+     as missing. */
   useEffect(() => {
     const nav = strip.current;
     if (!nav) return;
@@ -39,7 +41,10 @@ export function SiteHeader() {
     if (current) {
       nav.scrollLeft = current.offsetLeft - (nav.clientWidth - current.clientWidth) / 2;
     }
-    const check = () => setAtEnd(nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
+    const check = () => {
+      setAtEnd(nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
+      setAtStart(nav.scrollLeft <= 4);
+    };
     check();
     nav.addEventListener("scroll", check, { passive: true });
     window.addEventListener("resize", check);
@@ -49,7 +54,10 @@ export function SiteHeader() {
     };
   }, [pathname]);
 
-  const fade = atEnd ? undefined : "linear-gradient(to right, black 82%, transparent)";
+  const fade =
+    atEnd && atStart
+      ? undefined
+      : `linear-gradient(to right, ${atStart ? "black 0%" : "transparent 0%, black 12%"}, ${atEnd ? "black 100%" : "black 72%, transparent 96%"})`;
 
   return (
     /* Pinned on a laptop, where the market clock and the wallet are worth keeping
@@ -102,9 +110,10 @@ export function SiteHeader() {
       </div>
 
       {/* The same destinations, laid as tiles across the full width. */}
+      <div className="relative sm:hidden">
       <nav
         ref={strip}
-        className="flex overflow-x-auto border-t border-line text-sm [scrollbar-width:none] sm:hidden"
+        className="flex overflow-x-auto border-t border-line text-sm [scrollbar-width:none]"
         style={{ maskImage: fade, WebkitMaskImage: fade }}
       >
         {NAV.map((item) => {
@@ -127,6 +136,12 @@ export function SiteHeader() {
           );
         })}
       </nav>
+      {!atEnd && (
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-base text-ink-3">
+          ›
+        </span>
+      )}
+      </div>
     </header>
   );
 }

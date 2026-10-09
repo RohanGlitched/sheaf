@@ -5,7 +5,6 @@ import { isTestBasket } from "@/lib/hidden";
 import { fetchBaskets } from "@/lib/sheaf";
 import { teamTag } from "@/lib/team-wallets";
 import preset from "@/lib/meteora-preset.json";
-import { TRADE_WINDOW, readTrades } from "./read-trades";
 import { resolveLaunch } from "../launch/anchor";
 
 /**
@@ -21,15 +20,16 @@ import { resolveLaunch } from "../launch/anchor";
  * launch is listed with where its launch will be.
  *
  * Launches our own QA runs opened (a test basket, or a basket a team test
- * wallet created) carry `test: true` and are left out unless `?tests=1`.
- * `outsideLaunches` counts launches opened by anyone outside the Sheaf team;
- * `traders` counts distinct wallets outside the team that traded a launch.
- * House buys are ours and never count.
+ * wallet created) carry `test: true` and are left out unless `?tests=1`. The
+ * team's wallets are listed in lib/team-wallets.ts for that filter only; the
+ * feed does not tag wallets.
  *
  * Each open launch also carries `anchor`: whether the curve really opened at
  * half the basket's NAV, checked against SOL's price in that hour and the
  * basket's NAV at the last close (see app/api/launch/anchor.ts). A launch whose
- * anchor is off by more than 20% is not official.
+ * anchor is off by more than 10% is not official, and neither is one on a
+ * listed basket whose opening price could not be checked yet ("checking the
+ * opening price").
  */
 export const dynamic = "force-dynamic";
 
@@ -38,30 +38,20 @@ export async function GET(req: Request) {
   const withTests = url.searchParams.get("tests") === "1";
   const connection = new Connection(WRITE_RPC, "confirmed");
   const baskets = await fetchBaskets(connection);
-  const outsideWallets = new Set<string>();
   const all = await Promise.all(
     baskets.map(async (basket) => {
       // Every pool on the published terms is anchor-checked in slot order; the first that passes is the launch.
-      const { launch, unofficial, free, state, anchor, anchors } = await resolveLaunch(connection, url.origin, basket);
+      const { launch, unofficial, free, state, anchor, anchors, checking } = await resolveLaunch(connection, url.origin, basket);
       const info = launch?.info ?? free ?? (await launchFor(basket));
-      const official = !!state?.official && anchor?.status !== "mismatch";
+      const official = !!state?.official && anchor?.status !== "mismatch" && !checking;
       const preIpo = preIpoCompanies(basket);
-      const creatorTeam = teamTag(basket.creator);
-      const test = isTestBasket(basket) || creatorTeam === "test wallet";
-      const trades = state
-        ? await readTrades(connection, { pool: info.pool, baseMint: info.baseMint, migrated: state.migrated }).catch(
-            () => null,
-          )
-        : null;
-      if (trades && !test) for (const t of trades.trades) if (t.team == null) outsideWallets.add(t.wallet);
+      const test = isTestBasket(basket) || teamTag(basket.creator) === "test wallet";
       return {
         basket: {
           address: basket.address,
           name: basket.name,
           symbol: basket.symbol,
           creator: basket.creator,
-          // "house" for baskets Sheaf seeded, "test wallet" for our QA runs, null for anyone else.
-          creatorTeam,
         },
         test,
         // Pre-IPO SPV tokens in the basket: the launch is kept off featured surfaces and carries a warning.
@@ -77,7 +67,9 @@ export async function GET(req: Request) {
         open: state != null,
         ...(state && {
           official,
-          ...(!official && { unofficialReason: state.unofficialReason ?? anchor?.reason ?? null }),
+          ...(!official && {
+            unofficialReason: state.unofficialReason ?? (checking ? "checking the opening price" : (anchor?.reason ?? null)),
+          }),
           preset: state.preset,
           presetId: state.preset ? PRESET_NAMES[state.preset] : null,
           raisedSol: state.raised,
@@ -97,12 +89,6 @@ export async function GET(req: Request) {
           feeSchedulerCounts: state.activation === "timestamp" ? "seconds" : "slots",
           shape: state.shape,
           anchor,
-        }),
-        ...(trades && {
-          // Distinct wallets outside the Sheaf team; house, treasury and test wallets never count.
-          traders: trades.traders,
-          outsideTrades: trades.outsideTrades,
-          teamTrades: trades.teamTrades,
         }),
         ...(unofficial.length > 0 && {
           unofficial: unofficial.map((u) => ({
@@ -148,11 +134,6 @@ export async function GET(req: Request) {
       solRaisedOnCurves: opened.reduce((n, l) => n + (("raisedSol" in l && (l.graduated ? l.thresholdSol : l.raisedSol)) || 0), 0),
       solOnCurvesNow: opened.reduce((n, l) => n + (("raisedSol" in l && !l.graduated && l.raisedSol) || 0), 0),
       solRaisedByGraduated: opened.reduce((n, l) => n + (("thresholdSol" in l && l.graduated && l.thresholdSol) || 0), 0),
-      // Launches whose basket creator is outside the Sheaf team. House and QA launches never count.
-      outsideLaunches: opened.filter((l) => l.basket.creatorTeam == null).length,
-      // Distinct wallets outside the team that swapped on any launch, over each market's last `tradeWindow` signatures.
-      traders: outsideWallets.size,
-      tradeWindow: TRADE_WINDOW,
       testLaunchesHidden: withTests ? 0 : all.filter((l) => l.test && l.open).length,
       launches: withTests ? all : real,
     },

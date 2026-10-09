@@ -95,34 +95,37 @@ export const FEATURED_DBC: [string, DbcPoolInfo] = [
 ];
 
 /**
- * The launch the home page features: Bitcoin, by proxy, the first launch on the
- * current (v2) curve. It lives in slot 1 because slot 0 was squatted on purpose
- * to prove the official-launch check (docs/meteora.md §3).
+ * The launch the home page features: Index of indices (IDXA), on the current
+ * (v2) curve, its metadata URI on a domain Sheaf controls and its opening price
+ * checked against the basket's NAV. Slot 1 and slot 2 of the same basket hold
+ * the rogue-anchor pool and the exact squat that prove the price and creator
+ * checks (docs/meteora.md §3), so the card also lists what Sheaf refused.
  */
 export const FEATURED_LAUNCH: { basket: LaunchBasket; info: DbcPoolInfo } = {
   basket: {
-    address: "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
-    name: "Bitcoin, by proxy",
-    symbol: "PROXY",
+    address: "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",
+    name: "Index of indices",
+    symbol: "IDX",
     creator: HOUSE,
   },
   info: {
-    pool: "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV",
-    config: "He6bRAV4Fs3TKxmykt3bJHnL242MPL8cXrfiM3Zinfie",
-    baseMint: "5wMGUdLisfNW1kMiQoeYN4hQcv1rpUXma6Apf8mpjtw9",
-    baseSymbol: "PROXYA",
-    baseName: "Bitcoin, by proxy",
+    pool: "FtpxNnWB5HdBRG8jDvvFbQoXbvMkVn8LCRy6DmaF5eVi",
+    config: "8P3Lm2uQJV1iyvffo1wVZT68QWH6RoiYLjQGpM2N6uDT",
+    baseMint: "ADqLXKbYuvv7jXk8rHGLU9jVCY3ydtSm8FcXFQPpUTpL",
+    baseSymbol: "IDXA",
+    baseName: "Index of indices",
     quoteSymbol: "SOL",
     baseDecimals: LAUNCH_DECIMALS,
     supply: LAUNCH_SUPPLY,
-    slot: 1,
+    slot: 0,
   },
 };
 
 /**
  * Launch mints whose immutable metadata URI points at sheaf.vercel.app, the
- * site's old domain, which Sheaf no longer controls: BIG5A, FRNTRA and PROXYA.
- * Their cards say so; their provenance is served at /api/launch/<basket>.
+ * site's old domain, which Sheaf no longer controls and which now serves an
+ * unrelated app: BIG5A, FRNTRA and PROXYA. Their cards say so; their
+ * provenance is served at /api/launch/<basket>. None of them is featured.
  */
 export const RETIRED_METADATA_MINTS: ReadonlySet<string> = new Set([
   "7X46CBfPfFg2cBMaCFKJ8XpEqY7iCn9rMUsnAZnftKxB",

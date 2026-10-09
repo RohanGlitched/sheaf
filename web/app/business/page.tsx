@@ -9,8 +9,10 @@ import {
   FeeHeadline,
   FeeTable,
   HOUSE_FILLER_MARGIN_BPS,
+  HOUSE_MAX_OVER_FAIR_BPS,
   HolderCost,
   LiveNumbers,
+  MEASURED_BEFORE_FIX,
   MarketFacts,
   MeasuredRoute,
   NearbyProducts,
@@ -24,6 +26,7 @@ import {
   TrustStance,
   UnitEconomics,
   pct,
+  planBandsText,
 } from "@/components/business-case";
 
 export const metadata: Metadata = {
@@ -81,16 +84,24 @@ export default function BusinessPage() {
           <h1 className="display text-hero leading-[0.95] text-ink">How Sheaf makes money</h1>
           <p className="mt-6 text-lg leading-[1.65] text-ink-2">
             Sheaf&rsquo;s protocol fee is paid when a share is made, never while it is held, redeemed or sold. Sheaf&rsquo;s own
-            filler earns its {pct(HOUSE_FILLER_MARGIN_BPS)} on the dollar orders and sales it fills. Every fee is written into a
+            filler aims to earn {pct(HOUSE_FILLER_MARGIN_BPS)} on the dollar orders and sales it fills, and never takes more than{" "}
+            {pct(HOUSE_MAX_OVER_FAIR_BPS)}. Every fee is written into a
             basket when the basket is created, so the rate a buyer sees is the rate that basket will charge for as long as it
             exists.
           </p>
           <p className="display mt-8 border-l-2 border-bind pl-5 text-xl leading-snug text-ink sm:text-2xl">
             {pct(PROTOCOL_FEE_BPS)} of every share created goes to Sheaf. The basket&rsquo;s creator sets their own fee. A
-            filler earns whatever the buyer&rsquo;s own ±{pct(AUCTION_BAND_BPS)} band leaves it, and Sheaf&rsquo;s filler waits
-            for {pct(HOUSE_FILLER_MARGIN_BPS)}.
+            filler earns whatever the buyer&rsquo;s own band leaves it, and Sheaf&rsquo;s filler aims for{" "}
+            {pct(HOUSE_FILLER_MARGIN_BPS)}.
           </p>
           <p className="mt-6 text-sm leading-relaxed text-ink-3">
+            The band is ±{pct(AUCTION_BAND_BPS)} around fair on a dollar order or a sale, and on a plan run{" "}
+            {planBandsText("bandBps")} around the plan&rsquo;s last fill, inside the owner&rsquo;s hard limits (
+            {planBandsText("hardBps")}). Before the {MEASURED_BEFORE_FIX.date} timing fix, Sheaf&rsquo;s filler measured a
+            median {pct(MEASURED_BEFORE_FIX.bps)} over {MEASURED_BEFORE_FIX.fills} fills, because it sent each fill at its
+            break-even second and the fill landed about two seconds later; it now sends just ahead of it.
+          </p>
+          <p className="mt-4 text-sm leading-relaxed text-ink-3">
             Everything runs on devnet and testnets with test money today. The protocol fee is live on devnet for Solana baskets
             created since {PROTOCOL_FEE_SINCE} and on dollar fills through the EVM v2 and v3 desks, and the treasury has made its first
             claim. The rates are real; the revenue is not yet.
@@ -142,7 +153,8 @@ export default function BusinessPage() {
             <p>
               A buyer escrows dollars and names a floor. The auction offers a share count that starts above fair and falls
               toward the floor. Sheaf&rsquo;s filler steps in when the dollars cover the stocks at fair plus{" "}
-              {pct(HOUSE_FILLER_MARGIN_BPS)}; a faster filler gives the buyer a better count and keeps less.
+              {pct(HOUSE_FILLER_MARGIN_BPS)}, and never past {pct(HOUSE_MAX_OVER_FAIR_BPS)}; a faster filler gives the buyer a
+              better count and keeps less.
             </p>
             <p>
               The shares the stocks create are then split once: most to the buyer, the creator&rsquo;s fee to the creator,{" "}
@@ -182,7 +194,7 @@ export default function BusinessPage() {
           </div>
           <div className="mt-14 grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
             <div className="max-w-[48ch] space-y-4 text-base leading-relaxed text-ink-2">
-              <h3 className="display text-2xl text-ink">Why Sheaf&rsquo;s filler waits for {pct(HOUSE_FILLER_MARGIN_BPS)}</h3>
+              <h3 className="display text-2xl text-ink">Why Sheaf&rsquo;s filler aims for {pct(HOUSE_FILLER_MARGIN_BPS)}</h3>
               <p>
                 A filler has to buy every stock in the recipe before it can deliver them. On big US names that route is
                 cheap: we measured it through Jupiter for a five-stock basket, and at $1,000 the round trip is under a tenth
@@ -190,7 +202,7 @@ export default function BusinessPage() {
               </p>
               <p>
                 So {pct(HOUSE_FILLER_MARGIN_BPS)} covers the route with a little left over, and the buyer pays far less than
-                the {pct(AUCTION_BAND_BPS)} the band allows. Thin markets, like pre-IPO tokens, cost more to route; there the
+                the {pct(AUCTION_BAND_BPS)} a dollar order&rsquo;s band allows. Thin markets, like pre-IPO tokens, cost more to route; there the
                 filler waits longer in the auction or does not fill, and the dollars go back.
               </p>
             </div>
@@ -254,7 +266,7 @@ export default function BusinessPage() {
           lede={
             <p>
               These come from the program&rsquo;s own events, its basket accounts and the launch pools, not from a
-              spreadsheet. Every wallet the team uses is listed in the code, and the figures below say whose activity they are.
+              spreadsheet. Figures are read live from the chain.
             </p>
           }
         >
@@ -262,7 +274,7 @@ export default function BusinessPage() {
           <div className="mt-6">
             <ProtocolFeeReceipts />
           </div>
-          <h3 className="display mt-14 text-2xl text-ink">Use</h3>
+          <h3 className="display mt-14 text-2xl text-ink">The program on devnet</h3>
           <div className="mt-6">
             <LiveNumbers />
           </div>
@@ -289,8 +301,8 @@ export default function BusinessPage() {
           lede={
             <p>
               The program works. What comes next is showing that people use it and come back, that the fee is
-              charged and claimed, and that a wallet or front end will put it in front of its users. These are the targets,
-              counted the same way as the numbers above.
+              charged and claimed, and that a wallet or front end will put it in front of its users. These are the targets.
+              Figures are read live from the chain.
             </p>
           }
         >

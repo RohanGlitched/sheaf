@@ -1,6 +1,7 @@
 import type { Connection } from "@solana/web3.js";
 import {
   pickLaunch,
+  preIpoCompanies,
   readDbcState,
   scanLaunch,
   type DbcPoolInfo,
@@ -8,7 +9,7 @@ import {
   type FoundLaunch,
   type LaunchBasket,
 } from "@/lib/dbc";
-import { LAUNCH_METADATA_SITE, OPEN_MULTIPLE } from "@/lib/launch";
+import { OPEN_MULTIPLE, PUBLIC_SITE } from "@/lib/launch";
 
 /**
  * Whether a launch really opened at half its basket's NAV, from sources the
@@ -126,7 +127,7 @@ async function check(params: {
     if (t == null) return { ...base, reason: "The open time could not be read." };
     // Read from this deployment; published as the production URL anyone can check.
     const navRead = `${origin}/api/nav/${basket}?at=${t}`;
-    const navProof = `${LAUNCH_METADATA_SITE}/api/nav/${basket}?at=${t}`;
+    const navProof = `${PUBLIC_SITE}/api/nav/${basket}?at=${t}`;
     const [sol, nav] = await Promise.all([
       solUsdAt(t),
       fetch(navRead, { signal: AbortSignal.timeout(30_000) })
@@ -171,6 +172,14 @@ export type ResolvedLaunch = {
   /** The anchor of every pool on the published terms, by pool; and the pools it refused, with the reason. */
   anchors: Map<string, Anchor>;
   rejected: Map<string, string>;
+  /**
+   * The chosen pool's opening price could not be checked yet (a price source
+   * or the NAV read failed) on a basket whose holdings are all listed, so the
+   * check should have an answer. Until it does, the pool is not treated as
+   * official: the feed says so and the card stays read-only. Pre-IPO baskets
+   * have no listed close, so for them "unverifiable" is the final answer.
+   */
+  checking: boolean;
 };
 
 /**
@@ -180,7 +189,11 @@ export type ResolvedLaunch = {
  * rejected is the launch. A later valid pool is therefore never dropped, and a
  * mismatched slot never blocks a correct launch.
  */
-export async function resolveLaunch(connection: Connection, origin: string, basket: LaunchBasket): Promise<ResolvedLaunch> {
+export async function resolveLaunch(
+  connection: Connection,
+  origin: string,
+  basket: LaunchBasket & { components?: { mint: string }[] },
+): Promise<ResolvedLaunch> {
   const scan = await scanLaunch(connection, basket);
   const anchors = new Map<string, Anchor>();
   const states = new Map<string, DbcState>();
@@ -196,11 +209,14 @@ export async function resolveLaunch(connection: Connection, origin: string, bask
   }
   const picked = pickLaunch(scan, rejected);
   const pool = picked.launch?.info.pool;
+  const anchor = pool ? (anchors.get(pool) ?? null) : null;
+  const listed = basket.components != null && preIpoCompanies(basket).length === 0;
   return {
     ...picked,
     state: pool ? (states.get(pool) ?? null) : null,
-    anchor: pool ? (anchors.get(pool) ?? null) : null,
+    anchor,
     anchors,
     rejected,
+    checking: pool != null && listed && anchor?.status !== "verified",
   };
 }

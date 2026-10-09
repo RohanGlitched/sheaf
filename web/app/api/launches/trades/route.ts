@@ -29,9 +29,8 @@ async function officialPools(connection: Connection, origin: string): Promise<Ma
  * GET /api/launches/trades?pool=<DBC pool>
  *
  * The recent swaps on one official launch, on its curve and (once graduated)
- * its DAMM v2 pool, newest first. Sheaf's own wallets carry `team` ("house",
- * "test wallet", ...): those trades are ours and never count as traction;
- * `traders` counts only wallets outside the team.
+ * its DAMM v2 pool, newest first: signature, time, wallet, side, SOL moved
+ * and market. Wallets are not tagged.
  *
  * Only the pools of official launches are read, so the work behind this route
  * is bounded by the number of launches, whatever address is asked for. Calls

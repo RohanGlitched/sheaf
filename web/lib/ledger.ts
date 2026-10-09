@@ -81,6 +81,15 @@ export type LedgerEntry = {
   /** On a sell order: the dollars the seller asks for at the start, and their floor at the end. */
   startCash?: number;
   endCash?: number;
+  /**
+   * On a fill or a sale by one of the site's own fillers: the price against fair
+   * value at the moment of filling, in basis points, from the buyer's or seller's
+   * side (+20 is 0.20% over fair paid by a buyer, −15 is 0.15% under fair received
+   * by a seller). Fair is the stocks at that filler's live prices, transfer fees
+   * included, from its fill log; the chain records the trade, not a price, so
+   * other fills, and ours from before the log began, carry none.
+   */
+  vsFairBps?: number;
 };
 
 export type Ledger = {
@@ -495,8 +504,13 @@ export type FillStats = {
 };
 
 export type LedgerStats = {
-  /** Every event, and the distinct wallets behind them. */
+  /**
+   * Actions: every event the program emitted, one per row of the ledger, fee
+   * rows included. The one definition the site uses (/ledger, /explore and
+   * /business all read this field).
+   */
   actions: number;
+  /** Distinct wallets behind those events (fee rows name a basket or the treasury, not a wallet, so they add none). */
   wallets: number;
   /** Wallets that are not the team's own (the house key and test wallets), and their events. */
   outsideWallets: number;
@@ -524,6 +538,8 @@ export type LedgerStats = {
   /** Fill rate over finished orders of at least $5, the house's minimum, by cause too. */
   fillRateAtLeast5: number | null;
   fillRateAtLeast5ByCause: { dollar: number | null; plan: number | null };
+  /** The same orders of at least $5, by cause, with their counts and times: the fill rate /business shows. */
+  byCauseAtLeast5: { dollar: FillStats; plan: FillStats };
   /** Protocol fee shares accrued to the treasury, and claimed by it, in whole shares. */
   protocolFeeAccrued: number;
   protocolFeeClaimed: number;
@@ -571,13 +587,16 @@ function rateAtLeast5(xs: LedgerEntry[]): number | null {
   return fills + returned > 0 ? Math.round((fills / (fills + returned)) * 1000) / 1000 : null;
 }
 
+/** Only events of orders of at least $5 (every order event carries the order's dollars). */
+const atLeast5 = (xs: LedgerEntry[]) => xs.filter((e) => (e.cash ?? 0) >= 5);
+
 /** The numbers behind a set of events. `isOurs` tells a team wallet from anyone else's. */
 export function ledgerStats(
   entries: LedgerEntry[],
   isOurs: (wallet: string) => boolean,
   fillers: { house?: string; second?: string } = {},
 ): LedgerStats {
-  // Fee rows are bookkeeping, not anyone's action: they stay out of the activity counts.
+  // Fee rows name a basket or the treasury, not a wallet: they stay out of the wallet counts.
   const acts = entries.filter((e) => e.kind !== "feeAccrued" && e.kind !== "feeClaimed");
   const wallets = new Set(acts.map((e) => e.actor));
   let outsideWallets = 0;
@@ -602,7 +621,7 @@ export function ledgerStats(
     otherOurs: xs.filter((f) => f.filler != null && isOurs(f.filler) && f.filler !== fillers.house && f.filler !== fillers.second).length,
   });
   return {
-    actions: acts.length,
+    actions: entries.length,
     wallets: wallets.size,
     outsideWallets,
     outsideActions: acts.filter((e) => !isOurs(e.actor)).length,
@@ -631,6 +650,7 @@ export function ledgerStats(
     sellFillsByFiller: byFiller(sold),
     fillRateAtLeast5: rateAtLeast5(orderish),
     fillRateAtLeast5ByCause: { dollar: rateAtLeast5(dollar), plan: rateAtLeast5(plan) },
+    byCauseAtLeast5: { dollar: fillStats(atLeast5(dollar), placedAt), plan: fillStats(atLeast5(plan), placedAt) },
     protocolFeeAccrued: Math.round(entries.filter((e) => e.kind === "feeAccrued").reduce((a, e) => a + (e.shares ?? 0), 0) * 1e6) / 1e6,
     protocolFeeClaimed: Math.round(entries.filter((e) => e.kind === "feeClaimed").reduce((a, e) => a + (e.shares ?? 0), 0) * 1e6) / 1e6,
     since: entries.reduce<number | null>((a, e) => (e.time > 0 && (a == null || e.time < a) ? e.time : a), null),

@@ -1,6 +1,6 @@
 import "server-only";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { serverRpcUrl } from "./config";
+import { serverRpcUrl, SITE_URL } from "./config";
 import { dammV2PoolAddress, openLaunches } from "./dbc";
 import { entriesOf, type LedgerEntry } from "./ledger";
 import { fetchBaskets } from "./sheaf";
@@ -25,12 +25,34 @@ const POOLS_TTL_MS = 5 * 60_000;
 
 let pools: { at: number; bySymbol: Map<string, string> } | null = null;
 
-/** Every official launch market's address (curve and DAMM v2), mapped to the basket's symbol. */
+/**
+ * The pools the server's anchor check refused (pool -> reason), from the launches
+ * feed (cached at the edge), as lib/use-launches.ts fetchRejected reads it in the
+ * browser. Throws when the feed cannot be read, so no refused pool ever counts.
+ */
+async function refusedPools(): Promise<Map<string, string>> {
+  const res = await fetch(`${SITE_URL}/api/launches?tests=1`, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`launches feed: HTTP ${res.status}`);
+  const body = (await res.json()) as { launches?: { unofficial?: { pool: string; reason?: string; anchor?: { status?: string } }[] }[] };
+  const refused = new Map<string, string>();
+  for (const l of body.launches ?? []) {
+    for (const u of l.unofficial ?? []) {
+      if (u.anchor?.status === "mismatch") refused.set(u.pool, u.reason ?? "It did not open at half the basket's NAV.");
+    }
+  }
+  return refused;
+}
+
+/**
+ * Every official launch market's address (curve and DAMM v2), mapped to the
+ * basket's symbol. A pool that did not open at half of NAV is not official, so a
+ * swap on it proves nothing; without the refused list, no launch swap counts this time.
+ */
 async function officialMarkets(connection: Connection): Promise<Map<string, string>> {
   if (pools && Date.now() - pools.at < POOLS_TTL_MS) return pools.bySymbol;
-  const baskets = await fetchBaskets(connection);
+  const [baskets, refused] = await Promise.all([fetchBaskets(connection), refusedPools()]);
   const symbol = new Map(baskets.map((b) => [b.address, b.symbol]));
-  const found = await openLaunches(connection, baskets);
+  const found = await openLaunches(connection, baskets, refused);
   const bySymbol = new Map<string, string>();
   for (const [basket, info] of found) {
     const sym = symbol.get(basket) ?? info.baseSymbol;

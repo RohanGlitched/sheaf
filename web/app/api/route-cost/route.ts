@@ -10,9 +10,18 @@ export const maxDuration = 30;
 /**
  * GET /api/route-cost?basket=<address> → { basket, bps: { "100": n, "1000": n }, at, ... }
  *
- * What a filler pays, one way, to buy a basket's stocks on mainnet's real routes
- * for a $100 and a $1,000 order: Jupiter quotes through lib/fill-cost.ts (the
- * same measurement as /api/fill-cost), as basis points over spot. A dollar order
+ * What a filler pays to buy a basket's stocks on mainnet's real routes for a $100
+ * and a $1,000 order: Jupiter quotes through lib/fill-cost.ts (the same
+ * measurement as /api/fill-cost). Two different numbers, never to be read as
+ * halves of each other:
+ *
+ *   bps           buying only: dollars paid over the stocks' value at the prices
+ *                 this site shows, so it includes any premium the route pays over
+ *                 those prices.
+ *   roundTripBps  the route's own spread: USDC in against USDC back, buying each
+ *                 leg and selling it straight back. No reference price in it.
+ *
+ * A dollar order
  * or plan whose one-way cost is above the desk's band cannot be filled at a
  * profit, so the forms read this to say so. Cached for ten minutes per basket.
  * A size that cannot be routed reads null.

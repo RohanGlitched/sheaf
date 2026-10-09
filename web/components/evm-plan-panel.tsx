@@ -8,6 +8,7 @@ import {
   EVM_PLAN_V3,
   PLAN_DESK_V3_ABI,
   explainEvmError,
+  fairSharesFor,
   fromRaw,
   publicClientFor,
   readPlansOfV3,
@@ -49,6 +50,77 @@ type Terms = {
   hardMax: string;
 };
 
+/** What a plan's terms must be, from this page's own deployment record, cadence and price. */
+export type ExpectedTerms = {
+  basket: string;
+  planDesk: string;
+  /** The keeper the plan names; omitted on Tempo, where the plan names none and an access key runs it. */
+  keeper?: string;
+  cashPerRun: bigint;
+  interval: bigint;
+  auctionSecs: bigint;
+  runs?: bigint;
+  bandBps: number;
+  stepBps: number;
+  hardMinBps: number;
+  hardMaxBps: number;
+  /** Today's fair count for one run at the price this page shows; null while the page has no price. */
+  fairShares: bigint | null;
+  symbol: string;
+};
+
+type OfferedTerms = {
+  basket: string;
+  planDesk: string;
+  keeper?: string;
+  cashPerRun: string;
+  interval: string;
+  auctionSecs: string;
+  runs?: string;
+  bandBps: number;
+  stepBps: number;
+  refShares: string;
+  hardMin: string;
+  hardMax: string;
+};
+
+/** How far the server's count may sit from the one this page computes from its own price. */
+const FAIR_TOLERANCE = 0.03;
+/** How far each hard bound may sit from its stated share of the reference, in bps. */
+const BOUND_TOLERANCE_BPS = 10;
+
+/**
+ * Checks the terms the keeper route offers against what this page expects before
+ * anything is signed: the basket, the plan desk and the keeper from the deployment
+ * record; the amount, schedule, band and step for the chosen cadence; hard bounds
+ * at the stated share of the reference; and a reference within 3% of the count
+ * this page's own price gives. A wrong or tampered answer is refused, unsigned.
+ */
+export function checkPlanTerms(t: OfferedTerms, want: ExpectedTerms): void {
+  const same = (a: string | undefined, b: string | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  const refuse = (what: string) => {
+    throw new Error(`The plan terms from Sheaf's server don't match this page (${what}), so nothing was signed. Reload and try again.`);
+  };
+  if (!same(t.basket, want.basket)) refuse("a different basket");
+  if (!same(t.planDesk, want.planDesk)) refuse("a different plan desk");
+  if (want.keeper != null && !same(t.keeper, want.keeper)) refuse("a keeper other than the house");
+  if (BigInt(t.cashPerRun) !== want.cashPerRun) refuse("a different amount a run");
+  if (BigInt(t.interval) !== want.interval || BigInt(t.auctionSecs) !== want.auctionSecs) refuse("a different schedule");
+  if (want.runs != null && (t.runs == null || BigInt(t.runs) !== want.runs)) refuse("a different number of runs");
+  if (t.bandBps !== want.bandBps || t.stepBps !== want.stepBps) refuse("a different window or step");
+  const ref = BigInt(t.refShares);
+  if (ref <= 0n) refuse("no reference count");
+  // Each bound as bps of the reference, to a hundredth of a bp.
+  const bps = (v: string) => Number((BigInt(v) * 1_000_000n) / ref) / 100;
+  if (Math.abs(bps(t.hardMin) - want.hardMinBps) > BOUND_TOLERANCE_BPS) refuse("a different floor");
+  if (Math.abs(bps(t.hardMax) - want.hardMaxBps) > BOUND_TOLERANCE_BPS) refuse("a different ceiling");
+  if (want.fairShares == null || want.fairShares <= 0n) {
+    throw new Error(`This page hasn't priced ${want.symbol} yet, so it can't check the plan's count. Try again in a moment.`);
+  }
+  const off = Math.abs(Number(ref - want.fairShares)) / Number(want.fairShares);
+  if (off > FAIR_TOLERANCE) refuse(`a count ${(off * 100).toFixed(1)}% from today's price on this page`);
+}
+
 type RunResult = { planId: number; status: "ran" | "skipped" | "failed"; orderId?: number; reason?: string; hash?: string };
 
 const sh = (v: bigint | string) => quantity(fromRaw(BigInt(v)), 4);
@@ -63,7 +135,20 @@ async function keeperPost(body: Record<string, unknown>) {
   return json;
 }
 
-export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; basket: ChainBasket; wallet: EvmWallet; onDone: () => void }) {
+export function EvmPlanPanel({
+  d,
+  basket,
+  wallet,
+  nav,
+  onDone,
+}: {
+  d: Deployment;
+  basket: ChainBasket;
+  wallet: EvmWallet;
+  /** The share price this page shows: the plan terms are checked against it before signing. */
+  nav: number | null;
+  onDone: () => void;
+}) {
   const v3 = v3Of(d)!;
   const house = (d.deployer ?? "") as Address;
   const [cadence, setCadence] = useState<PlanCadence>("demo");
@@ -115,13 +200,32 @@ export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; bas
     }
   }
 
-  const terms = async (cashPerRun: bigint, cad: PlanCadence) =>
-    (await keeperPost({ network: d.network, plan: { action: "terms", basket: basket.address, cash: cashPerRun.toString(), cadence: cad } })) as unknown as Terms;
+  // The server names each plan's terms; the page checks every one of them before the wallet sees a step.
+  const terms = async (cashPerRun: bigint, cad: PlanCadence, runs?: bigint) => {
+    const t = (await keeperPost({ network: d.network, plan: { action: "terms", basket: basket.address, cash: cashPerRun.toString(), cadence: cad } })) as unknown as Terms;
+    const k = EVM_PLAN_V3.cadences[cad];
+    checkPlanTerms(t, {
+      basket: basket.address,
+      planDesk: v3.planDesk,
+      keeper: house,
+      cashPerRun,
+      interval: k.interval,
+      auctionSecs: k.auctionSecs,
+      runs,
+      bandBps: EVM_PLAN_V3.bandBps,
+      stepBps: EVM_PLAN_V3.stepBps,
+      hardMinBps: EVM_PLAN_V3.hardMinBps,
+      hardMaxBps: EVM_PLAN_V3.hardMaxBps,
+      fairShares: nav != null && nav > 0 ? fairSharesFor(cashPerRun, d.stable.decimals, nav) : null,
+      symbol: basket.symbol,
+    });
+    return t;
+  };
 
   const open = () =>
     act("open", async () => {
       if (!cash || !wallet.address) return;
-      const t = await terms(cash, cadence);
+      const t = await terms(cash, cadence, c.runs);
       // Add this plan's runs to whatever the plan desk may already pull, so another plan's allowance is kept.
       const have = await publicClientFor(d).readContract({
         address: d.stable.address as Address,
@@ -137,7 +241,7 @@ export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; bas
           data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [v3.planDesk as Address, total] }),
         },
         {
-          label: `Open the plan: ${fromRaw(cash, d.stable.decimals).toFixed(2)} ${d.stable.symbol} a run into ${t.symbol}`,
+          label: `Open the plan: ${fromRaw(cash, d.stable.decimals).toFixed(2)} ${d.stable.symbol} a run into ${t.symbol}, about ${sh(t.refShares)} a run today, never below ${sh(t.hardMin)} or above ${sh(t.hardMax)}`,
           to: v3.planDesk as Address,
           data: encodeFunctionData({
             abi: PLAN_DESK_V3_ABI,
@@ -165,11 +269,16 @@ export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; bas
 
   const recenter = (p: PlanV3) =>
     act(`recenter:${p.id}`, async () => {
+      // The terms are checked against this page's price, so a plan on another basket is re-centered from that basket's page.
+      if (p.basket.toLowerCase() !== basket.address.toLowerCase()) {
+        const other = d.baskets.find((b) => b.address.toLowerCase() === p.basket.toLowerCase())?.symbol ?? shortAddress(p.basket);
+        throw new Error(`Plan #${p.id} buys ${other}. Re-center it from the ${other} page, which checks the new terms against that basket's price.`);
+      }
       const t = await terms(p.cashPerRun, p.interval >= 86_400 ? "monthly" : "demo");
       await wallet.send(
         [
           {
-            label: `Re-center plan #${p.id} at today's price`,
+            label: `Re-center plan #${p.id} at today's price: about ${sh(t.refShares)} ${t.symbol} a run, never below ${sh(t.hardMin)} or above ${sh(t.hardMax)}`,
             to: v3.planDesk as Address,
             data: encodeFunctionData({ abi: PLAN_DESK_V3_ABI, functionName: "recenter", args: [BigInt(p.id), BigInt(t.refShares), BigInt(t.hardMin), BigInt(t.hardMax)] }),
           },
@@ -192,7 +301,7 @@ export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; bas
   const ceilPct = EVM_PLAN_V3.hardMaxBps / 100;
 
   return (
-    <section className="mt-20 border-t border-line pt-16">
+    <section id="plan" className="mt-20 scroll-mt-24 border-t border-line pt-16">
       <div className="max-w-[62ch]">
         <p className="text-xs text-ink-3">PlanDeskV3 on {d.label}</p>
         <h2 className="display mt-2 text-title text-ink">A monthly plan into {basket.symbol}</h2>
@@ -203,7 +312,9 @@ export function EvmPlanPanel({ d, basket, wallet, onDone }: { d: Deployment; bas
         </p>
         <p className="mt-3 text-sm leading-relaxed text-ink-3">
           The keeper names each run&apos;s fair count from live quotes, but the contract only accepts one within {EVM_PLAN_V3.stepBps / 100}% of
-          what your last run actually filled at and inside the hard bounds you sign ({floorPct}% to {ceilPct}% of today&apos;s count). A bigger
+          what your last run actually filled at and inside the hard bounds you sign ({floorPct}% to {ceilPct}% of today&apos;s count). Before
+          your wallet signs, this page checks the keeper, basket, schedule and bounds the server offers against its own price, and the step
+          shows the bounds in shares. A bigger
           move pauses the plan until you re-center it. The 0.10% protocol fee goes to a separate treasury key.
         </p>
         <p className="mt-3 rounded-[var(--radius-control)] border border-line bg-raised px-4 py-3 text-sm leading-relaxed text-ink-2">

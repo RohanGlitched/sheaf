@@ -36,7 +36,7 @@ Researched Oct 9, 2026, from `solami.dev/llms.txt`, the live pricing API (`GET h
 
 | Product | What it would do for the tape | Free tier | Status in Sheaf |
 |---|---|---|---|
-| Yellowstone gRPC streams | Push every transaction on the 10 xStock mints the moment it lands, with no polling | `grpc_streams: 0`, `grpc_access: false` (Pro plan and up; a 2-day trial) | Not used. A serverless function also cannot hold a stream open. |
+| Yellowstone gRPC streams | Push every transaction on the 10 xStock mints the moment it lands, with no polling | `grpc_streams: 0`, `grpc_access: false` (Pro plan and up; the Solami sidetrack offers Pro free for 7 days through its signup link) | Not used. A serverless function also cannot hold a stream open. |
 | WebSocket | `logsSubscribe` on the mints | `ws_connections: 0` | Not used |
 | Webhooks (`POST /webhooks/create`) | Stream subscriptions delivered to a URL, "filters included, down to individual trades" | `max_webhooks: 1` in the pricing API, but 0 in the site's own plan table | Not used. Creating one needs a signed-in dashboard session (`AccountContext` bearer), not the API key. |
 | Data API ("Blur data"): `GET /data/token/trades?chain=solana&address=<mint>` | Decoded trades per mint, with `dex`, `side`, `trader`, `price_usd` and `volume_usd`. That would replace Sheaf's balance-diff decoder and cover all 10 mints in 10 calls. | Billed per GB from a prepaid balance (`payg.blur`); the key needs the `DataApi` permission | Tested with Sheaf's key: **403 "missing required permission: DataApi"**. |

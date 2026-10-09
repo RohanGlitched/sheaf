@@ -291,7 +291,7 @@ export function EvmBasket({
 
       {isTempo(d) && (
         <section id="sip" className="mt-20 scroll-mt-24 border-t border-line pt-16">
-          <TempoSip d={d} />
+          <TempoSip d={d} prices={prices} />
         </section>
       )}
 
@@ -422,7 +422,7 @@ export function EvmBasket({
         </section>
       </div>
 
-      <EvmDeskBook d={d} basket={basket} wallet={wallet} tick={deskTick} onDone={onDone} />
+      <EvmDeskBook d={d} basket={basket} wallet={wallet} tick={deskTick} nav={nav} onDone={onDone} />
 
       <HyperCorePricing basket={basket} perps={hyper.perps} nav={hyper.nav} quoteNav={nav} />
 

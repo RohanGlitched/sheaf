@@ -10,8 +10,8 @@ import { WRITE_CLUSTER, WRITE_RPC } from "@/lib/config";
 import { clientIp } from "@/lib/faucet-server";
 import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
 import { rememberOidc } from "@/lib/gcs-store";
-import { budgetMessage, reserve as reserveBudget } from "@/lib/server-faucet-budget";
-import { cleanRef } from "@/lib/invite-ref";
+import { LIMITS, budgetRefusal, faucetInvite, reserve as reserveBudget } from "@/lib/server-faucet-budget";
+import { originAllowed } from "@/lib/server-origin";
 
 /**
  * Enough devnet SOL for a whole first visit, the longest path included: compose a
@@ -47,15 +47,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "The faucet is not configured on this deployment." }, { status: 503 });
   }
 
+  // Only this site's pages may ask; a browser always sends Origin on a POST.
+  if (!originAllowed(request)) {
+    return Response.json({ error: "This faucet serves this site's pages only." }, { status: 403 });
+  }
+
   rememberOidc(request);
   let owner: PublicKey;
-  // An invite code (?ref= on the page, sent as `ref` or the x-sheaf-ref header) counts the
-  // grant against the invite instead of the network, so a group on one Wi-Fi is not turned away.
-  let invite: string | null = cleanRef(request.headers.get("x-sheaf-ref"));
+  // A founder-issued invite code (?ref= on the page, sent as `ref` or the x-sheaf-ref header)
+  // raises the network's cap, so a group on one Wi-Fi is not turned away. Any other code is ignored here.
+  let invite: string | null = null;
   try {
     const body = (await request.json()) as { owner?: string; ref?: string };
     owner = new PublicKey(body.owner ?? "");
-    invite = cleanRef(body.ref) ?? invite;
+    invite = faucetInvite(body.ref, request.headers.get("x-sheaf-ref"));
   } catch {
     return Response.json({ error: "That does not look like a Solana address." }, { status: 400 });
   }
@@ -70,7 +75,7 @@ export async function POST(request: Request) {
   const ip = clientIp(request);
   const now = Date.now();
   const recent = (grantsByIp.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS);
-  if (!invite && recent.length >= IP_MAX_GRANTS) {
+  if (recent.length >= IP_MAX_GRANTS * (invite ? LIMITS.inviteNetFactor : 1)) {
     return Response.json(
       { error: "This network has had its test SOL for today. faucet.solana.com has more." },
       { status: 429 },
@@ -118,7 +123,7 @@ export async function POST(request: Request) {
   const budget = await reserveBudget({ kind: "sol", net: ip, invite, lamports: GRANT });
   if (!budget.ok) {
     release();
-    return Response.json({ error: budgetMessage(budget.refused), empty: budget.refused === "global" }, { status: budget.refused === "global" ? 503 : 429 });
+    return budgetRefusal(budget.refused, { extra: { empty: budget.refused === "global" } });
   }
 
   try {

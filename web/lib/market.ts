@@ -21,7 +21,7 @@
  * keyless on-chain price for the same mint (an independent indexer of the same
  * Solana pools), and failing that from the last snapshot that came back whole
  * (lib/price-snapshot.ts, at most six hours old). Each quote says which source it
- * came from, so a filler can ask for a wider margin on a fallback price.
+ * came from: the site shows fallback prices, but its fillers fill on live Jupiter quotes only.
  */
 
 import { XSTOCKS, BY_MINT, type XStock } from "./universe";

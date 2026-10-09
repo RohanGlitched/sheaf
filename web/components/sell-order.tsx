@@ -252,8 +252,8 @@ export function SellOrderPanel({
   return (
     <div className="p-6">
       <p className="text-sm leading-relaxed text-ink-2">
-        Sell {basket.symbol} for dollars. Your shares wait in an escrow the program controls while fillers compete to pay you; nobody
-        can take them for less than the floor you set.
+        Sell {basket.symbol} for dollars. Your shares wait in an escrow the program controls until a filler pays the current
+        amount; any filler can, and nobody can take them for less than the floor you set.
       </p>
 
       {(stage.kind === "idle" || stage.kind === "signing") && (
@@ -327,8 +327,8 @@ export function SellOrderPanel({
 
           {blocked && (
             <p className="mt-4 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
-              On mainnet no filler could fill this inside the 2% band today: trading the stocks costs about{" "}
-              {((routeBps ?? 0) / 100).toFixed(2)}% one way. Redeem the shares in kind instead, from the Redeem tab.
+              On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
+              {((routeBps ?? 0) / 100).toFixed(2)}% over the prices shown here. Redeem the shares in kind instead, from the Redeem tab.
             </p>
           )}
 

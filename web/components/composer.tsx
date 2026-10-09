@@ -17,7 +17,7 @@ import { PRESTOCK_SYMBOLS } from "@/lib/prestocks";
 import { unitsForWeights } from "@/lib/sheaf";
 import { buildCreateBasket, sendSteps, explainError } from "@/lib/tx";
 import { MAX_COMPONENTS, MAX_CREATOR_FEE_BPS, explorerTx } from "@/lib/config";
-import type { Quote } from "@/lib/market";
+import type { MarketSnapshot, Quote } from "@/lib/market";
 import { MosaicSkeleton } from "./skeletons";
 import { ConnectButton } from "./connect-button";
 
@@ -67,9 +67,13 @@ const PRESETS: Preset[] = [
   },
 ];
 
-export function Composer() {
+export function Composer({ initialSnapshot = null }: { initialSnapshot?: MarketSnapshot | null } = {}) {
   const router = useRouter();
-  const { snapshot, loading } = useMarket();
+  const { snapshot: liveSnapshot, loading: liveLoading } = useMarket();
+  // The server's last whole snapshot draws the market at once; the live read replaces it
+  // within seconds, and a basket is only ever written from live prices.
+  const snapshot = liveSnapshot ?? initialSnapshot;
+  const loading = liveLoading && !snapshot;
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
 
@@ -314,6 +318,7 @@ export function Composer() {
   if (feeBps < 0 || feeBps > MAX_CREATOR_FEE_BPS)
     problems.push(`The fee has to be between 0 and ${MAX_CREATOR_FEE_BPS / 100}%.`);
   if (!recipe.units) problems.push("Waiting on a price for every ticker.");
+  else if (!liveSnapshot) problems.push("Reading today's prices before the recipe is written.");
   if (recipe.units?.some((u) => u.unitsPerShare <= 1n))
     problems.push(
       "One component rounds to a single raw unit. Raise the share price.",

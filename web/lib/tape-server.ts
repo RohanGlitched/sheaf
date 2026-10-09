@@ -527,7 +527,8 @@ async function poll(): Promise<Tape> {
 
   const prints = [...seen.values()]
     .filter((p): p is Print => p != null)
-    .sort((a, b) => b.slot - a.slot || b.time - a.time)
+    // Newest first by the time each row shows (block time, or one estimated from its slot), so the list reads in time order.
+    .sort((a, b) => b.time - a.time || b.slot - a.slot)
     .slice(0, DEPTH);
   return {
     slot,
@@ -615,7 +616,8 @@ export async function readTape(background?: (task: () => Promise<unknown>) => vo
     // Whatever the backfill has decoded so far (its first rows land in about three seconds).
     prints: [...seen.values()]
       .filter((p): p is Print => p != null)
-      .sort((a, b) => b.slot - a.slot || b.time - a.time)
+      // Newest first by the time each row shows (block time, or one estimated from its slot), so the list reads in time order.
+    .sort((a, b) => b.time - a.time || b.slot - a.slot)
       .slice(0, DEPTH),
     polledAt: Date.now(),
     watching: STOCKS.map((s) => s.base),

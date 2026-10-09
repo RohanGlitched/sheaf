@@ -23,17 +23,21 @@ import { VoicesChannels } from "@/components/voices-channels";
 const link = "text-bind underline decoration-bind/40 underline-offset-4 hover:decoration-bind";
 const quiet = "text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink";
 
-const VERIFY_SNIPPET = `// npm i tweetnacl bs58
+const VERIFY_SNIPPET = `// npm i tweetnacl bs58 viem
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { verifyMessage } from "viem";
 
 const { voices } = await (await fetch("https://sheaf.world/api/voices")).json();
 for (const v of voices) {
-  const ok = nacl.sign.detached.verify(
-    new TextEncoder().encode(v.message),
-    bs58.decode(v.signature),
-    bs58.decode(v.wallet),
-  );
+  // Solana wallets sign with ed25519; EVM wallets (0x…) with EIP-191 personal_sign.
+  const ok = v.wallet.startsWith("0x")
+    ? await verifyMessage({ address: v.wallet, message: v.message, signature: v.signature }).catch(() => false)
+    : nacl.sign.detached.verify(
+        new TextEncoder().encode(v.message),
+        bs58.decode(v.signature),
+        bs58.decode(v.wallet),
+      );
   console.log(ok ? "valid  " : "INVALID", v.wallet, v.handle, v.proof?.signature);
 }`;
 

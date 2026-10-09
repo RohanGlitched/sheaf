@@ -44,6 +44,12 @@
  *      account grows by at least the expected net payout, and that no component
  *      leaves the wallet in a larger amount than was priced. Else it skips.
  *
+ * And for the buyer: it prices on live Jupiter quotes only (never a fallback or
+ * stale snapshot price), and never fills more than 1% over fair, so an order
+ * whose auction already sits past that is left to run out and be refunded.
+ * Each fill is sent about 1.8 s before the second it clears the margin, so it
+ * lands on that second rather than past it.
+ *
  * Baskets of 7 or 8 components need an address lookup table to fit one packet;
  * it is read from --site's /api/alt and then from chain.
  *
@@ -98,10 +104,15 @@ function mirrorSymbols() {
 }
 const symbols = mirrorSymbols();
 
-/** Mainnet quotes by symbol, from --site. Replace this to price from your own feed. */
+/**
+ * Mainnet quotes by symbol, from --site. Replace this to price from your own feed.
+ * Live Jupiter quotes only: the site also serves fallback (GeckoTerminal) and
+ * last-good snapshot prices, which can be hours old, so those are dropped here
+ * and a component priced from one is never filled on (the core refuses them too).
+ */
 async function quotesBySymbol() {
   const market = await fetch(`${SITE}/api/market`).then((r) => r.json());
-  return new Map(market.quotes.map((q) => [q.symbol, q]));
+  return new Map(market.quotes.filter((q) => q.source === "jupiter").map((q) => [q.symbol, q]));
 }
 
 /** The basket's lookup table: its address from --site, its contents from chain. */

@@ -14,7 +14,9 @@ import {
   TEMPO_PATH_USD,
   TEMPO_SIP_V3,
   explainEvmError,
+  fairSharesFor,
   fromRaw,
+  navFrom,
   readDeskOrderV2,
   readPlansOf,
   readPlansOfV3,
@@ -24,6 +26,7 @@ import {
   v3Of,
 } from "@/lib/evm";
 import { quantity, shortAddress } from "@/lib/format";
+import { checkPlanTerms } from "./evm-plan-panel";
 
 /**
  * A monthly plan that the chain enforces, on Tempo.
@@ -91,7 +94,7 @@ function useBudget(d: Deployment, account: Address | null | undefined, key: Addr
   return { budget, error };
 }
 
-export function TempoSip({ d }: { d: Deployment }) {
+export function TempoSip({ d, prices }: { d: Deployment; /** The page's per-ticker prices: plan terms are checked against them before signing. */ prices?: Record<string, number> }) {
   if (!v3Of(d)) return null;
   return (
     <div>
@@ -122,7 +125,7 @@ export function TempoSip({ d }: { d: Deployment }) {
       </div>
       <div className="mt-10 grid gap-8 [&>*]:min-w-0 lg:grid-cols-2">
         <Recorded d={d} />
-        <LiveSip d={d} />
+        <LiveSip d={d} prices={prices} />
       </div>
     </div>
   );
@@ -151,7 +154,7 @@ function Recorded({ d }: { d: Deployment }) {
       detail: "Pay the whole installment for nothing. The plan's window refuses it.",
       refused: sip.refused.dustFair,
     },
-    { label: "Keeper calls CreationDeskV2.placeOrder at its own price", detail: "Outside the scope: the chain rejects it before inclusion.", refused: sip.refused.directOrder },
+    { label: "Keeper calls the v3 desk's placeOrder at its own price", detail: "Outside the scope: the chain rejects it before inclusion.", refused: sip.refused.directOrder },
     { label: "Keeper opens a plan with its own terms", detail: "Outside the scope: the key can run the plan, never write one.", refused: sip.refused.rewriteTerms },
     { label: "Keeper re-centers the plan to a floor of 1 raw unit", detail: "Outside the scope: only the investor's own key can re-center.", refused: sip.refused.recenterByKey },
     {
@@ -307,9 +310,33 @@ const STEPS = [
   { n: 9, label: "Revoke the key and close the plan (optional)", note: "Skip it and the keeper keeps investing once a period" },
 ];
 
-function LiveSip({ d }: { d: Deployment }) {
+function LiveSip({ d, prices }: { d: Deployment; prices?: Record<string, number> }) {
   const v3 = v3Of(d)!;
   const v2 = v2Of(d);
+  /**
+   * The plan's terms come from the keeper route; every one is checked here, against
+   * this page's deployment record and its own price for the plan's basket, before
+   * the root key signs anything.
+   */
+  const sipTerms = async () => {
+    const t = (await keeperPost({ network: d.network, sip: { action: "terms" } })) as unknown as Terms;
+    const target = d.baskets[0];
+    const nav = prices ? navFrom(target, prices) : null;
+    checkPlanTerms(t, {
+      basket: target.address,
+      planDesk: v3.planDesk,
+      cashPerRun: TEMPO_SIP_V3.cashPerRun,
+      interval: TEMPO_SIP_V3.interval,
+      auctionSecs: TEMPO_SIP_V3.auctionSecs,
+      bandBps: TEMPO_SIP_V3.bandBps,
+      stepBps: TEMPO_SIP_V3.stepBps,
+      hardMinBps: TEMPO_SIP_V3.hardMinBps,
+      hardMaxBps: TEMPO_SIP_V3.hardMaxBps,
+      fairShares: nav != null && nav > 0 ? fairSharesFor(TEMPO_SIP_V3.cashPerRun, d.stable.decimals, nav) : null,
+      symbol: target.symbol,
+    });
+    return t;
+  };
   const [root, setRoot] = useState<StoredRoot | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
@@ -416,7 +443,7 @@ function LiveSip({ d }: { d: Deployment }) {
   const sign = () =>
     step("authorize", async () => {
       if (!plan?.active) {
-        const t = (await keeperPost({ network: d.network, sip: { action: "terms" } })) as unknown as Terms;
+        const t = await sipTerms();
         const receipt = await sendRoot(
           v3.planDesk as Address,
           encodeFunctionData({
@@ -426,7 +453,7 @@ function LiveSip({ d }: { d: Deployment }) {
           }),
         );
         push({
-          label: `Plan written on PlanDeskV3: ${CASH} AlphaUSD every 30 days, within ${STEP_PCT}% of the last fill, never outside ${sh(t.hardMin)} to ${sh(t.hardMax)} ${t.symbol} a run`,
+          label: `Plan written on PlanDeskV3: ${CASH} AlphaUSD every 30 days, about ${sh(t.refShares)} ${t.symbol} a run today, within ${STEP_PCT}% of the last fill, never below ${sh(t.hardMin)} or above ${sh(t.hardMax)}`,
           ok: true,
           hash: receipt.transactionHash,
         });
@@ -527,7 +554,7 @@ function LiveSip({ d }: { d: Deployment }) {
             ? `Keeper tried to pay ${CASH} AlphaUSD for 1 raw share unit`
             : action === "tooSoon"
               ? "Keeper tried a second installment this period"
-              : "Keeper called CreationDeskV2.placeOrder at its own price, outside the scope";
+              : "Keeper called the v3 desk's placeOrder at its own price, outside the scope";
       const by = PLAN_REFUSALS.test(json.refusal ?? "") ? "the plan" : "the chain";
       push({ label, ok: !!json.ok, hash: json.hash, note: json.ok ? undefined : `Refused by ${by}: ${json.refusal}` });
       if (json.ok) setPaused(null);
@@ -538,7 +565,7 @@ function LiveSip({ d }: { d: Deployment }) {
   const recenter = () =>
     step("recenter", async () => {
       if (!plan || plan.version !== 3) return;
-      const t = (await keeperPost({ network: d.network, sip: { action: "terms" } })) as unknown as Terms;
+      const t = await sipTerms();
       const receipt = await sendRoot(
         v3.planDesk as Address,
         encodeFunctionData({ abi: PLAN_DESK_V3_ABI, functionName: "recenter", args: [BigInt(plan.id), BigInt(t.refShares), BigInt(t.hardMin), BigInt(t.hardMax)] }),

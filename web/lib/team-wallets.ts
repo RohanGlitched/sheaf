@@ -161,6 +161,12 @@ export const TEAM_WALLETS: TeamWallet[] = [
   // Placed seconds after our own Tempo SIP test runs, with the same amount and nonce; counted as ours rather than as outside buyers.
   { address: "0xcDb524B789146A872f4D019e7B2145ef2e2B9ec0", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
   { address: "0x3F3219F8F577772a90367a864153AD1f3BAb180b", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
+  { address: "0x07B87b923095FeFF28394DaCA944352662E26e69", role: "test", label: "EVM test wallet, QA round 7 (Arbitrum Sepolia)" },
+  { address: "0x0a47C1EdD1BCB4e9a4eA9d8366b2387B24CE3587", role: "test", label: "EVM browser wallet, QA round 7 (Robinhood Chain)" },
+  { address: "0x37F3E84B8d5c6FaC9F6A2144af3017dEF2F38642", role: "test", label: "EVM browser wallet, QA round 7 plan (Robinhood Chain)" },
+  { address: "0xDe0447367a821bC5591E66a595eae825C1Af9169", role: "test", label: "Tempo test plan account, QA round 7" },
+  { address: "EeCoGUNPZAADMYvFwzTB4xXjoJfcU1MM64MhLcf53Y2P", role: "test", label: "Faucet probe key, judge round 7" },
+  { address: "7Ph291EuKx1ZJUfGtvDDPQCVS3PKNNPgjNjrnQnqsSaQ", role: "test", label: "Faucet probe key, judge round 7" },
 ];
 
 /** Base58 is case-sensitive; only hex EVM addresses are folded to one case. */

@@ -15,6 +15,17 @@ import { CURVE_FULL, NATIVE_SOL, dammV2PoolAddress, type DbcPoolInfo } from "./d
 
 export type Side = "buy" | "sell";
 
+/**
+ * What the quote behind a trade said, for the receipt: the input it spends
+ * (a partial-fill buy at the end of a curve can spend less than asked), what
+ * comes out, and the fee, all in raw units (lamports for SOL). Both markets
+ * collect fees in SOL, so `feeLamports` is the whole fee, Meteora's share
+ * included.
+ */
+export type TradeQuote = { spent: bigint; out: bigint; feeLamports: bigint };
+
+const big = (value: { toString(): string } | null | undefined): bigint => BigInt(value?.toString() ?? "0");
+
 /** One percent of slippage, in basis points, for both markets. */
 const SLIPPAGE_BPS = 100;
 
@@ -31,7 +42,7 @@ export async function buildTrade(params: {
   side: Side;
   amount: bigint;
   graduated: boolean;
-}): Promise<Transaction> {
+}): Promise<{ transaction: Transaction; quote: TradeQuote }> {
   return params.graduated ? buildPoolTrade(params) : buildCurveTrade(params);
 }
 
@@ -47,7 +58,7 @@ async function buildCurveTrade({
   info: DbcPoolInfo;
   side: Side;
   amount: bigint;
-}): Promise<Transaction> {
+}): Promise<{ transaction: Transaction; quote: TradeQuote }> {
   const client = new DynamicBondingCurveClient(connection, "confirmed");
   const pool = new PublicKey(info.pool);
   const [virtualPool, config] = await Promise.all([
@@ -77,7 +88,7 @@ async function buildCurveTrade({
     eligibleForFirstSwapWithMinFee: false,
     currentPoint: await getCurrentPoint(connection, config.activationType),
   });
-  return client.pool.swap2({
+  const transaction = await client.pool.swap2({
     owner,
     pool,
     swapMode,
@@ -86,6 +97,14 @@ async function buildCurveTrade({
     swapBaseForQuote,
     referralTokenAccount: null,
   });
+  return {
+    transaction,
+    quote: {
+      spent: big(quote.includedFeeInputAmount) > 0n ? big(quote.includedFeeInputAmount) : amount,
+      out: big(quote.outputAmount),
+      feeLamports: big(quote.tradingFee) + big(quote.protocolFee) + big(quote.referralFee),
+    },
+  };
 }
 
 async function buildPoolTrade({
@@ -100,7 +119,7 @@ async function buildPoolTrade({
   info: DbcPoolInfo;
   side: Side;
   amount: bigint;
-}): Promise<Transaction> {
+}): Promise<{ transaction: Transaction; quote: TradeQuote }> {
   const amm = new CpAmm(connection);
   const pool = new PublicKey(dammV2PoolAddress(info.baseMint));
   const poolState = await amm.fetchPoolState(pool);
@@ -125,7 +144,7 @@ async function buildPoolTrade({
     swapMode: PoolSwapMode.ExactIn,
     amountIn,
   });
-  return amm.swap2({
+  const transaction = await amm.swap2({
     payer: owner,
     pool,
     inputTokenMint,
@@ -142,6 +161,14 @@ async function buildPoolTrade({
     amountIn,
     minimumAmountOut: quote.minimumAmountOut ?? new BN(0),
   });
+  return {
+    transaction,
+    quote: {
+      spent: amount,
+      out: big(quote.outputAmount),
+      feeLamports: big(quote.claimingFee) + big(quote.protocolFee) + big(quote.compoundingFee) + big(quote.referralFee),
+    },
+  };
 }
 
 /**

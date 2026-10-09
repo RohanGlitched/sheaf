@@ -2,7 +2,7 @@ import { Connection } from "@solana/web3.js";
 import { WRITE_RPC } from "@/lib/config";
 import { PRESET_NAMES, launchName, launchSymbol, preIpoCompanies } from "@/lib/dbc";
 import { clientIp, rateLimiter } from "@/lib/evm-server";
-import { LAUNCH_METADATA_SITE } from "@/lib/launch";
+import { PUBLIC_SITE } from "@/lib/launch";
 import { fetchBasketAt } from "@/lib/sheaf";
 import { resolveLaunch } from "./anchor";
 
@@ -47,7 +47,7 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
   const basket = await fetchBasketAt(address).catch(() => null);
   if (!basket) return Response.json({ error: "No basket at that address." }, { status: 404 });
 
-  const page = `${LAUNCH_METADATA_SITE}/basket/${basket.address}`;
+  const page = `${PUBLIC_SITE}/basket/${basket.address}`;
   const preIpo = preIpoCompanies(basket);
   const connection = new Connection(WRITE_RPC, "confirmed");
   const resolved = await resolveLaunch(connection, url.origin, basket).catch(() => null);
@@ -64,7 +64,11 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
     anchor: resolved?.anchors.get(u.info.pool) ?? null,
   }));
   const rejected = refused.filter((r) => r.anchor?.status === "mismatch").map(({ pool, reason, anchor }) => ({ pool, reason, anchor }));
-  const headers = { "cache-control": "public, s-maxage=300, stale-while-revalidate=86400" };
+  const checking = resolved?.checking ?? false;
+  // While the opening price is still being checked, keep the answer short-lived so the verdict replaces it soon.
+  const headers = {
+    "cache-control": checking ? "public, s-maxage=60, stale-while-revalidate=60" : "public, s-maxage=300, stale-while-revalidate=86400",
+  };
 
   // A per-slot URL that is not the basket's launch: say so, and point at the real one.
   if (slot != null && (!launch || (launch.info.slot ?? 0) !== slot)) {
@@ -75,7 +79,7 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
         name: "Not an official Sheaf launch",
         symbol: "NOTSHEAF",
         description:
-          `This token is not ${basket.name}'s launch. ${reason}` +
+          `This token is not the launch of ${basket.name}. ${reason}` +
           (officialMint ? ` The basket's official launch token is mint ${officialMint}.` : "") +
           " Sheaf does not list or trade it.",
         external_url: page,
@@ -101,6 +105,7 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
     ...(anchor?.solUsdAtOpen ? [{ trait_type: "sol_usd_at_open", value: Number(anchor.solUsdAtOpen.toFixed(2)) }] : []),
     ...(anchor?.navUsdAtClose ? [{ trait_type: "nav_usd_at_last_close", value: Number(anchor.navUsdAtClose.toFixed(2)) }] : []),
     ...(anchor ? [{ trait_type: "anchor", value: anchor.status }] : []),
+    ...(checking ? [{ trait_type: "official", value: "checking the opening price" }] : []),
     { trait_type: "redeemable", value: "no" },
     ...(preIpo.length ? [{ trait_type: "pre_ipo_components", value: preIpo.join(", ") }] : []),
   ];
@@ -111,7 +116,7 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
       symbol: launchSymbol(basket.symbol),
       description:
         (officialMint
-          ? `Describes mint ${officialMint} (${short(officialMint)}) only. Any other token pointing here is not ${basket.name}'s launch. `
+          ? `Describes mint ${officialMint} (${short(officialMint)}) only. Any other token pointing here is not the launch of ${basket.name}. `
           : "") +
         `Launch token for ${basket.name} (${basket.symbol}), a Sheaf basket of ${basket.components.length} tokenized equities. ` +
         "A separate token on a Meteora bonding curve: not a basket share, not backed by the basket's vault and not redeemable for anything." +
@@ -130,6 +135,8 @@ export async function launchMetadata(req: Request, address: string, slotParam: s
               slot: launch ? (launch.info.slot ?? 0) : null,
               preset: state?.preset ? PRESET_NAMES[state.preset] : null,
               anchor,
+              // True while the opening price of a listed basket's launch is still unchecked: not official until it answers.
+              checking,
               rejected,
               refused,
               method: METHOD,

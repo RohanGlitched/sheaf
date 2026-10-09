@@ -10,7 +10,7 @@ import {
   explorerTx,
 } from "@/lib/config";
 import { PlanSheaf } from "@/components/plan-sheaf";
-import { PRESET_URL } from "@/lib/dbc";
+import { FEATURED_LAUNCH, PRESET_URL } from "@/lib/dbc";
 import { FeeTable } from "@/components/business-case";
 import { fetchBasketAt, type Basket } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
@@ -32,14 +32,9 @@ const EXAMPLE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
 /** A sale of shares for dollars, filled on devnet. */
 const EXAMPLE_SELL_TX =
   "MmvsWDKyrLZzvDEdM7cedYhoM9PEdNyMnyUra8AbEt7aDjJA5DxsbZPJRP181G7hADeXzivh4bCW4diUu8a1Sen";
-/** The launch this page shows: Bitcoin, by proxy, opened on the current curve. */
-const LAUNCH_EXAMPLE = {
-  address: "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
-  name: "Bitcoin, by proxy",
-  symbol: "PROXY",
-  creator: "B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L",
-};
-const LAUNCH_EXAMPLE_POOL = "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV";
+/** The launch this page shows: the one the home page features (IDXA), on the current curve. */
+const LAUNCH_EXAMPLE = FEATURED_LAUNCH.basket;
+const LAUNCH_EXAMPLE_POOL = FEATURED_LAUNCH.info.pool;
 const GRADUATION = preset.graduationMultipleOfNav;
 const FIRST_GRADUATION = preset.previous.graduationMultipleOfNav;
 const OPEN_FEE = preset.fees.antiSnipe.startingFeeBps / 100;
@@ -252,15 +247,63 @@ const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[]
     ],
   },
   {
-    name: "Jupiter recurring",
+    // Jupiter's DCA, which superseded the deprecated Recurring API: "Each round worth >= $10, currently", at least
+    // 2 rounds, transfer-fee or transfer-hook mints rejected unless whitelisted (developers.jup.ag/docs/trigger/dca);
+    // "recurring orders each carry a 0.1% flat fee" (docs.jup.ag/user-docs/global/mobile/fees). Checked 10 Oct 2026.
+    name: "Jupiter DCA",
     note: "a plan of single-token orders",
-    href: "https://developers.jup.ag/docs/recurring/best-practices",
+    href: "https://developers.jup.ag/docs/trigger/dca",
     cells: [
       "No basket token: each order buys one token into your wallet",
       "You set up your own orders",
       "Not needed: you hold the tokens",
-      "Swaps at the route's price; 0.1% per order",
-      "Yes, but at least $50 per order and 2 orders: a five-stock plan starts at $250 a month. The API does not support Token-2022 mints such as xStocks",
+      "Swaps at the route's price; 0.1% per round",
+      "Yes, at least $10 a round and 2 rounds: five stocks a month start at $50, as five positions. Mints with a transfer fee or hook, such as PreStocks, are refused unless whitelisted",
+      "Solana",
+    ],
+  },
+  {
+    // Glider: custom tokenized-stock portfolios with Ondo, weightings kept automatically (Cointelegraph, 23 Mar 2026);
+    // "$1" on BNB and Solana, "0.30% automated and 0.50% manual fees" on traded volume (Glider blog, 23 Jun 2026);
+    // $4M round led by a16z CSX (BusinessWire, Apr 2025). Checked 10 Oct 2026.
+    name: "Glider",
+    note: "with Ondo; a16z CSX-backed",
+    href: "https://blog.glider.fi/how-to-invest-in-us-stocks-from-india/",
+    cells: [
+      "No basket token: you hold each stock token, in a portfolio Glider keeps weighted",
+      "You build your own portfolio",
+      "Not needed: you hold the tokens",
+      "Swaps; 0.30% of traded volume automated, 0.50% manual",
+      "Automatic rebalancing on a cadence you choose; from $1",
+      "BNB Chain and Solana for stocks",
+    ],
+  },
+  {
+    // Indexa, read from its site's bundle in round 6 (the page renders client-side); marked as previews then.
+    name: "Indexa",
+    note: "indexes marked as previews when read",
+    href: "https://indexafund.com/",
+    cells: [
+      "One token over a basket of tokenized stocks (MAG7, AI and others)",
+      "Not stated",
+      "Yes, for the stocks, USDC or SOL",
+      "Entry and exit fees, plus a management fee",
+      "Not stated",
+      "Not stated; it redeems for SOL",
+    ],
+  },
+  {
+    // Portfi, "The S&P 500 of Solana": baskets of tokenized stocks, gold and crypto into the user's wallet, $10 packs
+    // with a random roll; MagicBlock Founders Camp (KuCoin, 14 Sep 2026). Checked 10 Oct 2026.
+    name: "Portfi",
+    note: "MagicBlock Founders Camp",
+    href: "https://www.kucoin.com/news/trends/SOL/6aa80f397d10fa0007cd76d9",
+    cells: [
+      "No basket token: the assets go to your wallet",
+      "Portfi's baskets; a $10 pack rolls which one you get",
+      "Not needed: you hold the assets",
+      "$10 packs; pricing not stated",
+      "Not stated",
       "Solana",
     ],
   },
@@ -663,7 +706,8 @@ export default async function MethodPage() {
           <p>
             Anyone can fill it by delivering the stocks the recipe names at the current count. The vault
             receives them exactly as in a creation, the buyer receives the shares, and the filler takes the
-            dollars. Fillers compete on timing, so the price is set by whoever fills first; the program reads none. If
+            dollars. The auction caps the price at the buyer&rsquo;s own floor, any filler can compete to fill sooner, and
+            the reference filler&rsquo;s code is published; the program reads no price. If
             nobody fills in time, the order can be canceled and the dollars go back to the buyer.
           </p>
         </Stage>
@@ -699,7 +743,8 @@ export default async function MethodPage() {
             A plan is that dollar order on a schedule: an amount, a period and a number of runs. Opening it
             approves exactly the amount per run for its runs, and nothing else. A plan run is the same auction,
             stretched to 30 minutes so any filler has time (four minutes on the demo pace that runs every five
-            minutes).
+            minutes), with a band sized to the cadence: ±15% around the last fill for a monthly plan, ±10% weekly and
+            ±2% at demo pace, never past the owner&rsquo;s hard limits of ±25%, ±15% and ±10%.
           </p>
           <p>
             When a run is due anyone may send it, and the person who does is repaid the small account deposit
@@ -731,7 +776,7 @@ export default async function MethodPage() {
             over {FEE_MINUTES} minutes.
           </p>
           <p className="text-sm text-ink-3">
-            The market shown is {LAUNCH_EXAMPLE.name}&rsquo;s, on this curve.
+            The market shown is the launch of {LAUNCH_EXAMPLE.name}, on this curve.
             The first launches, The Big Five&rsquo;s (since graduated) and
             Frontier Labs&rsquo; among them, opened on an earlier curve that graduates at{" "}
             {FIRST_GRADUATION} times NAV with a {FIRST_OPEN_FEE}% opening fee, and
@@ -879,7 +924,7 @@ export default async function MethodPage() {
           </table>
         </div>
         <p className="mt-4 max-w-[80ch] text-xs leading-relaxed text-ink-3">
-          From each product&rsquo;s own documentation, checked 9 October 2026:{" "}
+          From each product&rsquo;s own documentation or the coverage linked, checked 9 and 10 October 2026:{" "}
           {COMPARE.filter((r) => r.href).map((r, i, list) => (
             <span key={r.name}>
               <a href={r.href} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">

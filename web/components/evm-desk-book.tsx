@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { encodeFunctionData } from "viem";
+import { encodeFunctionData, parseAbiItem, type Address } from "viem";
 import type { ChainBasket, Deployment } from "@/lib/chains";
 import {
   DESK_ABI,
@@ -10,6 +10,7 @@ import {
   deskAddress,
   explainEvmError,
   fromRaw,
+  publicClientFor,
   readDeskOrders,
   readDeskOrdersV2,
   v2Of,
@@ -23,6 +24,45 @@ import { useKeeperKick } from "@/lib/use-keeper-kick";
 import { KeeperPulse } from "./keeper-pulse";
 import { EvmPlanPanel } from "./evm-plan-panel";
 import type { EvmWallet } from "./evm-wallet";
+
+const INSTALMENT = parseAbiItem(
+  "event Instalment(uint256 indexed id, uint256 indexed orderId, address indexed caller, uint256 fairShares, uint256 startShares, uint256 endShares, uint32 run)",
+);
+/** Public testnet RPCs answer getLogs over a bounded range (Tempo's is 100,000 blocks). */
+const LOG_RANGE = 100_000n;
+
+type PlanRun = { plan: number; run: number };
+/** Per network: which v3 desk orders a PlanDeskV3 instalment placed, and how far the logs have been read. */
+const planRunCache = new Map<string, { runs: Map<number, PlanRun>; scannedTo: bigint }>();
+
+/**
+ * The v3 desk orders that are plan runs, from PlanDeskV3's own Instalment(planId,
+ * orderId, …, run) events since the v3 deployment. It tags the order, not the
+ * wallet: "plan #1, run 1" says why the order exists. Only new blocks are read on
+ * a refresh; a failed read leaves the tags as they were.
+ */
+async function readPlanRuns(d: Deployment): Promise<Map<number, PlanRun>> {
+  const v3 = v3Of(d) as (ReturnType<typeof v3Of> & { startBlock?: number }) | null;
+  if (!v3?.planDesk) return new Map();
+  const client = publicClientFor(d);
+  const cached = planRunCache.get(d.network) ?? { runs: new Map<number, PlanRun>(), scannedTo: BigInt(v3.startBlock ?? 0) - 1n };
+  const latest = await client.getBlockNumber();
+  const ranges: [bigint, bigint][] = [];
+  for (let from = cached.scannedTo + 1n; from <= latest; from += LOG_RANGE) ranges.push([from, from + LOG_RANGE - 1n > latest ? latest : from + LOG_RANGE - 1n]);
+  for (let i = 0; i < ranges.length; i += 4) {
+    const batch = await Promise.all(
+      ranges.slice(i, i + 4).map(([fromBlock, toBlock]) => client.getLogs({ address: v3.planDesk as Address, event: INSTALMENT, fromBlock, toBlock })),
+    );
+    for (const log of batch.flat()) {
+      const { id, orderId, run } = log.args;
+      if (id != null && orderId != null && run != null) cached.runs.set(Number(orderId), { plan: Number(id), run: Number(run) });
+    }
+    cached.scannedTo = ranges[Math.min(i + 3, ranges.length - 1)][1];
+  }
+  cached.scannedTo = latest;
+  planRunCache.set(d.network, cached);
+  return cached.runs;
+}
 
 const th = "px-3 py-3 font-normal sm:px-4";
 const td = "px-3 py-3 sm:px-4";
@@ -40,12 +80,15 @@ export function EvmDeskBook({
   basket,
   wallet,
   tick,
+  nav = null,
   onDone,
 }: {
   d: Deployment;
   basket: ChainBasket;
   wallet: EvmWallet;
   tick: number;
+  /** The share price the page shows, which the plan panel checks plan terms against. */
+  nav?: number | null;
   onDone: () => void;
 }) {
   const desks = ([3, 2] as const).filter((v) => (v === 3 ? v3Of(d) : v2Of(d)));
@@ -55,6 +98,7 @@ export function EvmDeskBook({
   const [acting, setActing] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const [planRuns, setPlanRuns] = useState<Map<number, PlanRun>>(new Map());
   // Ask the house filler to look at this chain's open orders while the page is open.
   useKeeperKick("/api/evm-keeper", { network: d.network });
   const desksKey = desks.join(",");
@@ -67,6 +111,10 @@ export function EvmDeskBook({
       setOrders(o);
       setNow(Math.floor(Date.now() / 1000));
       setError(null);
+      // Plan-run tags are a nicety: the book shows without them if the logs can't be read.
+      void readPlanRuns(d)
+        .then((m) => setPlanRuns(new Map(m)))
+        .catch(() => {});
     } catch (err) {
       setError(
         /\b(403|429)\b|rate limit|fetch failed|network/i.test(String((err as Error)?.message))
@@ -234,6 +282,11 @@ export function EvmDeskBook({
                   ) : (
                     <span className="text-ink-3">{o.status === "Cancelled" ? "Returned" : o.status}</span>
                   )}
+                  {version === 3 && planRuns.get(o.id) && (
+                    <span className="tnum mt-0.5 block text-[11px] text-ink-3">
+                      plan #{planRuns.get(o.id)!.plan}, run {planRuns.get(o.id)!.run}
+                    </span>
+                  )}
                 </td>
                 <td className={`${td} text-right`}>{o.status === "Open" && actionsCell(version, o.id, o.buyer, expired)}</td>
               </tr>
@@ -249,7 +302,7 @@ export function EvmDeskBook({
 
   return (
     <>
-      {d.network !== "tempoTestnet" && v3Of(d) && <EvmPlanPanel d={d} basket={basket} wallet={wallet} onDone={onDone} />}
+      {d.network !== "tempoTestnet" && v3Of(d) && <EvmPlanPanel d={d} basket={basket} wallet={wallet} nav={nav} onDone={onDone} />}
       <section className="mt-20 border-t border-line pt-16">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>

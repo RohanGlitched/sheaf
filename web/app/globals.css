@@ -56,7 +56,20 @@ body {
    changing price never shifts the layout under the reader's eye. */
 .tnum {
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+  font-feature-settings: "tnum" 1, "calt" 0;
+  font-variant-ligatures: no-contextual;
+}
+
+/* Addresses and hashes are read character by character. The sans face's
+   contextual alternates turn an x between digits into a multiplication sign,
+   so "0x00F3" would read "0×00F3"; figures, addresses and code spans turn
+   them off. */
+.addr,
+code,
+kbd,
+.font-mono {
+  font-feature-settings: "calt" 0;
+  font-variant-ligatures: no-contextual;
 }
 
 .display {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ChainsBoard } from "@/components/chains-board";
 import { DEPLOYED, basketHref, type Deployment } from "@/lib/chains";
+import { EVM_PLAN_V3 } from "@/lib/evm";
 import { shortAddress } from "@/lib/format";
 
 export const metadata: Metadata = {
@@ -93,7 +94,26 @@ export default function ChainsPage() {
               Robinhood baskets hold. Connect a wallet on a basket page and it reads what you already have, says how many shares that binds, and
               creates them in kind. Units are shown through each token&apos;s ERC-8056 multiplier, so a split never misstates a holding.
             </p>
+            <p className="mt-3 max-w-[56ch] text-base leading-relaxed text-ink-2">
+              A monthly plan too: open it from your wallet on PlanDeskV3, naming the house as keeper. Each run&apos;s price must sit within{" "}
+              {EVM_PLAN_V3.stepBps / 100}% of the last fill and inside the bounds you sign ({EVM_PLAN_V3.hardMinBps / 100}% to{" "}
+              {EVM_PLAN_V3.hardMaxBps / 100}% of today&apos;s count), and every run lands in the desk&apos;s book as &ldquo;plan #N, run M&rdquo;.
+            </p>
+            <p className="mt-3 max-w-[56ch] text-sm leading-relaxed text-ink-3">
+              On mainnet: the same factory and v3 desks, holding Robinhood&apos;s live stock tokens. Deployment waits on an audit and on our rule
+              of no real money before then.
+            </p>
             <ul className="mt-6 flex flex-wrap gap-3 text-sm">
+              {rh.d.baskets[0] && (
+                <li>
+                  <Link
+                    href={`${basketHref(rh.d.network, rh.d.baskets[0].symbol)}#plan`}
+                    className="inline-flex rounded-[var(--radius-control)] bg-bind px-4 py-2 font-medium text-white hover:bg-bind-deep"
+                  >
+                    Open a monthly plan into {rh.d.baskets[0].symbol}
+                  </Link>
+                </li>
+              )}
               {rh.d.baskets.map((b) => (
                 <li key={b.address}>
                   <Link href={basketHref(rh.d.network, b.symbol)} className="inline-flex rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2 text-ink hover:border-ink-3">
@@ -109,9 +129,10 @@ export default function ChainsPage() {
             <p className="text-xs text-ink-3">Tempo</p>
             <h2 className="display mt-2 text-title text-ink">A monthly plan is an access key</h2>
             <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
-              One passkey signature writes the plan on PlanDesk: the amount, the interval and the price cap. A second scopes the keeper to
-              AlphaUSD.approve(PlanDesk) and PlanDesk.instalment. Ask for fewer shares and the plan answers FairOutOfBounds, run early and it
-              answers TooSoon, call anything else and the chain answers CallNotAllowed. No custody, and gas paid in a dollar.
+              One passkey signature writes the plan on PlanDeskV3: the amount, the interval, the trailing window and your hard bounds. A second
+              scopes the keeper to AlphaUSD.approve(PlanDeskV3) and PlanDeskV3.instalment. Ask for fewer shares and the plan answers
+              FairOutOfBounds, run early and it answers TooSoon, call anything else and the chain answers CallNotAllowed. No custody, and gas
+              paid in a dollar.
             </p>
             <Link
               href={`${basketHref(tempo.d.network, tempo.d.baskets[0].symbol)}#sip`}

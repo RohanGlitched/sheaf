@@ -30,6 +30,8 @@ type Answer = {
   liquidityInjectionUsdc?: string;
   platformRevenueUsdc?: string;
   categoryPreferred?: boolean;
+  /** The two closes the week is measured between (Panta's endTime is the first). */
+  window?: { fromClose: number; toClose: number };
   draft?: { wallet: string; question: string; resolutionRule: string; sourcesOfTruth: string[]; category: string; startTime: number; endTime: number; imageUrl: string };
   transaction?: string;
   recentBlockhash?: string;
@@ -530,18 +532,19 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
       <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
         <div className="border-b border-line p-6">
           <p className="text-xs text-ink-3">The question</p>
-          <p className="mt-1.5 text-lg text-ink">{question}</p>
+          <p className="mt-1.5 text-lg text-ink">{c.quote?.draft?.question ?? question}</p>
           <p className="mt-3 text-sm leading-relaxed text-ink-2">
             Resolves YES if one {symbol} share&apos;s <code className="text-xs">navPerShare.listed</code>{" "}
-            rose more than SPY&apos;s adjusted close between two week-ending NYSE closes (normally Friday 16:00 New York). Both are
-            read from <code className="text-xs">/api/nav/{short(basket, 4, 4)}?at=&lt;close&gt;</code>, the
+            rose more than SPY&apos;s adjusted close between two week-ending NYSE closes (normally Friday 16:00 New York).
+            Trading closes at the first of them, before any of the week is known. Both are read from <code className="text-xs">/api/nav/{short(basket, 4, 4)}?at=&lt;close&gt;</code>, the
             market&apos;s first source of truth.
           </p>
           {c.quote?.draft && (
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
-              Trading opens {day(c.quote.draft.startTime)} · measures the week-ending closes{" "}
-              {nyDay(c.quote.draft.endTime - 7 * 86_400)} to {nyDay(c.quote.draft.endTime)}, so none of the week is
-              known when it opens · category{" "}
+              Trading opens {day(c.quote.draft.startTime)} and closes at the {nyDay(c.quote.draft.endTime)} close,
+              before any of the week is known · measures the week-ending closes{" "}
+              {nyDay(c.quote.window?.fromClose ?? c.quote.draft.endTime)} to{" "}
+              {c.quote.window ? nyDay(c.quote.window.toClose) : "the next week's"} · category{" "}
               {c.quote.draft.category}
               {c.quote.categoryPreferred === false && " (the sandbox has no finance category; live, it files under finance)"}
               {" · "}

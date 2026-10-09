@@ -38,20 +38,32 @@ import { explainError } from "@/lib/tx";
 import { ConnectButton } from "./connect-button";
 import { confirmSignature } from "@/lib/confirm";
 
-const AMOUNTS = [0.005, 0.01, 0.05, 0.1];
+/**
+ * Buy sizes. One test-SOL grant is 0.05 SOL, and a curve buy also pays about
+ * 0.004 SOL of account rent (the launch token's account and a temporary wSOL
+ * account) plus the network fee, so the largest buy one grant pays for is 0.04.
+ */
+const AMOUNTS = [0.005, 0.01, 0.04, 0.1];
 const SELL_SHARES = [25, 50, 100];
+/** SOL a buy leaves in the wallet for rent and the network fee: buttons above balance minus this are off. */
+const BUY_RESERVE = 0.006;
+/** The buy size the graduation line counts in: what one test-SOL grant pays for. */
+const GRANT_BUY = 0.04;
+const TEST_SOL_FAUCET = "https://faucet.solana.com";
 
 /** SOL a new launch raises before it graduates, per SOL of NAV, from the SDK's own curve builder. */
 const THRESHOLD_PER_NAV = preset.measured.thresholdSolPerNavSol;
 /** How long the opening bot tax lasts at its full rate: one scheduler period. */
 const FIRST_FEE_SECONDS = LAUNCH_FEE.totalDurationSeconds / LAUNCH_FEE.numberOfPeriod;
 
+/** Shown when a wallet cannot pay; the card adds a Get test SOL button and a faucet.solana.com link under it. */
+const NO_SOL =
+  "Not enough devnet SOL. A buy needs its amount plus about 0.006 SOL for account rent and the network fee. Get test SOL below (one grant per wallet), or use faucet.solana.com with this wallet's address.";
+
 /** The Meteora-specific failures first, then the site's shared reading of everything else. */
 function explain(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : String(error ?? "");
-  if (/insufficient lamports|insufficient funds|no record of a prior credit/i.test(raw)) {
-    return "Not enough devnet SOL. With the wallet in this browser, open the wallet menu and choose Get test SOL; with another wallet, switch it to devnet and use faucet.solana.com.";
-  }
+  if (/insufficient lamports|insufficient funds|no record of a prior credit/i.test(raw)) return NO_SOL;
   if (/slippage|ExceededSlippage/i.test(raw)) return "The price moved while you were signing. Try again.";
   if (/already in use/i.test(raw)) {
     return "Something took this launch's address while you were signing. Try again: the next free address is used.";
@@ -108,10 +120,13 @@ function PresetLink({ state }: { state: DbcState }) {
 }
 
 /**
- * Where a basket's launch lives, and its live state once opened. Only a pool
- * that passes `checkLaunch` (opened by the basket's creator, fees to Sheaf's
- * treasury) counts; anything else found at the basket's launch addresses comes
- * back in `unofficial` and is never traded from here.
+ * Where a basket's launch lives, and its live state once opened. A pool counts
+ * only if it passes all three checks: `checkLaunch` (opened by the basket's
+ * creator, on the published terms, fees and leftovers to Sheaf's treasury, no
+ * mint authority) and the server's price check (the curve opened at half the
+ * basket's NAV, within 10%). Anything else found at the basket's launch
+ * addresses comes back in `unofficial` and is never traded from here. While the
+ * price check has no answer for a listed basket, the card stays read-only.
  */
 function useLaunch(basket: LaunchBasketProps) {
   const { connection } = useConnection();
@@ -129,7 +144,12 @@ function useLaunch(basket: LaunchBasketProps) {
       const scan = await scanLaunch(connection, { address, name, symbol, creator });
       // The anchor check needs prices from outside the chain, so the server does it, over
       // every pool on the published terms in slot order: it names the launch and the pools it refused.
-      const provenance: { pool: string | null; anchor: Anchor | null; rejected?: { pool: string; reason: string }[] } | null =
+      const provenance: {
+        pool: string | null;
+        anchor: Anchor | null;
+        rejected?: { pool: string; reason: string }[];
+        checking?: boolean;
+      } | null =
         scan.candidates.length > 0
           ? await fetch(`/api/launch/${address}`)
               .then((r) => (r.ok ? r.json() : null))
@@ -143,8 +163,9 @@ function useLaunch(basket: LaunchBasketProps) {
       setInfo(next);
       setUnofficial(found.unofficial);
       setRejected(refused);
-      // Without the server's price check the card cannot tell a refused pool from the launch, so it stays read-only.
-      setAnchorUnknown(scan.candidates.length > 0 && provenance == null);
+      // Without the server's price check the card cannot tell a refused pool from the launch, so it stays
+      // read-only; so it does while the check is still unanswered on a basket of listed holdings.
+      setAnchorUnknown(scan.candidates.length > 0 && (provenance == null || provenance.checking === true));
       setAnchor(found.launch && provenance?.pool === found.launch.info.pool ? provenance.anchor : null);
       setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
@@ -164,6 +185,36 @@ function useLaunch(basket: LaunchBasketProps) {
 /** "20 × NAV", read off a pool's own open and graduation caps, so old and new curves both say the truth. */
 function graduationMultiple(state: DbcState): number {
   return Math.round((state.graduationCap / state.openCap) * OPEN_MULTIPLE);
+}
+
+/**
+ * The curve's base fee right now, from the published anti-snipe scheduler:
+ * exponential, falling by `reductionFactor` / 10,000 each period from the
+ * starting fee to the ending one. v2 pools count in seconds, v1 in slots
+ * (`slotNow` is needed for those). The dynamic fee can add a little on top in
+ * volatile minutes, so the card says "about". Null when it cannot be told.
+ */
+function curveFeeNow(
+  state: DbcState,
+  nowSec: number,
+  slotNow: number | null,
+): { bps: number; settledAt: number | null } | null {
+  if (state.migrated) return null;
+  const v1 = state.preset === "v1";
+  const s = v1 ? preset.previous.antiSnipe : LAUNCH_FEE;
+  const duration = v1 ? preset.previous.antiSnipe.totalDurationSlots : LAUNCH_FEE.totalDurationSeconds;
+  const elapsed = state.activation === "timestamp" ? nowSec - state.activationPoint : slotNow != null ? slotNow - state.activationPoint : null;
+  if (elapsed == null) return null;
+  const period = Math.min(s.numberOfPeriod, Math.max(0, Math.floor(elapsed / (duration / s.numberOfPeriod))));
+  const bps = Math.max(s.endingFeeBps, s.startingFeeBps * (1 - s.reductionFactor / 10_000) ** period);
+  const settledAt = state.activation === "timestamp" ? state.activationPoint + duration : null;
+  return { bps: period >= s.numberOfPeriod ? s.endingFeeBps : bps, settledAt };
+}
+
+/** "24%", "1.6%", "1%": a fee in basis points as a short percentage. */
+function feeText(bps: number): string {
+  const pct = bps / 100;
+  return `${pct >= 10 ? Math.round(pct) : Number(pct.toFixed(1))}%`;
 }
 
 export function LaunchMarket() {
@@ -288,7 +339,7 @@ export function BasketLaunch({
             It is not a share of {basket.symbol}: the vault does not back it, and it cannot be
             redeemed for the stocks.
           </p>
-          {preIpo.length > 0 && <PreIpoWarning basketName={basket.name} companies={preIpo} />}
+          {preIpo.length > 0 && <PreIpoWarning companies={preIpo} />}
         </div>
         <LaunchCard
           basketAddress={basket.address}
@@ -492,7 +543,6 @@ type Trade = {
   signature: string;
   at: number | null;
   wallet: string;
-  team: string | null;
   side: "buy" | "sell";
   sol: number;
   market: "curve" | "damm";
@@ -500,7 +550,7 @@ type Trade = {
 
 /** The launch's recent swaps, from `/api/launches/trades`. */
 function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null }) {
-  const [data, setData] = useState<{ trades: Trade[]; traders: number } | null>(null);
+  const [data, setData] = useState<{ trades: Trade[] } | null>(null);
   useEffect(() => {
     let live = true;
     fetch(`/api/launches/trades?pool=${pool}`)
@@ -542,55 +592,72 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
 /**
  * Every pool Sheaf found at this basket's launch addresses and refused, with
  * the reason: a squat (wrong creator), rogue terms, or a curve that did not open
- * at half the basket's NAV. None of them is listed, traded or counted.
+ * at half the basket's NAV. None of them is listed, traded or counted. Open by
+ * default when the list is short, and each row links to the metadata a wallet
+ * gets for that slot ("Not an official Sheaf launch").
  */
-function RefusedPools({ pools }: { pools: FoundLaunch[] }) {
+function RefusedPools({ pools, basketAddress }: { pools: FoundLaunch[]; basketAddress: string }) {
   if (pools.length === 0) return null;
   return (
-    <details className="mt-5 border-t border-line pt-4 text-xs text-ink-3">
+    <details open={pools.length <= 3} className="mt-5 border-t border-line pt-4 text-xs text-ink-3">
       <summary className="cursor-pointer text-ink-2 hover:text-ink">
         Pools Sheaf refused at this basket&rsquo;s addresses ({pools.length})
       </summary>
       <ul className="mt-2 divide-y divide-line">
-        {pools.map((p) => (
-          <li key={p.info.pool} className="py-2 leading-relaxed">
-            <span className="tnum text-ink-2">Slot {p.info.slot ?? 0}</span>{" "}
-            <a
-              href={explorerAddress(p.info.pool)}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono underline decoration-line-strong underline-offset-4 hover:text-ink-2"
-            >
-              {shortAddress(p.info.pool)}
-            </a>
-            : {p.check.reason}
-          </li>
-        ))}
+        {pools.map((p) => {
+          const slot = p.info.slot ?? 0;
+          return (
+            <li key={p.info.pool} className="py-2 leading-relaxed">
+              <span className="tnum text-ink-2">Slot {slot}</span>{" "}
+              <a
+                href={explorerAddress(p.info.pool)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+              >
+                {shortAddress(p.info.pool)}
+              </a>
+              : {p.check.reason}{" "}
+              <a
+                href={`/api/launch/${basketAddress}/${slot}`}
+                target="_blank"
+                rel="noreferrer"
+                className="whitespace-nowrap underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+              >
+                What a wallet sees
+              </a>
+            </li>
+          );
+        })}
       </ul>
     </details>
   );
 }
 
-/** A plain warning above a launch whose basket holds pre-IPO SPV tokens. */
-function PreIpoWarning({ basketName, companies }: { basketName: string; companies: string[] }) {
+/**
+ * A short warning above a launch whose basket holds pre-IPO tokens. The basket
+ * page states the pre-IPO risk in full above this, so it is not repeated here.
+ */
+function PreIpoWarning({ companies }: { companies: string[] }) {
   return (
     <p className="mt-3 border-l-2 border-loss pl-3 text-sm leading-relaxed text-ink-2">
-      <span className="text-ink">Pre-IPO basket.</span> {basketName} holds PreStocks, SPV tokens
-      for {companies.join(", ")}, not company shares. In May 2026 Anthropic and OpenAI said that
-      any transfer of their stock without board approval, tokenized ones included, is void and
-      not recognized on their books. This launch token is one step further away still: it is
-      not a basket share and is not redeemable for anything.
+      <span className="text-ink">Pre-IPO basket ({companies.join(", ")}): see the risk above.</span>{" "}
+      This launch token is one step further away still: it is not a basket share and is not
+      redeemable for anything.
     </p>
   );
 }
 
-/** The three first launches point their immutable metadata at a domain Sheaf no longer controls. */
+/**
+ * The three first launches point their immutable metadata at sheaf.vercel.app,
+ * a domain Sheaf no longer controls, which now serves an unrelated app.
+ */
 function RetiredMetadataNote({ basketAddress }: { basketAddress: string }) {
   return (
     <p className="mt-4 text-xs leading-relaxed text-ink-3">
-      This token was minted while the site lived at sheaf.vercel.app, and its immutable metadata
-      link still points there. We no longer control that domain, so wallets and explorers show no
-      metadata for it. Its provenance is served at{" "}
+      This token&rsquo;s fixed metadata link points at sheaf.vercel.app, a domain Sheaf no longer
+      controls, so any name or image a wallet shows for it did not come from Sheaf; the real record
+      is at{" "}
       <a
         href={`/api/launch/${basketAddress}`}
         className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
@@ -633,7 +700,13 @@ export function LaunchCard({
   const { publicKey, sendTransaction, connected } = useWallet();
   const [held, setHeld] = useState<{ ui: number; raw: bigint } | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [amount, setAmount] = useState(AMOUNTS[2]);
+  const [amount, setAmount] = useState(AMOUNTS[1]);
+  /** The wallet's SOL, to switch off buy sizes it cannot pay for. Null until read. */
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  /** Unix seconds and the cluster's slot, for the opening fee shown next to Buy. */
+  const [clock, setClock] = useState<{ now: number; slot: number | null }>({ now: 0, slot: null });
+  const [lowSol, setLowSol] = useState(false);
+  const [funding, setFunding] = useState<string | null>(null);
   const [sellShare, setSellShare] = useState(SELL_SHARES[0]);
   const [busy, setBusy] = useState<"trade" | "claim" | "graduate" | "poolClaim" | null>(null);
   const [position, setPosition] = useState<{ feeSol: number; feeToken: number } | null>(null);
@@ -641,32 +714,93 @@ export function LaunchCard({
   const [done, setDone] = useState<{ what: string; signature: string } | null>(null);
   const isCreator = publicKey != null && state?.creator === publicKey.toBase58();
 
-  const loadHeld = useCallback(async () => {
+  const loadSol = useCallback(async () => {
+    if (!publicKey) {
+      setSolBalance(null);
+      return;
+    }
+    try {
+      setSolBalance((await connection.getBalance(publicKey)) / 1e9);
+    } catch {
+      setSolBalance(null);
+    }
+  }, [connection, publicKey]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadSol);
+  }, [loadSol]);
+
+  // The opening fee falls every few seconds, so the clock ticks while the card is open.
+  const slotCounted = state != null && !state.migrated && state.activation === "slot";
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const slot = slotCounted ? await connection.getSlot().catch(() => null) : null;
+      if (live) setClock({ now: Math.floor(Date.now() / 1000), slot });
+    };
+    void tick();
+    const timer = setInterval(tick, slotCounted ? 60_000 : 10_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [connection, slotCounted]);
+  const fee = state && clock.now > 0 ? curveFeeNow(state, clock.now, clock.slot) : null;
+  /** The most this wallet can put into a buy, leaving rent and the network fee. */
+  const spendable = solBalance == null ? null : Math.max(0, Math.floor((solBalance - BUY_RESERVE) * 1000) / 1000);
+  const canPay = (value: number) => spendable == null || value <= spendable + 1e-9;
+  // A chosen size the wallet cannot pay for falls back to the largest one it can.
+  const buyAmount = canPay(amount) ? amount : ([...AMOUNTS].reverse().find(canPay) ?? amount);
+
+  async function getTestSol() {
+    if (!publicKey) return;
+    setFunding("Sending test SOL…");
+    try {
+      const { faucetRequest } = await import("./faucet-button");
+      const response = await fetch("/api/faucet/sol", faucetRequest({ owner: publicKey.toBase58() }));
+      const body = (await response.json().catch(() => ({}))) as { signature?: string; error?: string };
+      if (!response.ok || !body.signature) {
+        setFunding(`${body.error ?? "The faucet did not answer."} faucet.solana.com sends devnet SOL to any address.`);
+        return;
+      }
+      await confirmSignature(connection, body.signature).catch(() => {});
+      await loadSol();
+      setFunding(null);
+      setLowSol(false);
+      setError(null);
+    } catch {
+      setFunding("Could not reach the faucet. faucet.solana.com sends devnet SOL to any address.");
+    }
+  }
+
+  /** The wallet's launch tokens, read and stored; null when there is no wallet or the read fails. */
+  const readHeld = useCallback(async (): Promise<{ ui: number; raw: bigint } | null> => {
     if (!publicKey) {
       setHeld(null);
-      return;
+      return null;
     }
     try {
       const accounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
         mint: new PublicKey(info.baseMint),
       });
-      setHeld(
-        accounts.value.reduce(
-          (sum, a) => {
-            const t = a.account.data.parsed.info.tokenAmount;
-            return { ui: sum.ui + (t.uiAmount ?? 0), raw: sum.raw + BigInt(t.amount) };
-          },
-          { ui: 0, raw: 0n },
-        ),
+      const total = accounts.value.reduce(
+        (sum, a) => {
+          const t = a.account.data.parsed.info.tokenAmount;
+          return { ui: sum.ui + (t.uiAmount ?? 0), raw: sum.raw + BigInt(t.amount) };
+        },
+        { ui: 0, raw: 0n },
       );
+      setHeld(total);
+      return total;
     } catch {
       setHeld(null);
+      return null;
     }
   }, [connection, info.baseMint, publicKey]);
 
   useEffect(() => {
-    void Promise.resolve().then(loadHeld);
-  }, [loadHeld]);
+    void Promise.resolve().then(readHeld);
+  }, [readHeld]);
 
   // Only a graduated launch has locked DAMM v2 positions, so only then is the SDK loaded.
   const graduated = state?.migrated ?? false;
@@ -691,16 +825,25 @@ export function LaunchCard({
     if (!publicKey || !state) return;
     const amountIn =
       side === "buy"
-        ? BigInt(Math.round(amount * 1e9))
+        ? BigInt(Math.round(buyAmount * 1e9))
         : ((held?.raw ?? 0n) * BigInt(sellShare)) / 100n;
     if (amountIn <= 0n) return;
-    setBusy("trade");
     setError(null);
     setDone(null);
+    setLowSol(false);
+    // Checked before signing, so a wallet that cannot pay hears it here, not from a failed transaction.
+    if (side === "buy" && !canPay(buyAmount)) {
+      setError(
+        `This wallet can spend about ${solText(spendable ?? 0)} SOL here, after about ${BUY_RESERVE} SOL for account rent and the network fee: not enough for a ${buyAmount} SOL buy. Get test SOL below (one grant per wallet), or use faucet.solana.com with this wallet's address.`,
+      );
+      setLowSol(true);
+      return;
+    }
+    setBusy("trade");
     try {
       // Loaded on the click, so neither Meteora SDK sits on the page load.
       const { buildTrade } = await import("@/lib/trade");
-      const transaction = await buildTrade({
+      const { transaction, quote } = await buildTrade({
         connection,
         owner: publicKey,
         info,
@@ -708,12 +851,31 @@ export function LaunchCard({
         amount: amountIn,
         graduated: state.migrated,
       });
+      const before = held?.raw ?? 0n;
       const sig = await sendTransaction(transaction, connection);
       await confirmSignature(connection, sig);
-      setDone({ what: side === "buy" ? "Bought." : "Sold.", signature: sig });
-      await Promise.all([onTraded(), loadHeld()]);
+      const after = await readHeld();
+      const unit = 10 ** info.baseDecimals;
+      const feeSol = Number(quote.feeLamports) / 1e9;
+      const feeLine = feeSol > 0 ? ` Fee ${solText(feeSol)} SOL, ${CREATOR_FEE_PERCENT}% of it to the basket's creator.` : "";
+      if (side === "buy") {
+        // What actually arrived, read back from the wallet; the quote if that read fails.
+        const got = after != null && after.raw > before ? Number(after.raw - before) / unit : Number(quote.out) / unit;
+        setDone({
+          what: `Bought ${count(Math.floor(got))} ${info.baseSymbol} for ${solText(Number(quote.spent) / 1e9)} SOL.${feeLine}`,
+          signature: sig,
+        });
+      } else {
+        setDone({
+          what: `Sold ${count(Math.floor(Number(amountIn) / unit))} ${info.baseSymbol} for about ${solText(Number(quote.out) / 1e9)} SOL.${feeLine}`,
+          signature: sig,
+        });
+      }
+      await Promise.all([onTraded(), loadSol()]);
     } catch (err) {
-      setError(explain(err, side === "buy" ? "The buy failed." : "The sale failed."));
+      const text = explain(err, side === "buy" ? "The buy failed." : "The sale failed.");
+      setError(text);
+      setLowSol(text === NO_SOL);
     } finally {
       setBusy(null);
     }
@@ -828,7 +990,7 @@ export function LaunchCard({
           value={state ? `${quantity(state.openCap, 2)} SOL` : "—"}
           note={
             anchor?.status === "verified"
-              ? `½ × NAV: ${anchor.deviationPct != null ? `${anchor.deviationPct >= 0 ? "+" : ""}${anchor.deviationPct.toFixed(1)}% vs` : "checked against"} the ${anchor.closeDay ?? "last"} close`
+              ? `½ × NAV: ${anchor.deviationPct != null ? `${anchor.deviationPct < 0 && Math.abs(anchor.deviationPct) >= 0.05 ? "−" : "+"}${Math.abs(anchor.deviationPct).toFixed(1)}% vs` : "checked against"} the ${anchor.closeDay ?? "last"} close`
               : anchor?.status === "unverifiable"
                 ? "½ × NAV, as set; not checkable"
                 : "½ × NAV"
@@ -912,15 +1074,19 @@ export function LaunchCard({
               className="flex"
             >
               {(side === "buy" ? AMOUNTS : SELL_SHARES).map((value) => {
-                const on = side === "buy" ? amount === value : sellShare === value;
+                const on = side === "buy" ? buyAmount === value : sellShare === value;
+                // A buy size this wallet cannot pay for, with rent and the network fee, is switched off.
+                const off = side === "buy" && !canPay(value);
                 return (
                   <button
                     key={value}
                     type="button"
                     role="radio"
                     aria-checked={on}
+                    disabled={off}
+                    title={off ? `This wallet can spend about ${solText(spendable ?? 0)} SOL here` : undefined}
                     onClick={() => (side === "buy" ? setAmount(value) : setSellShare(value))}
-                    className="tnum -ml-px border px-3 py-2.5 text-sm transition-colors first:ml-0 rounded-[var(--radius-control)]"
+                    className="tnum -ml-px border px-3 py-2.5 text-sm transition-colors first:ml-0 disabled:cursor-not-allowed disabled:opacity-40 rounded-[var(--radius-control)]"
                     style={{
                       borderColor: on ? "var(--color-bind)" : "var(--color-line)",
                       color: on ? "var(--color-ink)" : "var(--color-ink-3)",
@@ -954,11 +1120,10 @@ export function LaunchCard({
             </button>
             {curveFull ? (
               <p className="w-full text-xs text-ink-3">{CURVE_FULL}</p>
+            ) : side === "sell" && !(held && held.raw > 0n) ? (
+              <p className="w-full text-xs text-ink-3">You hold no {info.baseSymbol} to sell.</p>
             ) : (
-              side === "sell" &&
-              !(held && held.raw > 0n) && (
-                <p className="w-full text-xs text-ink-3">You hold no {info.baseSymbol} to sell.</p>
-              )
+              <FeeNow state={state} fee={fee} spendable={side === "buy" ? spendable : null} />
             )}
           </div>
         ) : (
@@ -974,6 +1139,27 @@ export function LaunchCard({
 
         {error && (
           <p className="mt-4 border-l-2 border-loss pl-3 text-sm text-loss">{error}</p>
+        )}
+        {connected && (lowSol || (side === "buy" && spendable != null && spendable < AMOUNTS[0])) && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+            <button
+              type="button"
+              onClick={getTestSol}
+              disabled={funding === "Sending test SOL…"}
+              className="border border-line-strong px-3 py-2 text-ink transition-colors hover:border-bind hover:text-bind disabled:opacity-60 rounded-[var(--radius-control)]"
+            >
+              {funding === "Sending test SOL…" ? funding : "Get test SOL"}
+            </button>
+            <a
+              href={TEST_SOL_FAUCET}
+              target="_blank"
+              rel="noreferrer"
+              className="text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+            >
+              faucet.solana.com
+            </a>
+            {funding && funding !== "Sending test SOL…" && <p className="w-full leading-relaxed text-ink-2">{funding}</p>}
+          </div>
         )}
         {done && (
           <p className="mt-4 text-sm text-ink-2">
@@ -1050,8 +1236,8 @@ export function LaunchCard({
         {state && !state.migrated && !untouched && !curveFull && !preIpo && state.threshold - state.raised <= 1 && (
           <p className="mt-4 text-xs leading-relaxed text-ink-3">
             {solText(state.threshold - state.raised)} SOL to graduation: about{" "}
-            {Math.max(1, Math.ceil((state.threshold - state.raised) / 0.05))} test-wallet buys of 0.05 SOL. Graduate
-            it and the pool&rsquo;s liquidity locks for good.
+            {Math.max(1, Math.ceil((state.threshold - state.raised) / GRANT_BUY))} buys of {GRANT_BUY} SOL, one test-SOL
+            grant each. Graduate it and the pool&rsquo;s liquidity locks for good.
           </p>
         )}
         {state && <LaunchTrades pool={info.pool} refresh={done?.signature ?? null} />}
@@ -1062,7 +1248,7 @@ export function LaunchCard({
         )}
         {RETIRED_METADATA_MINTS.has(info.baseMint) && <RetiredMetadataNote basketAddress={basketAddress} />}
 
-        <RefusedPools pools={refused} />
+        <RefusedPools pools={refused} basketAddress={basketAddress} />
 
         <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
           {state && <PresetLink state={state} />}
@@ -1194,6 +1380,50 @@ export function LaunchLifecycle() {
         </a>
       </p>
     </div>
+  );
+}
+
+/**
+ * The fee a trade pays right now, beside the Buy button: on a young curve the
+ * anti-snipe fee is most of it, and nothing else on the card would say so.
+ */
+function FeeNow({
+  state,
+  fee,
+  spendable,
+}: {
+  state: DbcState | null;
+  fee: { bps: number; settledAt: number | null } | null;
+  spendable: number | null;
+}) {
+  if (!state) return null;
+  const v1 = state.preset === "v1";
+  const floor = v1 ? preset.previous.antiSnipe.endingFeeBps : LAUNCH_FEE.endingFeeBps;
+  let text: string | null = null;
+  if (state.migrated) {
+    text = v1
+      ? `Fee right now: ${feeText(preset.previous.migratedPoolFeeBps)} on the DAMM v2 pool.`
+      : `Fee right now: ${feeText(preset.migration.dammV2.endingFeeBps)} to ${feeText(preset.migration.dammV2.startingFeeBps)} on the DAMM v2 pool, falling as the price rises.`;
+  } else if (fee) {
+    const settles =
+      fee.bps > floor && fee.settledAt != null
+        ? `, ${feeText(floor)} from ${new Date(fee.settledAt * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+        : "";
+    text =
+      fee.bps > floor
+        ? `Fee right now: about ${feeText(fee.bps)} (the opening anti-snipe fee${settles}).`
+        : `Fee right now: about ${feeText(fee.bps)}.`;
+  }
+  if (!text && spendable == null) return null;
+  return (
+    <p className="tnum w-full text-xs leading-relaxed text-ink-3">
+      {text}
+      {spendable != null && (
+        <>
+          {text ? " " : ""}This wallet can spend about {solText(spendable)} SOL here.
+        </>
+      )}
+    </p>
   );
 }
 

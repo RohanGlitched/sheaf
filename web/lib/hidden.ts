@@ -24,7 +24,22 @@ export const HIDDEN_BASKETS: ReadonlySet<string> = new Set([
   "6WRU3zPJm9o6qJnZVzxNwyXn2HrBiqM9YokjR9ioDLju",
   // QA4LC8, "QA judge QA4LC8", created by QA wallet AWwhyV…
   "FzHUmTWLhvxpbdvWqeict9ZeQqcqeJryGSHNjNoQEUwK",
+  // QA4ATV, "QA judge QA4ATV", created by fixed-seed test wallet 71 (HsVLmM…), round-7 QA compose + launch run
+  "89YfckYY7SakKm3xiSM3FH88zyMa3icgGN6vTNDXXEzs",
+  // QAKRRQ, "QA judge QAKRRQ", created by test wallet 6YtTBB…
+  "FXEu6Kcq3k32YoUdRZSsJS24zEghqiSjEsGU8DcYNbzF",
+  // QA3V9W, "QA judge QA3V9W", created by test wallet Ep5kyi…
+  "DFjLxot2mbSyQZwsckY2ZDG3Gb2PrSYZgXM7UdDM2ihp",
+  // DIVDEMO, "Dividend payers, demo", created by test wallet Gxa3YF… for a video
+  "DviEARiBA48UnEY8Zf18b2oTKbYT8TxBqj7KXMCByQz2",
 ]);
+
+/**
+ * Baskets the house created and lists first: the ones Sheaf curates. Every
+ * other basket that isn't a test is a community basket, listed behind a switch
+ * on Explore so a lookalike name never sits beside the house's by default.
+ */
+export const isHouseBasket = (basket: { creator?: string }) => basket.creator != null && teamTag(basket.creator) === "house";
 
 /** True for a basket our tests made: listed above, or created by one of our test wallets. */
 export function isTestBasket(basket: { address: string; creator?: string; name?: string; symbol?: string }): boolean {

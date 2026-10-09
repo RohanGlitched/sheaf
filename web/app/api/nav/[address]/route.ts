@@ -231,13 +231,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
 
   if (at != null) {
     if (!history) return bad("Daily closes could not be read right now; try again shortly.", 503, { "retry-after": "60" });
-    // An answer already stored for this close and this data date is served as stored.
+    // An answer already stored for this close and this data date is served as
+    // stored, except `at`, which is always the caller's own: the stored answer
+    // is the same whatever time inside the close's day it was first asked for.
     const frozenDay = dayIso(closeDayAtOrBefore(at));
     const already = await readFrozen<Record<string, unknown>>(address, frozenDay, history.asOf);
     if (already) {
       return NextResponse.json(
         {
           ...already.answer,
+          at,
           frozen: { key: already.key, storedAt: already.storedAt, replay: `${navUrl}?at=${at}&asOf=${history.asOf}` },
         },
         { headers: { "cache-control": "public, s-maxage=3600, stale-while-revalidate=600", "access-control-allow-origin": "*" } },
@@ -280,7 +283,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
     const answer = {
         basket: { address: basket.address, name: basket.name, symbol: basket.symbol, shareMint: basket.shareMint, cluster: WRITE_CLUSTER },
         question: basketQuestion(basket.name, basket.symbol),
-        at,
+        // Stored as the close itself, so the frozen bytes do not depend on who asked first; every reply echoes the caller's at.
+        at: closeOn(spyAt.day),
         closeDay: dayIso(spyAt.day),
         closeTime: new Date(closeOn(spyAt.day) * 1000).toISOString(),
         asOf: history.asOf,
@@ -295,7 +299,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           "navPerShare.listed at a close = sum over components of unitsPerShare / 10^decimals x adjusted close x the mint's multiplier today. Adjusted closes reinvest dividends, as the multiplier does, so the ratio between two closes is the share's total return; spy.adjClose is on the same basis.",
         sources: {
           closes: historySource(history),
-          multipliers: `Token-2022 ScaledUiAmount config on each mainnet mint, read at slot ${snapshot.chain.slot}`,
+          multipliers: `Token-2022 ScaledUiAmount config on each mainnet mint, read at slot ${snapshot.chain.slot} through ${snapshot.chain.via === "solami" ? "Solami" : "the public mainnet RPC (Solami unavailable)"}`,
+          // Which RPC answered the multiplier read: "solami", or "public" when Solami did not.
+          via: snapshot.chain.via,
           recipe: `The basket account ${basket.address} on Solana ${WRITE_CLUSTER}`,
         },
         recompute,
@@ -307,6 +313,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
     return NextResponse.json(
       {
         ...body,
+        at,
         frozen: stored
           ? { key: stored.key, storedAt: stored.storedAt, replay: `${navUrl}?at=${at}&asOf=${history.asOf}` }
           : null,
@@ -389,6 +396,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           nextWindow: {
             opens: new Date(w.opens * 1000).toISOString(),
             opensText: fmtClose(w.opens),
+            // Trading closes at the first close, before any of the measured week is known (Panta's endTime).
+            tradingCloses: fmtClose(w.fromClose),
             fromClose: w.fromClose,
             toClose: w.toClose,
             from: fmtClose(w.fromClose),
@@ -416,6 +425,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
         multipliers: snapshot.chain
           ? `Token-2022 ScaledUiAmount config on each mainnet mint, read at slot ${snapshot.chain.slot} through ${snapshot.chain.via === "solami" ? "Solami" : "the public mainnet RPC"}`
           : "Jupiter's copy of each mint's multiplier (the chain read failed)",
+        via: snapshot.chain?.via ?? null,
         vault: `Share mint supply and the vault's token accounts on Solana ${WRITE_CLUSTER}, slot ${infos?.context.slot ?? "unknown"}`,
         trailingWeek: historySource(history),
       },

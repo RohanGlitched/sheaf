@@ -211,8 +211,8 @@ export function LiveTape({
             known.current.set(p.signature, p);
             arrived.add(p.signature);
           }
-          // Newest first by slot, then block time; keep a rolling window.
-          const merged = [...known.current.values()].sort((a, b) => b.slot - a.slot || b.time - a.time);
+          // Newest first by the time each row shows, then slot; keep a rolling window.
+          const merged = [...known.current.values()].sort((a, b) => b.time - a.time || b.slot - a.slot);
           for (const p of merged.slice(KEEP)) known.current.delete(p.signature);
           setRows(merged.slice(0, KEEP));
           // Only a newer server tape replaces the header line, so an older cached
@@ -278,17 +278,43 @@ export function LiveTape({
   // Dust: under a dollar is a route's rounding, not a trade.
   const worth = (r: ReturnType<typeof price>) => r.value == null || r.value >= 1;
 
-  const view = rows.map((p) => price(p, false)).filter(worth);
+  // One row per trade: the same signature and mint (or the same wallet, amount and moment, decoded twice
+  // by two reads) shows once, the copy that names its venue kept. Sorted by the time each row shows.
+  const dedupe = (list: ReturnType<typeof price>[]) => {
+    const out = new Map<string, ReturnType<typeof price>>();
+    const fingerprints = new Map<string, string>();
+    for (const r of list) {
+      const key = `${r.p.signature}:${r.p.symbol}`;
+      const print = `${r.p.symbol}:${r.p.wallet}:${r.p.raw}:${r.p.side}:${r.p.time}`;
+      const priorKey = out.has(key) ? key : fingerprints.get(print);
+      const prior = priorKey != null ? out.get(priorKey) : undefined;
+      if (priorKey != null && prior) {
+        if (!prior.p.venue && r.p.venue) out.set(priorKey, r);
+        continue;
+      }
+      out.set(key, r);
+      fingerprints.set(print, key);
+    }
+    return [...out.values()].sort((a, b) => b.p.time - a.p.time || b.p.slot - a.p.slot);
+  };
+  const view = dedupe(rows.map((p) => price(p, false)).filter(worth));
   const onScreen = new Set(view.map((r) => r.p.signature));
+  const onScreenPrints = new Set(view.map((r) => `${r.p.symbol}:${r.p.wallet}:${r.p.raw}:${r.p.side}:${r.p.time}`));
   const oldestLive = view.length ? Math.min(...view.map((r) => r.p.slot)) : Infinity;
-  const earlier =
+  const earlierRows =
     seed && view.length < SEED_UNTIL
       ? seed.prints
-          .filter((p) => p.side in SIDE && !onScreen.has(p.signature) && p.slot < oldestLive)
+          .filter(
+            (p) =>
+              p.side in SIDE &&
+              !onScreen.has(p.signature) &&
+              !onScreenPrints.has(`${p.symbol}:${p.wallet}:${p.raw}:${p.side}:${p.time}`) &&
+              p.slot < oldestLive,
+          )
           .map((p) => price({ ...p, refAt: p.refAt ?? seed.capturedAt }, true))
           .filter(worth)
-          .slice(0, KEEP - view.length)
       : [];
+  const earlier = earlierRows.length ? dedupe(earlierRows).slice(0, KEEP - view.length) : [];
 
   const reconnecting = lastOk != null && now - lastOk > 20_000;
   const race = stats?.race ?? null;
@@ -393,7 +419,7 @@ export function LiveTape({
         </p>
         <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-3">
           <span
-            className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-loss" : "bg-gain"}`}
+            className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-amber-500" : "bg-gain"}`}
             aria-hidden
           />
           <span className="tnum">
@@ -402,7 +428,7 @@ export function LiveTape({
           {tape && (
             <span>
               · read through {tape.via === "solami" ? "Solami" : "a public RPC"}
-              {reconnecting ? ", reconnecting" : tape.stale ? ", last good tape" : ""}
+              {reconnecting ? ", reconnecting" : tape.stale ? ", showing the last trades read · refreshing" : ""}
             </span>
           )}
         </p>
@@ -431,7 +457,7 @@ export function LiveTape({
             className={`flex flex-wrap items-center gap-x-2 border-b border-line px-4 py-2.5 text-xs text-ink-3 sm:px-5 ${hideIntro ? "" : "lg:hidden"}`}
           >
             <span
-              className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-loss" : "bg-gain"}`}
+              className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-amber-500" : "bg-gain"}`}
               aria-hidden
             />
             <span>Solana mainnet</span>

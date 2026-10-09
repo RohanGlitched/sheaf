@@ -26,10 +26,32 @@ export const PROTOCOL_FEE_BPS = 10;
 export const PROTOCOL_FEE_SINCE = "9 Oct 2026";
 /** The composer's default creator fee. The creator can pick anything from 0 to the ceiling. */
 export const DEFAULT_CREATOR_FEE_BPS = 25;
-/** The house filler waits until the auction pays it this much over fair. A policy of Sheaf's filler, not a program rule. */
+/** The house filler aims to fill at this much over fair. A policy of Sheaf's filler, not a program rule. */
 export const HOUSE_FILLER_MARGIN_BPS = 15;
-/** A dollar order's auction runs from this far above the fair share count to this far below it. */
+/** Nor does it ever fill more than this over fair (or under fair, buying a sale): past it the order runs out and the money goes back. */
+export const HOUSE_MAX_OVER_FAIR_BPS = 100;
+/** A dollar order's auction runs from this far above the fair share count to this far below it. So does a sell order's, in dollars. */
 export const AUCTION_BAND_BPS = 200;
+/**
+ * A plan run's band, by cadence, around the plan's last fill, and the owner's
+ * hard limits around the price when the plan was opened, which no run may pass.
+ * The same numbers as CADENCE in components/plan-form.tsx (a client file, so
+ * they are repeated here rather than imported into server components).
+ */
+export const PLAN_BANDS = [
+  { cadence: "monthly", bandBps: 1500, hardBps: 2500 },
+  { cadence: "weekly", bandBps: 1000, hardBps: 1500 },
+  { cadence: "demo pace", bandBps: 200, hardBps: 1000 },
+] as const;
+/** What a lone filler that waits for the floor of a monthly run takes over the plan's last fill: 1 / (1 - 15%) - 1. */
+export const MONTHLY_WORST_CASE_PCT = (1 / (1 - PLAN_BANDS[0].bandBps / 1e4) - 1) * 100;
+/**
+ * The house filler's margin as measured before the timing fix of 10 Oct 2026:
+ * the median of the fills its log recorded, and how many house fills the ledger
+ * had then. The log was added late in the build, and the chain records the
+ * trade, not the filler's price, so the fills before it carry no figure.
+ */
+export const MEASURED_BEFORE_FIX = { bps: 23, fills: 8, houseFills: 88, date: "10 Oct 2026" } as const;
 /** The house filler leaves orders and plan runs below this many dollars to other fillers. */
 export const HOUSE_MIN_DOLLARS = 5;
 /** Meteora's cut of every launch-curve and graduated-pool trading fee, then the split of what is left. */
@@ -42,6 +64,10 @@ export const CHECKED = "9 Oct 2026";
 
 /** 10 → "0.10%", 100 → "1%". */
 export const pct = (bps: number) => `${bps % 100 === 0 ? bps / 100 : (bps / 100).toFixed(2)}%`;
+
+/** "±15% monthly, ±10% weekly, ±2% at demo pace": a plan run's band, or the owner's hard limits. */
+export const planBandsText = (key: "bandBps" | "hardBps") =>
+  PLAN_BANDS.map((b) => `±${pct(b[key])} ${b.cadence === "demo pace" ? "at demo pace" : b.cadence}`).join(", ");
 
 /** One date format for the page: "9 Oct 2026, 10:39 UTC". */
 export function utcStamp(d: Date, withTime = true): string {
@@ -91,14 +117,38 @@ export const SOURCES = {
     label: "ICI, fund fees in 2025",
     href: "https://www.ici.org/news-release/mutual-fund-and-etf-fees-remained-near-historic-lows-in-2025",
   },
-  jupRecurring: { label: "Jupiter, recurring orders", href: "https://developers.jup.ag/docs/recurring" },
-  jupMinimums: { label: "Jupiter, recurring order minimums", href: "https://developers.jup.ag/docs/recurring/best-practices" },
+  // Jupiter's current DCA (the Recurring API is deprecated): "Each round worth >= $10, currently", at least 2 rounds;
+  // transfer-fee or transfer-hook mints rejected unless whitelisted. Read 10 Oct 2026.
+  jupDca: { label: "Jupiter, DCA", href: "https://developers.jup.ag/docs/trigger/dca" },
+  // "Limit orders and recurring orders each carry a 0.1% flat fee." Read 10 Oct 2026.
+  jupFees: { label: "Jupiter, fees on recurring orders", href: "https://docs.jup.ag/user-docs/global/mobile/fees" },
   jupIntegrator: { label: "Jupiter, adding integrator fees", href: "https://developers.jup.ag/docs/ultra/add-fees-to-ultra" },
   krakenBundles: { label: "Kraken, Crypto + xStocks Bundles", href: "https://blog.kraken.com/product/bundles/introducing-crypto-xstocks-bundles" },
   bitgetBasket: { label: "Bitget Wallet, Basket", href: "https://web3.bitget.com/wallet/basket-wallet" },
   weave: { label: "HackQuest, Weave", href: "https://hackquest.io/projects/Weave" },
   basketSol: { label: "Basket", href: "https://basketsolana.xyz/" },
   indexa: { label: "Indexa", href: "https://indexafund.com/" },
+  // Glider: $4M led by a16z CSX (BusinessWire, Apr 2025); with Ondo, custom tokenized-stock portfolios rebalanced
+  // automatically (Cointelegraph, 23 Mar 2026); "$1" stock investments on BNB and Solana, 0.30% automated fee on
+  // traded volume (Glider blog, 23 Jun 2026). Checked 10 Oct 2026.
+  glider: { label: "Glider, investing in US stocks from India", href: "https://blog.glider.fi/how-to-invest-in-us-stocks-from-india/" },
+  gliderOndo: {
+    label: "Cointelegraph, Glider and Ondo launch custom tokenized-stock portfolios",
+    href: "https://cointelegraph.com/news/glider-ondo-launch-platform-for-custom-tokenized-stock-portfolios",
+  },
+  gliderA16z: {
+    label: "BusinessWire, Glider raises $4M led by a16z CSX",
+    href: "https://www.businesswire.com/news/home/20250415391753/en/Glider-Raises-%244-Million-Strategic-Funding-Round-Led-by-a16z-CSX-to-Transform-Crypto-Portfolio-Management",
+  },
+  // Securitize Stocks on Solana, announced 8 Oct 2026: 12 US equities as UCC Article 8 security entitlements,
+  // onboarding and KYC/AML checks, eligible investors only, USDC settlement. Checked 10 Oct 2026.
+  securitize: {
+    label: "Solana Compass, Securitize Stocks on Solana",
+    href: "https://solanacompass.com/news/securitize-launches-securitize-stocks-on-solana-12-us-equities-as-11-backed-security-entitlements",
+  },
+  // Portfi, "The S&P 500 of Solana": onchain baskets of tokenized stocks, gold and crypto into the user's wallet,
+  // $10 packs; accepted to MagicBlock Founders Camp (KuCoin, 14 Sep 2026). Checked 10 Oct 2026.
+  portfi: { label: "KuCoin, Portfi joins MagicBlock Founders Camp", href: "https://www.kucoin.com/news/trends/SOL/6aa80f397d10fa0007cd76d9" },
   backpackSec: { label: "Crypto Briefing, Backpack's tokenized stocks on Solana", href: "https://cryptobriefing.com/backpack-tokenized-blackrock-blk-solana/" },
   stockLaunch: {
     label: "Solana Compass, Meteora StockLaunch",
@@ -165,7 +215,11 @@ export function FeeHeadline() {
   const items = [
     { value: pct(PROTOCOL_FEE_BPS), label: "of every share created, to Sheaf", note: `Solana baskets created since ${PROTOCOL_FEE_SINCE}, and dollar fills on the EVM v3 desks, paid to a separate treasury key` },
     { value: `0–${pct(MAX_CREATOR_FEE_BPS)}`, label: "to the basket's creator", note: `the composer suggests ${pct(DEFAULT_CREATOR_FEE_BPS)}` },
-    { value: pct(HOUSE_FILLER_MARGIN_BPS), label: "what Sheaf's filler waits for", note: `any filler may fill anywhere inside the ±${pct(AUCTION_BAND_BPS)} band the buyer signs` },
+    {
+      value: pct(HOUSE_FILLER_MARGIN_BPS),
+      label: "what Sheaf's filler aims for",
+      note: `never more than ${pct(HOUSE_MAX_OVER_FAIR_BPS)}; any filler may fill anywhere inside the band the buyer signs: ±${pct(AUCTION_BAND_BPS)} on a dollar order, ${planBandsText("bandBps")} on a plan run`,
+    },
     { value: "0%", label: "protocol fee to hold, redeem or sell", note: "no yearly fee; redeem for the stocks or sell for dollars" },
   ];
   return (
@@ -231,11 +285,11 @@ export const FEE_ROWS: FeeRow[] = [
   },
   {
     line: "Filler margin",
-    rate: `Any filler: anywhere inside the buyer's ±${pct(AUCTION_BAND_BPS)} band. Sheaf's filler: ${pct(HOUSE_FILLER_MARGIN_BPS)} over fair.`,
+    rate: `Any filler: anywhere inside the band the buyer signed: ±${pct(AUCTION_BAND_BPS)} around fair on a dollar order; on a plan run ${planBandsText("bandBps")} around the plan's last fill. Sheaf's filler: ${pct(HOUSE_FILLER_MARGIN_BPS)} over fair, never more than ${pct(HOUSE_MAX_OVER_FAIR_BPS)}.`,
     payer: "The buyer of a dollar order or a plan run",
     receiver: "Whichever filler delivers the stocks first",
-    how: `The auction offers a share count that starts ${pct(AUCTION_BAND_BPS)} above fair and falls to the buyer's floor, ${pct(AUCTION_BAND_BPS)} below it. Sheaf's filler fills once the dollars cover the stocks at fair plus ${pct(HOUSE_FILLER_MARGIN_BPS)}. Another filler can fill earlier for less, and the buyer gets that better count; one that waits longer earns more, up to the floor the buyer signed.`,
-    status: `Sheaf's ${pct(HOUSE_FILLER_MARGIN_BPS)} is a policy of its filler, not a program rule. It leaves orders under $${HOUSE_MIN_DOLLARS} to others and refuses to fill on stale prices. Anyone can run a filler; the script is in the repository.`,
+    how: `A dollar order's auction offers a share count that starts ${pct(AUCTION_BAND_BPS)} above fair and falls to the buyer's floor, ${pct(AUCTION_BAND_BPS)} below it, over 90 seconds. A plan run's starts its band above the plan's last fill and falls to its band below over 30 minutes (4 at demo pace), never past the owner's hard limits (${planBandsText("hardBps")}). Sheaf's filler fills at the second the dollars cover the stocks at fair plus ${pct(HOUSE_FILLER_MARGIN_BPS)}, and never more than ${pct(HOUSE_MAX_OVER_FAIR_BPS)} over fair: past that it lets the order run out and the dollars go back. Another filler can fill earlier for less, and the buyer gets that better count; one that waits longer earns more, up to the floor the buyer signed. With no other filler, one that waits for the floor of a monthly run takes up to ${MONTHLY_WORST_CASE_PCT.toFixed(1)}% over the last fill; the plan form says so.`,
+    status: `Sheaf's ${pct(HOUSE_FILLER_MARGIN_BPS)} and its ${pct(HOUSE_MAX_OVER_FAIR_BPS)} cap are policies of its filler, not program rules. It leaves orders under $${HOUSE_MIN_DOLLARS} to others and fills on live Jupiter prices only, never on a fallback or stale one. Measured before the ${MEASURED_BEFORE_FIX.date} timing fix: a median ${pct(MEASURED_BEFORE_FIX.bps)} over ${MEASURED_BEFORE_FIX.fills} fills. Anyone can run a filler; the reference code is in the repository.`,
   },
   {
     line: "Launch markets",
@@ -250,7 +304,7 @@ export const FEE_ROWS: FeeRow[] = [
     rate: "Free to open and to run",
     payer: "Nobody, beyond each run's own dollar order",
     receiver: "—",
-    how: "Each run is a dollar order, so the protocol fee, the creator fee and the filler's margin apply to every run exactly as to any other order. Whoever sends a due run gets back the small account deposit it paid to place the order.",
+    how: "Each run is a dollar order inside the plan's own band (see the filler margin above), so the protocol fee, the creator fee and the filler's margin apply to every run exactly as to any other order. Whoever sends a due run gets back the small account deposit it paid to place the order.",
     status: "Live on devnet.",
   },
   {
@@ -263,7 +317,7 @@ export const FEE_ROWS: FeeRow[] = [
   },
   {
     line: "Selling for dollars",
-    rate: `No protocol fee. Any filler: anywhere inside the seller's ±${pct(AUCTION_BAND_BPS)} band. Sheaf's filler pays fair less ${pct(HOUSE_FILLER_MARGIN_BPS)}.`,
+    rate: `No protocol fee. Any filler: anywhere inside the seller's ±${pct(AUCTION_BAND_BPS)} band. Sheaf's filler pays fair less ${pct(HOUSE_FILLER_MARGIN_BPS)}, never less than fair less ${pct(HOUSE_MAX_OVER_FAIR_BPS)}.`,
     payer: "The seller, through the auction",
     receiver: "Whichever filler takes the shares first",
     how: `A sell order is the dollar order run backwards: the dollars offered start ${pct(AUCTION_BAND_BPS)} above fair and fall to the seller's floor over 90 seconds. The filler redeems the shares for the stocks and sells them.`,
@@ -477,14 +531,14 @@ export async function HolderCost() {
   const rows: CostRow[] = [
     {
       route: "Sheaf, one dollar order",
-      each: `up to ${pct(SHEAF_ALL_IN)}`,
+      each: `about ${pct(SHEAF_ALL_IN)}`,
       yearly: "0%",
-      note: `${pct(PROTOCOL_FEE_BPS)} protocol, ${pct(DEFAULT_CREATOR_FEE_BPS)} suggested creator fee, up to ${pct(HOUSE_FILLER_MARGIN_BPS)} to Sheaf's filler. With no creator fee, up to ${pct(PROTOCOL_FEE_BPS + HOUSE_FILLER_MARGIN_BPS)}.`,
+      note: `${pct(PROTOCOL_FEE_BPS)} protocol, ${pct(DEFAULT_CREATOR_FEE_BPS)} suggested creator fee, and the ${pct(HOUSE_FILLER_MARGIN_BPS)} Sheaf's filler aims for (never more than ${pct(HOUSE_MAX_OVER_FAIR_BPS)}). Before the ${MEASURED_BEFORE_FIX.date} timing fix its fills measured a median ${pct(MEASURED_BEFORE_FIX.bps)}, so ${pct(PROTOCOL_FEE_BPS + DEFAULT_CREATOR_FEE_BPS + MEASURED_BEFORE_FIX.bps)} all in. With no creator fee, about ${pct(PROTOCOL_FEE_BPS + HOUSE_FILLER_MARGIN_BPS)}.`,
       ours: true,
     },
     {
       route: "Sheaf, a monthly plan of ₹500 or ₹5,000",
-      each: `up to ${pct(SHEAF_ALL_IN)} every run`,
+      each: `about ${pct(SHEAF_ALL_IN)} every run`,
       yearly: "0%",
       note: "Every run is a new dollar order, so it pays the same fees every time, at any size.",
       ours: true,
@@ -498,7 +552,7 @@ export async function HolderCost() {
     },
     {
       route: "Sheaf, selling a share for dollars",
-      each: `up to ${pct(HOUSE_FILLER_MARGIN_BPS)}`,
+      each: `about ${pct(HOUSE_FILLER_MARGIN_BPS)}`,
       yearly: "0%",
       note: `No protocol fee. Sheaf's filler pays fair less ${pct(HOUSE_FILLER_MARGIN_BPS)}; any filler may pay more. Or redeem for the stocks themselves, free.`,
       ours: true,
@@ -534,10 +588,10 @@ export async function HolderCost() {
       note: "Cheaper than Sheaf for a broad index. If that is what you want, buy it; a Sheaf basket can hold SPYx too.",
     },
     {
-      route: "Five tokens on Jupiter's recurring orders",
+      route: "Five tokens on Jupiter's DCA",
       each: "0.1% of what you spend",
       yearly: "0%",
-      note: "Cheaper than Sheaf per run. But each order needs at least $50 and each plan $100 in total, so five stocks a month start at $250; a Sheaf plan starts at $5. You hold five positions and keep the weights yourself.",
+      note: "Cheaper than Sheaf per run. Each round must be at least $10, and a plan at least two rounds, so five stocks a month start at $50; a Sheaf plan starts at $5, into one token. You hold five positions and keep the weights yourself, and tokens with a transfer fee, such as PreStocks, are refused unless Jupiter whitelists them.",
     },
     {
       route: "Five tokens bought by hand on Jupiter",
@@ -594,7 +648,7 @@ export async function HolderCost() {
         </p>
       </div>
       <Sources
-        keys={["smallcaseFees", "arkk", "botz", "ici", "jupRecurring", "jupMinimums", "vdaTax", "usTax", "fx"]}
+        keys={["smallcaseFees", "arkk", "botz", "ici", "jupDca", "jupFees", "vdaTax", "usTax", "fx"]}
         note={`Rupees at ${fxNote(fx)}. Fees only: none of these counts taxes, the token's premium to the listed share, or a broker's own charges.`}
       />
     </div>
@@ -658,6 +712,9 @@ export function UnitEconomics() {
   const flows = [1e6, 1e7, 1e8];
   // An illustration, not a forecast: protocol fee on all of it, four in five bought with dollars, Sheaf filling seven in ten of those.
   const blended = protocol + 0.8 * 0.7 * fillerNet;
+  // The same, with half the filler margin to a licensed partner of record, as the break-even figure assumes.
+  const blendedHalf = protocol + (0.8 * 0.7 * fillerNet) / 2;
+  const halfOf = (c: (typeof cases)[number]) => c.protocol + c.filler / 2 + c.creator;
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
       <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
@@ -705,6 +762,13 @@ export function UnitEconomics() {
           ({(routeOneWay / 100).toFixed(3)}%), before network fees and the cost of holding stock between fills. Creator: Sheaf
           earns the {pct(DEFAULT_CREATOR_FEE_BPS)} only on baskets it creates; on anyone else&rsquo;s it goes to them. The
           protocol fee arrives as basket shares; turning it into dollars means redeeming them and selling the stocks.
+          These rows credit Sheaf the whole filler margin. With half of it to a licensed partner of record, as the
+          break-even figure beside them assumes, the rows where Sheaf fills come to{" "}
+          {cases
+            .filter((c) => c.filler > 0)
+            .map((c) => usd(halfOf(c)))
+            .join(", ")}
+          .
         </p>
       </div>
       <div className="space-y-6">
@@ -725,13 +789,17 @@ export function UnitEconomics() {
         <div className="rounded-[var(--radius-panel)] border border-line bg-raised p-5 sm:p-6">
           <p className="text-sm text-ink">At different sizes, illustrated</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-3">
-            Protocol fee on every creation, four in five bought with dollars, and Sheaf filling seven in ten of those.
+            Protocol fee on every creation, four in five bought with dollars, and Sheaf filling seven in ten of those. In
+            brackets, with half the filler margin to a partner of record, the basis the break-even figure uses.
           </p>
           <dl className="mt-4 divide-y divide-line text-sm">
             {flows.map((f) => (
               <div key={f} className="flex items-baseline justify-between gap-4 py-3">
                 <dt className="tnum text-ink-2">${(f / 1e6).toLocaleString("en-US")}M created a month</dt>
-                <dd className="tnum text-ink">${Math.round((f / PER_MILLION) * blended).toLocaleString("en-US")} a month</dd>
+                <dd className="tnum text-right text-ink">
+                  ${Math.round((f / PER_MILLION) * blended).toLocaleString("en-US")} a month
+                  <span className="text-ink-3"> (${Math.round((f / PER_MILLION) * blendedHalf).toLocaleString("en-US")})</span>
+                </dd>
               </div>
             ))}
           </dl>
@@ -790,6 +858,9 @@ export type LedgerStats = {
   /** One-off dollar orders and plan runs, separately. */
   dollar: FillStats;
   plan: FillStats;
+  /** The same, orders of $5 or more only: the one fill-rate definition the page shows. */
+  dollar5: FillStats;
+  plan5: FillStats;
   /** Only orders whose buyer is not ours. */
   outsideDollar: FillStats;
   outsidePlan: FillStats;
@@ -804,6 +875,12 @@ export type LedgerStats = {
   realizedMarginBps: number | null;
   realizedSellMarginBps: number | null;
   realizedFills: number | null;
+  /** Since the timing fix: measured at the second each fill executed. */
+  landedMarginBps: number | null;
+  landedFills: number | null;
+  /** Logged before it, at the filler's own estimate. */
+  earlierMarginBps: number | null;
+  earlierFills: number | null;
   secondMarginBps: number | null;
   secondFills: number | null;
   /** Orders of $5 or more that filled: the number the target is about. */
@@ -855,6 +932,8 @@ export function readLedgerStats(json: unknown): LedgerStats {
     medianSecsToFill: num(s.medianSecsToFill),
     dollar: fillStats(byCause.dollar),
     plan: fillStats(byCause.plan),
+    dollar5: fillStats(obj(s.byCauseAtLeast5).dollar),
+    plan5: fillStats(obj(s.byCauseAtLeast5).plan),
     outsideDollar: fillStats(outside.dollar),
     outsidePlan: fillStats(outside.plan),
     byFiller: { house: num(byFiller.house), second: num(byFiller.second), outside: num(byFiller.outside) },
@@ -865,6 +944,10 @@ export function readLedgerStats(json: unknown): LedgerStats {
     realizedMarginBps: num(obj(obj(s.realizedMarginBps).house).buyMedianBps) ?? num(obj(obj(s.realizedMarginBps).house).medianBps) ?? num(s.realizedMarginBps),
     realizedSellMarginBps: num(obj(obj(s.realizedMarginBps).house).sellMedianBps),
     realizedFills: num(obj(obj(s.realizedMarginBps).house).fills),
+    landedMarginBps: num(obj(obj(obj(s.realizedMarginBps).house).landed).medianBps),
+    landedFills: num(obj(obj(obj(s.realizedMarginBps).house).landed).fills),
+    earlierMarginBps: num(obj(obj(obj(s.realizedMarginBps).house).earlier).medianBps),
+    earlierFills: num(obj(obj(obj(s.realizedMarginBps).house).earlier).fills),
     secondMarginBps: num(obj(obj(s.realizedMarginBps).second).medianBps),
     secondFills: num(obj(obj(s.realizedMarginBps).second).fills),
     fillRateAtLeast5: ratio(s.fillRateAtLeast5),
@@ -916,6 +999,8 @@ const dash = "—";
 const whole = (v: number | null) => (v == null ? dash : Math.round(v).toLocaleString("en-US"));
 const secs = (v: number | null) => (v == null ? dash : `${Math.round(v)} s`);
 const rate = (v: number | null) => (v == null ? dash : `${(v * 100).toFixed(1)}%`);
+/** Finished orders: filled or returned. */
+const finished = (f: FillStats) => (f.fills == null || f.returned == null ? dash : whole(f.fills + f.returned));
 
 /**
  * The numbers that have to come from use, read from the site's own API when the
@@ -934,22 +1019,22 @@ export async function LiveNumbers() {
     {
       label: `Orders of $${HOUSE_MIN_DOLLARS} or more filled`,
       value: rate(l.fillRateAtLeast5),
-      note: `one-off orders ${rate(l.fillRateAtLeast5Dollar)}, plan runs ${rate(l.fillRateAtLeast5Plan)}; target 95%. Smaller orders are left to other fillers by design.`,
+      note: `of every finished order of $${HOUSE_MIN_DOLLARS} or more, one-off and plan runs together; target 95%. Smaller orders are left to other fillers by design.`,
     },
     {
       label: "Plans opened",
       value: whole(l.plans),
-      note: "monthly plans on the program",
+      note: "plans on the program, at any cadence",
     },
     {
-      label: "One-off dollar orders",
-      value: rate(l.dollar.fillRate),
-      note: `filled, ${whole(l.dollar.fills)} of ${whole(l.dollar.orders)}; median ${secs(l.dollar.medianSecsToFill)} to fill on a 90-second auction`,
+      label: `One-off dollar orders of $${HOUSE_MIN_DOLLARS} or more`,
+      value: rate(l.dollar5.fillRate ?? l.fillRateAtLeast5Dollar),
+      note: `filled, ${whole(l.dollar5.fills)} of ${finished(l.dollar5)} finished; median ${secs(l.dollar5.medianSecsToFill)} to fill on a 90-second auction`,
     },
     {
-      label: "Plan runs",
-      value: rate(l.plan.fillRate),
-      note: `filled, ${whole(l.plan.fills)} of ${whole(l.plan.orders)}; median ${secs(l.plan.medianSecsToFill)} on a 30-minute auction, by design`,
+      label: `Plan runs of $${HOUSE_MIN_DOLLARS} or more`,
+      value: rate(l.plan5.fillRate ?? l.fillRateAtLeast5Plan),
+      note: `filled, ${whole(l.plan5.fills)} of ${finished(l.plan5)} finished; median ${secs(l.plan5.medianSecsToFill)} on a 30-minute auction, by design`,
     },
     {
       label: "Orders filled, by filler",
@@ -963,13 +1048,16 @@ export async function LiveNumbers() {
     },
     {
       label: "What buyers paid Sheaf's filler over fair",
-      value: marginPct(l.realizedMarginBps),
-      note:
-        l.realizedMarginBps == null
-          ? `policy ${pct(HOUSE_FILLER_MARGIN_BPS)}; no measured fills to report yet`
-          : `median over ${whole(l.realizedFills)} ${l.realizedFills === 1 ? "fill" : "fills"}${(l.realizedFills ?? 0) < 10 ? " so far" : ""}, against a policy of ${pct(HOUSE_FILLER_MARGIN_BPS)}; fills land on the first auction step at or past it, so slightly above${l.realizedSellMarginBps != null ? `. Sellers: ${marginPct(l.realizedSellMarginBps)}` : ""}${l.secondMarginBps != null ? `. Our second filler: ${marginPct(l.secondMarginBps)} over ${whole(l.secondFills)}` : ""}`,
+      value: (l.landedFills ?? 0) > 0 ? marginPct(l.landedMarginBps) : marginPct(MEASURED_BEFORE_FIX.bps),
+      note: `${
+        (l.landedFills ?? 0) > 0
+          ? `measured median over ${whole(l.landedFills)} ${l.landedFills === 1 ? "fill" : "fills"} since the ${MEASURED_BEFORE_FIX.date} timing fix, each at the second it executed. Before it: ${pct(MEASURED_BEFORE_FIX.bps)} over ${MEASURED_BEFORE_FIX.fills} fills`
+          : `measured median over ${MEASURED_BEFORE_FIX.fills} fills before the ${MEASURED_BEFORE_FIX.date} timing fix, which now sends each fill just ahead of its break-even second; no fills measured since yet`
+      }. Policy ${pct(HOUSE_FILLER_MARGIN_BPS)}, never more than ${pct(HOUSE_MAX_OVER_FAIR_BPS)}. Only fills the filler logged are measured (before the fix, ${MEASURED_BEFORE_FIX.fills} of the ${MEASURED_BEFORE_FIX.houseFills} it had made): the chain records the trade, not the filler's price, and the log began late${
+        l.secondMarginBps != null ? `. Our second filler: ${marginPct(l.secondMarginBps)} over ${whole(l.secondFills)}` : ""
+      }`,
     },
-    { label: "Actions on the program", value: whole(l.actions), note: "in test dollars on devnet" },
+    { label: "Actions on the program", value: whole(l.actions), note: "every event the program emitted, as the ledger counts them; test dollars on devnet" },
   ];
   const launchCells: { label: string; value: string }[] = [
     { label: "Launch markets on the curve", value: launches ? String(launches.onCurve) : dash },
@@ -1014,7 +1102,7 @@ export async function LiveNumbers() {
           the ledger
         </Link>{" "}
         (decoded from the program&rsquo;s own events) and the launch feed (read from the pool accounts), on devnet with test
-        money{asOf ? `, at ${utcStamp(asOf)}` : ""}. Unfilled orders include test orders under the ${HOUSE_MIN_DOLLARS} Sheaf&rsquo;s filler leaves alone, returned by design. QA baskets are left out of the launch counts. A dash means the number
+        money{asOf ? `, at ${utcStamp(asOf)}` : ""}. Fill rates count finished orders of ${HOUSE_MIN_DOLLARS} or more, the smallest Sheaf&rsquo;s filler takes; smaller test orders are left to other fillers and come back by design. QA baskets are left out of the launch counts. A dash means the number
         could not be read just now. One launch has gone from first buy to a locked pool: on a 1.126 SOL curve the treasury took
         about 0.0206 SOL, near 1.8% of it, plus 1% of the token supply (
         <a href={SOURCES.meteoraReceipts.href} target="_blank" rel="noreferrer" className={linkClass}>
@@ -1170,9 +1258,9 @@ export async function MarketFacts() {
 export function Beachhead() {
   const gets = [
     ["Themes its users hold themselves", "It lists single tokens today. With Sheaf it can offer a theme as one backed token in the user's own wallet, created and redeemed onchain, which is the thing a wallet cannot fake with a database row."],
-    ["Monthly plans", "A plan into a basket in one approval, run by anyone when due, filled by competing fillers. The habit of investing every month, pointed at US stocks."],
+    ["Monthly plans", "A plan into a basket in one approval, run by anyone when due, filled by any filler inside the plan's band. The habit of investing every month, pointed at US stocks."],
     ["A revenue share with no invoice", "It creates the baskets, sets the creator fee (0–1%) and keeps it on every share created in them, paid by the program. A planned integrator fee field adds a fee on its users' orders, 80% to the wallet."],
-    ["Fills it doesn't have to run", "Sheaf's filler fills its users' orders at up to 0.15% over fair, inside the band each buyer signs. It can run its own filler or bring a market maker instead."],
+    ["Fills it doesn't have to run", "Sheaf's filler fills its users' orders aiming for 0.15% over fair and never more than 1%, inside the band each buyer signs. It can run its own filler or bring a market maker instead."],
   ];
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
@@ -1296,7 +1384,14 @@ export function FounderLine() {
 /* --------------------------------------------------- nearby products -- */
 
 /** Baskets that already exist near Sheaf, from each one's own page, and where Sheaf differs. */
-export const NEARBY: { name: string; what: string; differs: string; source: SourceKey }[] = [
+export const NEARBY: { name: string; what: string; differs: string; source: SourceKey; more?: SourceKey[] }[] = [
+  {
+    name: "Glider, with Ondo",
+    what: "Custom portfolios of tokenized US stocks (Ondo's, since March 2026), with weightings kept automatically on a cadence you choose; stock investments from $1 on BNB Chain and Solana, 0.30% of traded volume when automated. Backed by a $4M round led by a16z CSX.",
+    differs: "The closest funded rival, and the better retail product today. Glider rebalances a portfolio you hold position by position; a Sheaf share is one backed token for a fixed basket, redeemable by anyone for the stocks, that can be held or routed like any other token, with no rebalancing and no yearly fee.",
+    source: "glider",
+    more: ["gliderOndo", "gliderA16z"],
+  },
   {
     name: "Kraken, Crypto + xStocks Bundles",
     what: "Themes such as Big Tech + Crypto inside Kraken's app, rebalanced automatically, no trading fee for Kraken+ members. Kraken owns Backed, the xStocks issuer.",
@@ -1322,6 +1417,12 @@ export const NEARBY: { name: string; what: string; differs: string; source: Sour
     source: "indexa",
   },
   {
+    name: "Portfi",
+    what: "Billed as \"the S&P 500 of Solana\": onchain baskets of tokenized stocks, gold and crypto bought into the user's own wallet, sold as $10 packs whose basket is picked by a random roll. Accepted to MagicBlock's Founders Camp in September 2026.",
+    differs: "Portfi buys the assets into your wallet one by one; a Sheaf basket is one token backed in its own vault, chosen by you, and redeemable for the stocks.",
+    source: "portfi",
+  },
+  {
     name: "Basket (basketsolana.xyz)",
     what: "One redeemable token over several Solana tokens; the baskets on its page are crypto (AI, DePIN, Solana, memes, staking). A tokenized-stock index has been reported, but we could not find it on its page.",
     differs: "The same primitive. Sheaf applies it to tokenized stocks, checks each issuer's powers, and runs a dollar path that reads no oracle.",
@@ -1332,6 +1433,12 @@ export const NEARBY: { name: string; what: string; differs: string; source: Sour
     what: "An issuer, not a basket: about 200 tokenized US stocks on Solana, each designed to be redeemable one for one for the share.",
     differs: "A supplier Sheaf could hold, not a rival: once its keys are accepted, a Sheaf basket could mix Backpack stocks with xStocks. Not yet.",
     source: "backpackSec",
+  },
+  {
+    name: "Securitize Stocks",
+    what: "An issuer, launched on Solana on 8 Oct 2026: twelve US stocks (Apple, Microsoft, NVIDIA and others), each a security entitlement to a real share, for eligible investors after onboarding and identity checks, settled in USDC.",
+    differs: "A supplier, but a permissioned one: a token only checked holders may hold cannot sit in a vault anyone can redeem from. Sheaf cannot hold it as built.",
+    source: "securitize",
   },
   {
     name: "Meteora StockLaunch",
@@ -1347,16 +1454,24 @@ export function NearbyProducts() {
       <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
         {NEARBY.map((n) => (
           <li key={n.name} className="grid gap-2 px-5 py-4 text-sm leading-relaxed lg:grid-cols-[14rem_minmax(0,1fr)_minmax(0,1fr)] lg:gap-6">
-            <a href={SOURCES[n.source].href} target="_blank" rel="noreferrer" className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
-              {n.name} ↗
-            </a>
+            <span>
+              <a href={SOURCES[n.source].href} target="_blank" rel="noreferrer" className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
+                {n.name} ↗
+              </a>
+              {n.more?.map((k) => (
+                <a key={k} href={SOURCES[k].href} target="_blank" rel="noreferrer" className="mt-1 block text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink-2">
+                  {SOURCES[k].label} ↗
+                </a>
+              ))}
+            </span>
             <p className="text-ink-2">{n.what}</p>
             <p className="text-ink-3">{n.differs}</p>
           </li>
         ))}
       </ul>
       <p className="mt-4 max-w-[90ch] text-xs leading-relaxed text-ink-3">
-        From each product&rsquo;s own page, read {CHECKED}. Where Sheaf sits: the self-custody, multi-issuer version, one backed
+        From each product&rsquo;s own page or the coverage linked, read {CHECKED} (Glider, Portfi and Securitize on 10 Oct
+        2026). Where Sheaf sits: the self-custody, multi-issuer version, one backed
         token per basket, no yearly fee. Cesto, Peaks, Symmetry and issuer ETF tokens are compared on{" "}
         <Link href="/method#compare" className={linkClass}>
           How it works

@@ -10,10 +10,10 @@ import { isTestBasket } from "@/lib/hidden";
 
 /** Shown first, in this order; any other basket only fills a gap if one cannot be read. */
 const FEATURED = [
-  // The Big Five leads: listed megacaps, with a year of history and dividends inside.
-  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
-  // The Magnificent Seven: created after the protocol fee, so it carries the 0.10%.
+  // The Magnificent Seven leads, as in the hero: created after the protocol fee, so it carries the 0.10%.
   "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x",
+  // The Big Five: listed megacaps with a year of history, created before the fee, so it pays none.
+  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
   // Bitcoin, by proxy: its launch market is on the current curve (sheaf-nav-shelf-v2).
   "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
   "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",

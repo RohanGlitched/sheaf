@@ -23,18 +23,22 @@ export const maxDuration = 60;
  * faucet, asked for over HTTP as any visitor would (the faucet itself mints with
  * the house key), and from the sell orders it buys and redeems in kind. Whatever
  * it was short of on this pass it claims for the next one. It fills on live
- * quotes only: a component priced from the last-good snapshot means no fill.
+ * Jupiter quotes only: a component priced from a fallback (GeckoTerminal) or the
+ * last-good snapshot means no fill. Like the house, it never fills more than 1%
+ * over fair, and it sends each fill just before its margin's second.
  *
  * Open to anyone, like the keeper; a short gap stops a loop.
  */
 
 const EDGE_BPS = 8;
-/** Extra margin when any quote is a fallback (Jupiter did not answer for it), as the house asks. */
-const FALLBACK_EXTRA_BPS = 50;
-/** The whole pass, waits included, stays inside this, well under the route's 60 s. */
-const PASS_BUDGET_SECS = 45;
-/** Inside one pass, wait up to this long for an order about to reach the margin. */
-const WAIT_SECS = 30;
+/** The whole pass, waits included, stays inside this, under the route's 60 s. */
+const PASS_BUDGET_SECS = 48;
+/**
+ * Inside one pass, wait up to this long for an order about to reach the margin:
+ * the whole pass, so an order whose margin falls before the next minute's pass
+ * is not filled late (and deeper) by it.
+ */
+const WAIT_SECS = 48;
 
 let lastRun = 0;
 let running = false;
@@ -54,8 +58,7 @@ export async function GET(request: Request) {
   const short = new Set<string>();
   try {
     const market = await fetchMarket();
-    const fallback = market.quotes.some((q) => q.source && q.source !== "jupiter");
-    const edgeBps = EDGE_BPS + (fallback ? FALLBACK_EXTRA_BPS : 0);
+    const edgeBps = EDGE_BPS;
     const quotes = new Map(market.quotes.map((q) => [q.symbol, q]));
     const result = await runFillerPass({
       connection,
@@ -68,8 +71,8 @@ export async function GET(request: Request) {
       quote: (mint) => {
         const stock = stockForWriteMint(mint.toBase58());
         const q = stock ? quotes.get(stock.symbol) : undefined;
-        // Live quotes only: a component priced from the last-good snapshot means no fill.
-        return q && q.source !== "snapshot" ? q : undefined;
+        // Live Jupiter quotes only (the core refuses any other source too).
+        return q && q.source === "jupiter" ? q : undefined;
       },
       lookupTable: async (basket: CoreBasket) => {
         const res = await fetch(`${origin}/api/alt?basket=${basket.address.toBase58()}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -96,9 +99,9 @@ export async function GET(request: Request) {
     }
     // What it believed each fill was worth, for the realized margins on /api/ledger.
     await recordFills(
-      result.filled.map((f) => ({ order: f.order, side: f.side, filler: "second" as const, cash: f.dollars, fair: f.cost, marginBps: f.edgeBps, fallback, at: Date.now() })),
+      result.filled.map((f) => ({ order: f.order, side: f.side, filler: "second" as const, cash: f.dollars, fair: f.cost, marginBps: f.edgeBps, landed: !!f.landed, at: Date.now() })),
     );
-    return Response.json({ filler: filler.publicKey.toBase58(), edgeBps, fallback, ...result, topUp, log: lines.slice(-40) }, noStore);
+    return Response.json({ filler: filler.publicKey.toBase58(), edgeBps, ...result, topUp, log: lines.slice(-40) }, noStore);
   } catch (err) {
     return Response.json({ error: ((err as Error).message ?? "pass failed").split("\n")[0].slice(0, 200), log: lines.slice(-20) }, { status: 500 });
   } finally {

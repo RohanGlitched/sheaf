@@ -41,6 +41,13 @@ const isHouse = (address: string) => teamWallet(address)?.role === "house";
 /** A plan whose reference sits further than this from today's fair rate is offered a re-center. */
 const RECENTER_DRIFT = 0.02;
 
+/**
+ * A running plan whose price sits within this of one of its owner's limits is
+ * flagged "Re-center due": past a limit no filler can take its runs, so it
+ * pauses until its owner re-centers it.
+ */
+const NEAR_LIMIT = 0.05;
+
 /** The demo cadence's auction, short enough that one run has closed before the next is due. */
 const DEMO_AUCTION_SECS = 240;
 
@@ -155,6 +162,17 @@ function PlanCard({
   // only resets where the next auction starts.)
   const stalled = !plan.legacy && plan.runsLeft > 0 && paid != null && payAtMost != null && paid > payAtMost;
   const offCenter = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && (stalled || Math.abs(drift) > RECENTER_DRIFT);
+  // The owner's limits as prices: the hard limits on a trailing plan, the fixed bounds otherwise. A plan opened
+  // before hard limits trails with no floor, so it has none to flag.
+  const limitHi = plan.trailStepBps > 0 ? plan.hardMinRef : plan.minRef;
+  const limitLo = plan.trailStepBps > 0 ? plan.hardMaxRef : plan.maxRef;
+  const priceCap = limitHi != null && limitHi > 0n ? 1e9 / Number(limitHi) : null;
+  const priceFloor = limitLo != null && limitLo > 0n ? 1e9 / Number(limitLo) : null;
+  const nearLimit =
+    !plan.legacy &&
+    plan.runsLeft > 0 &&
+    paid != null &&
+    ((priceCap != null && paid >= priceCap * (1 - NEAR_LIMIT)) || (priceFloor != null && paid <= priceFloor * (1 + NEAR_LIMIT)));
   // An expired order the house paid rent for goes back on the keeper's next pass; anyone else's after the grace.
   const returnsIn = expired && !isHouse(expired.rentPayer) ? expired.endTs + REFUND_GRACE_SECS - now : 0;
   return (
@@ -176,6 +194,14 @@ function PlanCard({
                 demo pace
               </span>
             )}
+            {nearLimit && (
+              <span
+                className="rounded-full border border-loss/50 px-2 py-0.5 text-[11px] leading-none text-loss"
+                title={`Today's price is within ${NEAR_LIMIT * 100}% of this plan's ${priceCap != null && paid! >= priceCap * (1 - NEAR_LIMIT) ? "highest" : "lowest"} limit. Past it the plan pauses until its owner re-centers it.`}
+              >
+                Re-center due
+              </span>
+            )}
           </span>
           <span className="tnum text-sm text-ink-2">
             {money(fromCashRaw(plan.cashPerRun))} {every(plan.periodSecs)}
@@ -194,10 +220,10 @@ function PlanCard({
                 : ` · next run ${until(plan.nextRunTs, now)}`}
           {plan.fills > 0 && plan.lastFillTs > 0 && ` · last filled ${timeAgo(plan.lastFillTs)}`}
         </p>
-        {!plan.legacy && plan.trailStepBps > 0 && plan.hardMinRef == null && (
+        {!plan.legacy && plan.runsLeft > 0 && plan.trailStepBps > 0 && plan.hardMinRef == null && (
           <p className="mt-1 border-l-2 border-line-strong pl-2 text-xs text-ink-2">
             Opened before hard limits: it follows the market ±{(plan.trailStepBps / 100).toFixed(0)}% a run with no floor, and Re-center
-            can&apos;t add one. Close it and open a new plan to get one.
+            can&apos;t add one.{mine ? " Close it and open a new plan to get one." : ""}
           </p>
         )}
         {!plan.legacy && plan.trailStepBps > 0 && plan.hardMinRef != null && plan.runsLeft > 0 && (
@@ -521,9 +547,15 @@ export function PlansBoard() {
 
   // Totals come from the ledger, so /plans, /business and /ledger agree; the cards below list the plans still open.
   const listed = live.filter((p) => !folded(p)).length;
+  // Plans the cards don't show: closed ones (their accounts are gone) and broken test plans only their owners see.
+  // The ledger keeps every one of them.
+  const unlisted = ledgerTotals ? Math.max(0, ledgerTotals.opened - listed - mineLegacy.length - othersLegacy.length) : 0;
   const stats: { label: string; value: string; note: string | null }[] = ledgerTotals
     ? [
-        { label: "Plans opened", value: count(ledgerTotals.opened), note: `${count(totals.running)} running now · ${count(listed)} listed below` },
+        { label: "Plans opened", value: count(ledgerTotals.opened), note: `${count(totals.running)} running now · ${count(listed)} listed below${
+            unlisted > 0 ? ` · ${count(unlisted)} closed or retired, on the ledger` : ""
+          }`,
+        },
         { label: "Plan runs filled", value: count(ledgerTotals.filled), note: `of ${count(ledgerTotals.runs)} runs placed` },
         { label: "Dollars put in by plans", value: money(ledgerTotals.dollars), note: "every filled run, closed plans too" },
         { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
@@ -584,6 +616,10 @@ export function PlansBoard() {
             Running a due plan needs no permission: anyone can send the transaction, and the plan can only do the one thing
             its owner allowed.{" "}
             {plans == null ? "" : due.length > 0 ? `${due.length} ${due.length === 1 ? "plan is" : "plans are"} due right now.` : "No plan is due right now."}
+          </p>
+          <p className="mt-2 max-w-[50ch] text-xs leading-relaxed text-ink-3">
+            A plan keeps running only inside its owner&apos;s hard limits. If the price moves past one, the plan pauses until
+            its owner re-centers it; a card is marked &ldquo;Re-center due&rdquo; once the price is within {NEAR_LIMIT * 100}% of a limit.
           </p>
           {plans == null ? (
             <div className="skeleton mt-6 h-40 rounded-[var(--radius-panel)]" />

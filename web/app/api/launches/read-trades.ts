@@ -1,6 +1,5 @@
 import { Connection, PublicKey, type ParsedTransactionWithMeta } from "@solana/web3.js";
 import { NATIVE_SOL, dammV2PoolAddress } from "@/lib/dbc";
-import { teamTag } from "@/lib/team-wallets";
 
 /** The program PDAs that own every curve vault (DBC) and every graduated pool vault (DAMM v2). */
 const DBC_POOL_AUTHORITY = "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM";
@@ -15,8 +14,6 @@ export type LaunchTrade = {
   at: number | null;
   /** The fee payer, which signs the swap. */
   wallet: string;
-  /** "house", "treasury", "deploy" or "test wallet" for Sheaf's own wallets; null for anyone else. */
-  team: string | null;
   side: "buy" | "sell";
   /** SOL the trade moved into or out of the pool's SOL vault, fees included. */
   sol: number;
@@ -25,10 +22,6 @@ export type LaunchTrade = {
 
 export type LaunchTrades = {
   trades: LaunchTrade[];
-  /** Distinct wallets outside the Sheaf team that traded. Team, house and test wallets never count. */
-  traders: number;
-  teamTrades: number;
-  outsideTrades: number;
 };
 
 const cache = new Map<string, { at: number; value: LaunchTrades }>();
@@ -73,7 +66,6 @@ function tradeOf(
     signature,
     at: tx.blockTime ?? null,
     wallet,
-    team: teamTag(wallet),
     side: delta > 0n ? "buy" : "sell",
     sol: Number(delta < 0n ? -delta : delta) / 1e9,
     market,
@@ -82,7 +74,7 @@ function tradeOf(
 
 /**
  * Every recent swap on a launch's curve, and on its DAMM v2 pool once it has
- * graduated, newest first, with Sheaf's own wallets tagged. Read from the
+ * graduated, newest first. Wallets are not tagged. Read from the
  * chain on request (cached 30 seconds per pool); no indexer.
  */
 export async function readTrades(
@@ -111,13 +103,7 @@ export async function readTrades(
     });
   }
   trades.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
-  const outside = trades.filter((t) => t.team == null);
-  const value: LaunchTrades = {
-    trades,
-    traders: new Set(outside.map((t) => t.wallet)).size,
-    teamTrades: trades.length - outside.length,
-    outsideTrades: outside.length,
-  };
+  const value: LaunchTrades = { trades };
   // Keys are official launch pools only (the routes check), but keep the map bounded anyway.
   if (cache.size >= 100) cache.clear();
   cache.set(key, { at: Date.now(), value });

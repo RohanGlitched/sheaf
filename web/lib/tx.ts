@@ -585,10 +585,15 @@ export function explainError(error: unknown, context?: { action?: "cancel" }): s
     if (new RegExp(`\\b${code}\\b`).test(raw)) return message;
   }
 
-  if (/no record of a prior credit|blockhash not found/i.test(raw)) {
+  // "No record of a prior credit" means the fee payer holds no SOL at all. On devnet
+  // that is almost always an empty wallet (the browser wallet is never on another network).
+  if (/no record of a prior credit|insufficient funds for (fee|rent)|insufficient lamports/i.test(raw)) {
+    return "Not enough devnet SOL for fees. With the wallet in this browser, open the wallet menu and choose Get test SOL; with another wallet, use faucet.solana.com.";
+  }
+  if (/blockhash not found/i.test(raw)) {
     return "Your wallet looks to be on a different network. Switch it to devnet, where Sheaf settles, and try again.";
   }
-  if (/insufficient lamports|insufficient funds/i.test(raw)) {
+  if (/insufficient funds/i.test(raw)) {
     return "Not enough SOL in the wallet to pay for this transaction.";
   }
   if (/0x1\b/.test(raw)) {

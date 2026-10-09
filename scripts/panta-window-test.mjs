@@ -85,6 +85,12 @@ const cases = [
     from: "2027-04-02T20:00:00Z",
     to: "2027-04-09T20:00:00Z",
   },
+  {
+    name: "drafted Fri Oct 9 2026 at 13:00 New York: under a day of trading before that close, so it measures Oct 16 to Oct 23",
+    now: "2026-10-09T17:00:00Z",
+    from: "2026-10-16T20:00:00Z",
+    to: "2026-10-23T20:00:00Z",
+  },
 ];
 
 for (const c of cases) {
@@ -92,10 +98,62 @@ for (const c of cases) {
     const win = w.marketWindow(ny(c.now));
     assert.equal(iso(win.fromClose), c.from, "fromClose");
     assert.equal(iso(win.toClose), c.to, "toClose (Panta endTime)");
-    assert.ok(win.opens <= win.fromClose, "trading opens before the measured week starts");
+    assert.ok(win.opens + w.MIN_TRADING_S <= win.fromClose, "trading runs at least a day before the measured week starts");
     assert.equal(win.resolves, win.toClose + 2 * 3600, "resolutionTime is two hours after the close");
+    const times = w.pantaTimes(win);
+    assert.equal(times.startTime, win.opens, "startTime is when trading opens");
+    assert.equal(times.endTime, win.fromClose, "endTime is the first close: trading closes when the measured week starts");
+    assert.equal(times.resolutionTime, win.resolves, "resolutionTime");
   });
 }
+
+// The last decided week, for /predict's worked example: never a close that is not final yet.
+const settled = [
+  {
+    name: "Fri Oct 9 2026 15:20 New York, before the bell: last week is Sep 25 to Oct 2",
+    now: "2026-10-09T19:20:00Z",
+    from: "2026-09-25T20:00:00Z",
+    to: "2026-10-02T20:00:00Z",
+  },
+  {
+    name: "Fri Oct 9 2026 16:30 New York, the close not final yet: still Sep 25 to Oct 2",
+    now: "2026-10-09T20:30:00Z",
+    from: "2026-09-25T20:00:00Z",
+    to: "2026-10-02T20:00:00Z",
+  },
+  {
+    name: "Fri Oct 9 2026 17:30 New York, the close final: Oct 2 to Oct 9",
+    now: "2026-10-09T21:30:00Z",
+    from: "2026-10-02T20:00:00Z",
+    to: "2026-10-09T20:00:00Z",
+  },
+  {
+    name: "Sat Dec 26 2026, after Christmas: the week ends at Thu Dec 24's 13:00 close, from Fri Dec 18",
+    now: "2026-12-26T15:00:00Z",
+    from: "2026-12-18T21:00:00Z",
+    to: "2026-12-24T18:00:00Z",
+  },
+  {
+    name: "Mon Jan 4 2027: Dec 24 13:00 to Thu Dec 31 16:00",
+    now: "2027-01-04T15:00:00Z",
+    from: "2026-12-24T18:00:00Z",
+    to: "2026-12-31T21:00:00Z",
+  },
+];
+for (const c of settled) {
+  check(c.name, () => {
+    const week = w.lastSettledWeek(ny(c.now));
+    assert.equal(iso(week.fromClose), c.from, "fromClose");
+    assert.equal(iso(week.toClose), c.to, "toClose");
+    assert.equal(w.lastSettledWeekClose(ny(c.now)), week.toClose, "lastSettledWeekClose");
+    assert.ok(week.toClose + w.CLOSE_SETTLE_S <= ny(c.now), "the close is final");
+  });
+}
+
+check("the dated question names the week's last close", () => {
+  assert.equal(w.weekEndingLabel(ny("2026-10-23T20:00:00Z")), "Oct 23");
+  assert.equal(w.weekEndingLabel(ny("2026-12-24T18:00:00Z")), "Dec 24");
+});
 
 check("closeDayAtOrBefore skips Christmas and uses Thursday's early close", () => {
   assert.equal(w.closeDayAtOrBefore(ny("2026-12-25T23:00:00Z")), 20261224);
@@ -116,6 +174,7 @@ check("the rule carries the recipe units", () => {
     { base: "AAPL", unitsPerShare: "5857223", decimals: 8 },
   ]);
   assert.match(rule, /NVDA 0\.1127068, AAPL 0\.05857223/);
+  assert.match(rule, /Trading closes at the first of the two closes/);
 });
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");

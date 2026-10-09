@@ -11,7 +11,13 @@
  * A pass reads every open order, keeps the ones in the accepted cash mint,
  * prices the stocks the auction asks for at the caller's quotes (with every
  * Token-2022 transfer fee grossed up), and fills when the dollars beat that cost
- * by the caller's margin. Before it sends, it simulates the exact signed
+ * by the caller's margin, on live Jupiter quotes only (a fallback or snapshot
+ * price means no fill). It never fills more than 1% over fair for the buyer
+ * (maxOverFairBps): the auction only gets dearer from there, so such an order is
+ * left to run out and be refunded. It sends each fill about 1.8 s before the
+ * margin's second (leadMs), so the fill lands on that second rather than two
+ * seconds past it, and reports the margin at the second the fill actually
+ * executed. Before it sends, it simulates the exact signed
  * transaction and checks that its cash account grows by at least the expected
  * payout and that no component leaves it in a larger amount than was priced.
  *
@@ -97,7 +103,15 @@ export type CoreBasket = {
   components: CoreComponent[];
 };
 
-export type Quote = { price: number; multiplier?: number };
+/**
+ * A component's price. `source` is where it came from, when the feed says: only
+ * a live Jupiter quote is filled on. A fallback (GeckoTerminal) or last-good
+ * snapshot price may be shown on a page but is treated as no quote at all, so a
+ * component priced from one means no fill.
+ */
+export type Quote = { price: number; multiplier?: number; source?: string };
+/** A quote the filler may fill on: present, and live from Jupiter when its source is named. */
+const live = (q: Quote | undefined): q is Quote => q != null && (q.source == null || q.source === "jupiter");
 type Fee = { bps: bigint; max: bigint };
 type MintInfo = { program: PublicKey; decimals: number; fee: Fee };
 
@@ -401,6 +415,21 @@ export type PassOptions = {
   cashMint: PublicKey;
   /** Minimum margin over cost, in basis points. */
   edgeBps: number;
+  /**
+   * The most over fair a buyer may pay (or under fair a seller may receive)
+   * through this filler, in basis points (default 100). The auction only gets
+   * dearer for the buyer, so an order already past it is never filled: it runs
+   * out and its dollars go back.
+   */
+  maxOverFairBps?: number;
+  /**
+   * How long before the margin's second a fill is sent, in milliseconds (default
+   * 1,800). The cluster clock this filler reads (the newest confirmed block's
+   * time) runs about a second behind, and a transaction executes about half a
+   * second after it is sent; without the lead a fill lands about two seconds, some
+   * 8 bps on a 90-second auction, past the margin it waited for.
+   */
+  leadMs?: number;
   /** A quote for a component mint (the write-cluster mint), or undefined when unpriced. */
   quote: (mint: PublicKey) => Quote | undefined;
   /** Price and simulate, but sign nothing that is sent. */
@@ -419,25 +448,37 @@ export type PassOptions = {
 };
 
 export type PassResult = {
-  filled: { side: "buy" | "sell"; order: string; basket: string; dollars: number; cost: number; edgeBps: number; signature: string }[];
+  /** `landed`: the edge is the one at the second the fill executed, read from its block (else the filler's estimate). */
+  filled: { side: "buy" | "sell"; order: string; basket: string; dollars: number; cost: number; edgeBps: number; signature: string; landed?: boolean }[];
   considered: number;
 };
 
 const short = (k: PublicKey) => k.toBase58().slice(0, 6);
 /** A fill is only sent with at least this long left in the auction, so it lands before the end. */
 const MIN_SECS_LEFT = 5;
+const DEFAULT_MAX_OVER_FAIR_BPS = 100;
+const DEFAULT_LEAD_MS = 1_800;
 
-/** The cluster's clock (the newest block's time), carried forward by the wall clock. */
-async function chainClock(connection: Connection): Promise<() => number> {
-  const wall = () => Math.floor(Date.now() / 1000);
+/** The cluster's clock (the newest confirmed block's time), carried forward by the wall clock, in milliseconds. */
+async function chainClockMs(connection: Connection): Promise<() => number> {
+  const wall = () => Date.now();
   try {
     const t = await connection.getBlockTime(await connection.getSlot("confirmed"));
     if (t == null) return wall;
-    const offset = t - wall();
-    return () => wall() + offset;
+    const offset = t * 1000 - Date.now();
+    return () => Date.now() + offset;
   } catch {
     return wall;
   }
+}
+
+/** The clock in milliseconds, and in whole seconds as the program reads it. */
+type Clock = { ms: () => number; secs: () => number };
+
+/** The second a confirmed transaction executed at, from its block: what the program's clock read. Null if unknown. */
+async function landedAt(connection: Connection, signature: string): Promise<number | null> {
+  const tx = await connection.getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+  return tx?.blockTime ?? null;
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -475,7 +516,9 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
   result.considered = accepted.length + sells.length;
 
   // Defences 2 and 3: decimals and transfer fee from the mint itself, read fresh every pass.
-  const [{ epoch }, clock] = await Promise.all([connection.getEpochInfo(), chainClock(connection)]);
+  const [{ epoch }, clockMs] = await Promise.all([connection.getEpochInfo(), chainClockMs(connection)]);
+  const clock: Clock = { ms: clockMs, secs: () => Math.floor(clockMs() / 1000) };
+  const leadMs = o.leadMs ?? DEFAULT_LEAD_MS;
   let cash: MintInfo;
   try {
     cash = readMint(await connection.getAccountInfo(cashMint), epoch);
@@ -501,9 +544,10 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
   // is queued, soonest first, and waited for under one shared deadline, then
   // re-checked: still open, and still worth it.
   const passDeadline = Date.now() + (o.passBudgetSecs ?? 45) * 1000;
-  const pending: { dueAt: number; run: (opts: PassOptions) => Promise<Priced>; address: PublicKey; id: string }[] = [];
+  const pending: { dueAt: number; lead: boolean; run: (opts: PassOptions) => Promise<Priced>; address: PublicKey; id: string }[] = [];
   const take = (r: Priced, run: (opts: PassOptions) => Promise<Priced>, address: PublicKey, id: string) => {
-    if (r && "due" in r) pending.push({ dueAt: Date.now() + r.due * 1000, run, address, id });
+    // Due at chain second `at`: sent `leadMs` before the clock reads it, so it lands on it.
+    if (r && "at" in r) pending.push({ dueAt: Date.now() + (r.at * 1000 - (r.lead ? leadMs : 0) - clock.ms()), lead: r.lead, run, address, id });
     else if (r) result.filled.push(r);
   };
   for (const order of accepted) {
@@ -556,8 +600,8 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
         log(`${job.id} gone during the wait`);
         continue;
       }
-      const r = await job.run({ ...o, waitUpToSecs: 0 });
-      if (r && !("due" in r)) result.filled.push(r);
+      const r = await job.run({ ...o, waitUpToSecs: 0, leadMs: job.lead ? leadMs : 0 });
+      if (r && !("at" in r)) result.filled.push(r);
     } catch (err) {
       log(`${job.id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
     }
@@ -565,8 +609,17 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
   return result;
 }
 
-/** A priced order: filled, due in a few seconds, or nothing to do. */
-type Priced = PassResult["filled"][number] | { due: number } | null;
+/**
+ * A priced order: filled, due at chain second `at` (sent early when `lead`, which
+ * is only when landing a second early would still not lose money), or nothing to do.
+ */
+type Priced = PassResult["filled"][number] | { at: number; lead: boolean } | null;
+
+/**
+ * The second a fill sent now should land on: with the lead, the clock reads
+ * about `leadMs` before it; never earlier than the clock's own second.
+ */
+const landingSecond = (clock: Clock, leadMs: number) => Math.floor((clock.ms() + leadMs) / 1000);
 
 /** The cash a sell order owes its seller at `t`: start_cash decaying to end_cash, rounded in the seller's favour. */
 export const requiredCash = (o: Pick<CoreSellOrder, "startCash" | "endCash" | "startTs" | "endTs">, t: number) =>
@@ -578,7 +631,7 @@ async function priceAndFillSell(
   basket: CoreBasket,
   cash: MintInfo,
   epoch: number,
-  clock: () => number,
+  clock: Clock,
   log: (line: string) => void,
 ): Promise<Priced> {
   const { connection, filler, idl, edgeBps } = o;
@@ -617,8 +670,8 @@ async function priceAndFillSell(
   let value = 0;
   for (const [i, c] of basket.components.entries()) {
     const q = o.quote(c.mint);
-    if (!q) {
-      log(`${id} skipped: no quote for ${c.mint.toBase58()}`);
+    if (!live(q)) {
+      log(`${id} skipped: no live quote for ${c.mint.toBase58()}`);
       return null;
     }
     const units = (c.unitsPerShare * order.shares) / ONE_SHARE;
@@ -633,13 +686,14 @@ async function priceAndFillSell(
     const paid = Number(payAt(t)) / 10 ** cash.decimals;
     return paid > 0 ? (value - paid) / paid : -1;
   };
-  // The cash only decays, so the amount owed at the cluster's clock now is the most the fill can cost.
-  const t = clock();
+  // The cash only decays, and the clock runs behind the cluster's, so the amount
+  // owed at the clock now is the most the fill can cost.
+  const t = clock.secs();
   if (edgeAt(t) * 10_000 < edgeBps && o.waitUpToSecs) {
     for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
       if (edgeAt(t + dt) * 10_000 >= edgeBps) {
         log(`${tag}: margin in ${dt}s, queued`);
-        return { due: dt };
+        return { at: t + dt, lead: edgeAt(t + dt - 1) >= 0 };
       }
     }
   }
@@ -647,11 +701,18 @@ async function priceAndFillSell(
     log(`${tag}: skipped, auction ends in under ${MIN_SECS_LEFT}s`);
     return null;
   }
-  const edge = edgeAt(t);
+  // Priced where it should land; if landing a second early would lose money, only once the clock itself says so.
+  let tLand = Math.max(t, landingSecond(clock, o.leadMs ?? DEFAULT_LEAD_MS));
+  if (edgeAt(tLand - 1) < 0) tLand = t;
+  const edge = edgeAt(tLand);
   const pay = payAt(t);
-  const dollars = Number(pay) / 10 ** cash.decimals;
+  const dollars = Number(payAt(tLand)) / 10 ** cash.decimals;
   if (edge * 10_000 < edgeBps) {
     log(`${tag}: asks $${dollars.toFixed(2)}, edge ${(edge * 100).toFixed(2)}%, waiting`);
+    return null;
+  }
+  if (edge * 10_000 > (o.maxOverFairBps ?? DEFAULT_MAX_OVER_FAIR_BPS)) {
+    log(`${tag}: skipped, priced ${(edge * 100).toFixed(2)}% below fair; left to run out`);
     return null;
   }
   const heldCash = tokenAmount(fillerCashInfo?.data);
@@ -708,7 +769,11 @@ async function priceAndFillSell(
   const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
   if (res.value.err) throw new Error(JSON.stringify(res.value.err));
   log(`${tag}: FILLED: ${plan} ${signature}`);
-  return { side: "sell", order: order.address.toBase58(), basket: basket.symbol, dollars, cost: value, edgeBps: Math.round(edge * 100_000) / 10, signature };
+  // What it actually paid: the amount owed at the second the fill executed.
+  const at = await landedAt(connection, signature);
+  const paidNow = at != null ? Number(payAt(at)) / 10 ** cash.decimals : dollars;
+  const landedEdge = at != null ? edgeAt(at) : edge;
+  return { side: "sell", order: order.address.toBase58(), basket: basket.symbol, dollars: paidNow, cost: value, edgeBps: Math.round(landedEdge * 100_000) / 10, signature, landed: at != null };
 }
 
 async function priceAndFill(
@@ -717,7 +782,7 @@ async function priceAndFill(
   basket: CoreBasket,
   cash: MintInfo,
   epoch: number,
-  clock: () => number,
+  clock: Clock,
   log: (line: string) => void,
 ): Promise<Priced> {
   const { connection, filler, idl, edgeBps } = o;
@@ -756,7 +821,7 @@ async function priceAndFill(
     const deliver: bigint[] = [];
     for (const [i, c] of basket.components.entries()) {
       const q = o.quote(c.mint);
-      if (!q) return { error: `no quote for ${c.mint.toBase58()}` } as const;
+      if (!live(q)) return { error: `no live quote for ${c.mint.toBase58()}` } as const;
       const target = (c.unitsPerShare * g + ONE_SHARE - 1n) / ONE_SHARE;
       const amount = preFeeAmount(target, mints[i].fee);
       deliver.push(amount);
@@ -767,29 +832,41 @@ async function priceAndFill(
   const tag = `${id} ${basket.symbol} $${dollars.toFixed(2)} net`;
   // Priced at the cluster's own clock: the auction only decays, so the count owed
   // now is the most the fill can need when it lands a moment later.
-  const t = clock();
+  // `p` is the count owed at the clock now, which runs behind the cluster's: the
+  // most the fill can need, so it is what the filler must hold and what the
+  // simulation may take. `l` is the count where the fill should land, which is
+  // what the margin is judged on.
+  const t = clock.secs();
   const p = priceAt(t);
   if ("error" in p) {
     log(`${tag} skipped: ${p.error}`);
     return null;
   }
+  const edgeOf = (x: ReturnType<typeof priceAt>) => ("error" in x ? -1 : x.edge);
   if (p.edge * 10_000 < edgeBps && o.waitUpToSecs) {
     // The auction only decays, so find the first second inside the wait window that clears the margin.
     for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
-      const q = priceAt(t + dt);
-      if (!("error" in q) && q.edge * 10_000 >= edgeBps) {
+      if (edgeOf(priceAt(t + dt)) * 10_000 >= edgeBps) {
         log(`${tag} margin in ${dt}s, queued`);
-        return { due: dt };
+        return { at: t + dt, lead: edgeOf(priceAt(t + dt - 1)) >= 0 };
       }
     }
   }
-  if ("error" in p) return null;
   if (order.endTs - t < MIN_SECS_LEFT) {
     log(`${tag} skipped: auction ends in under ${MIN_SECS_LEFT}s`);
     return null;
   }
-  if (p.edge * 10_000 < edgeBps) {
-    log(`${tag} cost $${p.cost.toFixed(2)}, edge ${(p.edge * 100).toFixed(2)}%, waiting`);
+  // Where it should land; if landing a second early would lose money, only once the clock itself says so.
+  let tLand = Math.max(t, landingSecond(clock, o.leadMs ?? DEFAULT_LEAD_MS));
+  if (edgeOf(priceAt(tLand - 1)) < 0) tLand = t;
+  const l = priceAt(tLand);
+  if ("error" in l) return null;
+  if (l.edge * 10_000 < edgeBps) {
+    log(`${tag} cost $${l.cost.toFixed(2)}, edge ${(l.edge * 100).toFixed(2)}%, waiting`);
+    return null;
+  }
+  if (l.edge * 10_000 > (o.maxOverFairBps ?? DEFAULT_MAX_OVER_FAIR_BPS)) {
+    log(`${tag} skipped: run priced ${(l.edge * 100).toFixed(2)}% above fair; left to run out and be refunded`);
     return null;
   }
   const missing = basket.components.filter((_, i) => tokenAmount(holdingInfos[i]?.data) < p.deliver[i]).map((c) => c.mint);
@@ -823,7 +900,7 @@ async function priceAndFill(
     commitment: "confirmed",
     accounts: { encoding: "base64", addresses: watched.map((k) => k.toBase58()) },
   });
-  const plan = `fill ${Number(p.shares) / 1e6} shares for $${dollars.toFixed(2)} at cost $${p.cost.toFixed(2)}, edge ${(p.edge * 100).toFixed(2)}%`;
+  const plan = `fill ${Number(l.shares) / 1e6} shares for $${dollars.toFixed(2)} at cost $${l.cost.toFixed(2)}, edge ${(l.edge * 100).toFixed(2)}%`;
   if (sim.value.err) {
     const why = (sim.value.logs ?? []).filter((l) => /error|failed/i.test(l)).slice(-1)[0] ?? JSON.stringify(sim.value.err);
     log(`${tag} skipped: simulation failed (${why.slice(0, 160)})${o.dryRun ? `; would ${plan}` : ""}`);
@@ -848,5 +925,9 @@ async function priceAndFill(
   const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
   if (res.value.err) throw new Error(JSON.stringify(res.value.err));
   log(`${tag} FILLED: ${plan} ${signature}`);
-  return { side: "buy", order: order.address.toBase58(), basket: basket.symbol, dollars, cost: p.cost, edgeBps: Math.round(p.edge * 100_000) / 10, signature };
+  // What it actually delivered: the count at the second the fill executed.
+  const at = await landedAt(connection, signature);
+  const landed = at != null ? priceAt(at) : l;
+  const final = "error" in landed ? l : landed;
+  return { side: "buy", order: order.address.toBase58(), basket: basket.symbol, dollars, cost: final.cost, edgeBps: Math.round(final.edge * 100_000) / 10, signature, landed: final !== l };
 }

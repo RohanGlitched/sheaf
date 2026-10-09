@@ -65,6 +65,14 @@ export async function solUsd(): Promise<number> {
 export const LAUNCH_METADATA_SITE = "https://sheaf-index.vercel.app";
 
 /**
+ * The site's public address, for the links inside the metadata JSON
+ * (`external_url`, `image`, the NAV proof). The JSON is served fresh on every
+ * read, so these can follow the canonical domain; only the minted URI above has
+ * to stay fixed.
+ */
+export const PUBLIC_SITE = "https://sheaf.world";
+
+/**
  * The token URI a launch is minted with. It is kept short on purpose: the
  * config, pool and metadata go in one legacy transaction, and a 32-character
  * name with a longer URI does not fit in 1,232 bytes

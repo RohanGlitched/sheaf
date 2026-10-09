@@ -12,21 +12,21 @@
 
 ---
 
-Tokenized stocks now trade around the clock on Solana and several EVM chains, but you still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens one by one and tracking them yourself, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. The program reads no price, and no share can exist without the stocks behind it. On top of that core: dollar orders and sell orders filled by competing fillers in Dutch auctions, monthly plans anyone can run when due, a Meteora launch market per basket, a Panta prediction market per basket, and a live mainnet tape through Solami.
+Sheaf is for people who keep tokenized stocks in their own wallet, and for the wallets and front ends that list those stocks. Such a holder can buy Apple or NVIDIA as a token, around the clock, on Solana and several EVM chains, but still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens one by one and tracking them yourself, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. The program reads no price, and no share can exist without the stocks behind it. You buy a share in kind, with dollars through an auction any filler may fill, or every month through a plan anyone can run when it is due. You leave by selling it for dollars or redeeming it for the stocks.
 
 ## Live
 
 | | |
 |---|---|
 | App | [sheaf.world](https://sheaf.world): connect any Solana wallet set to devnet, or choose **Use a wallet in this browser** (nothing to install); an empty wallet gets test SOL and test dollars in one click |
-| Create a basket | [/compose](https://sheaf.world/compose): 28 tokenized stocks (20 xStocks, 8 PreStocks pre-IPO tokens such as OpenAI, Anthropic, SpaceX) |
+| Create a basket | [/compose](https://sheaf.world/compose): 28 tokenized stocks (20 xStocks such as Apple, NVIDIA and Tesla, and 8 PreStocks pre-IPO tokens) |
 | Browse | [/explore](https://sheaf.world/explore) · [/plans](https://sheaf.world/plans) · [/predict](https://sheaf.world/predict) · [/portfolio](https://sheaf.world/portfolio) |
 | Proof | [/ledger](https://sheaf.world/ledger) (every program event, decoded from the chain and cached) · [/business](https://sheaf.world/business) (fees, the protocol-fee claim receipt) · [/live](https://sheaf.world/live) (mainnet xStock trades through Solami) · [/chains](https://sheaf.world/chains) (each EVM vault read from its own chain) |
 | Program | [`GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz`](https://explorer.solana.com/address/GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz?cluster=devnet) on Solana devnet |
 
-Try it in two minutes on Solana: **Connect** → **Use a wallet in this browser** → **Get test SOL and test dollars**. Open **The Big Five**, buy $20 with dollars; a filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Sell some back for dollars from the same panel, or start a **Monthly** plan on a 5-minute period to watch it run.
+Try it in two minutes on Solana: **Connect** → **Use a wallet in this browser** → **Get test SOL and test dollars**. Open [**The Magnificent Seven**](https://sheaf.world/basket/v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x) (MAG7, which carries the 0.10% protocol fee) and buy $20 with dollars. A filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Sell some back for dollars from the same panel (**Sell**), or start a **Monthly** plan at **Every 5 minutes** to watch it run.
 
-On Robinhood Chain or Arbitrum Sepolia: open [/chains](https://sheaf.world/chains), pick a basket, connect (or use a wallet in this browser), take test stocks and dollars from the faucet, then create shares in kind or place a dollar auction the house fills. On Tempo: open the MAG8 basket and run the monthly plan panel; the chain itself refuses an overpay, an early run and any call outside the plan.
+On Robinhood Chain: open [HOOD5](https://sheaf.world/chains/robinhoodTestnet/hood5), connect with **Use a wallet in this browser** (nothing to install), and take **Send me test tokens** (a slice of Robinhood's own testnet stock tokens, USDG and gas). Then create shares in kind, place a dollar auction on the v3 desk that the house fills, or open a monthly plan on `PlanDeskV3` (a 10-minute demo cadence shows runs the same day). The Sepolia chains work the same way with labeled mirrors. On Tempo: open [MAG8](https://sheaf.world/chains/tempoTestnet/mag8) and run the plan panel. The plan lives on `PlanDeskV3` and runs through a Tempo access key, and the chain itself refuses an overpay (`FairOutOfBounds`), an early run (`TooSoon`) and any call outside the plan (`CallNotAllowed`).
 
 ## How it works
 
@@ -45,7 +45,7 @@ flowchart LR
 | **Bind** | Anyone writes a recipe: 1 to 8 Token-2022 mints, raw units per share, weights, and a creator fee of at most 1%. The basket PDA becomes the share mint's authority; no instruction edits the recipe. | `create_basket` |
 | **Buy in kind** | Deposit exactly the recipe for N shares and receive N shares (less the creator fee, minted to the creator as new shares). Deposits round up and are grossed up for any component transfer fee, so the vault always nets the full recipe. | `mint_shares` |
 | **Buy with dollars** | Escrow dollars for a share count that falls linearly over the auction (the site uses 90 seconds, from 2% above the fair count to 2% below). The first filler to deliver the stocks at the current count takes the dollars; the vault receives the stocks through the same deposit path. Fillers compete on timing, so no price feed is read. The buyer, or anyone after expiry, can cancel for a full refund. | `place_order`, `fill_order`, `cancel_order` |
-| **Every month** | A plan approves exactly `cash_per_run × runs` to the plan PDA once. When a run is due, anyone can turn it into a dollar order bracketing a reference rate. Each fill moves the reference to the rate the market cleared at; plans opened since Oct 9 re-center their bounds at ±6% around each fill, so a plan follows the market while no single run can be pushed far. | `open_plan`, `run_plan`, `update_plan`, `close_plan` |
+| **Every month** | A plan approves exactly `cash_per_run × runs` to the plan PDA once. When a run is due, anyone can turn it into a dollar order bracketing a reference rate. Each fill moves the reference to the rate the market cleared at. A plan opened on the site trails: each run's auction opens around the last fill, ±15% for a monthly plan, ±10% weekly and ±2% at the 5-minute demo pace, and no fill can move it past the owner's hard limits written into the plan at opening (±25%, ±15% and ±10% of the opening price). The plan follows the market, while no single run can be pushed far. | `open_plan`, `run_plan`, `update_plan`, `close_plan` |
 | **Sell for dollars** | Escrow shares for a dollar amount that starts 2% above fair and falls to the seller's own floor, 2% below, over 90 seconds. The first filler to pay the current amount takes the shares and can redeem them in the same transaction. No protocol fee. | `place_sell_order`, `fill_sell_order`, `cancel_sell_order` |
 | **Redeem** | Burn shares and take the components back, rounded down. Always available to any holder. | `redeem_shares` |
 
@@ -85,12 +85,25 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 |---|---|---|---|
 | Solana devnet | The Sheaf program: baskets, dollar orders, plans; Meteora launch markets | Mirrors of the 28 mainnet mints | Sheaf test dollar (Token-2022) |
 | Solana mainnet | Read only: prices, dividend multipliers, the tape | xStocks, PreStocks | – |
-| Robinhood Chain testnet | Factory, desk, 3 baskets (HOOD5, CHIPS, PRIME) | Robinhood's own test stock tokens | USDG (testnet) |
+| Robinhood Chain testnet | Factory, v1, v2 and v3 desks, 3 baskets (HOOD5, CHIPS, PRIME); monthly plans on PlanDeskV3, kept by the house | Robinhood's own test stock tokens | USDG (testnet) |
 | Tempo testnet | Factory, v1, v2 and v3 desks, 3 baskets; monthly plans on PlanDeskV3 through Tempo access keys, with a recurring spending limit and the price cap on chain | 8 labeled mirrors | AlphaUSD (TIP-20) |
-| Ethereum Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
-| Arbitrum Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
-| Base Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
+| Ethereum Sepolia | Factory, v1, v2 and v3 desks, 3 baskets; monthly plans on PlanDeskV3 | 8 labeled mirrors | sUSD mirror |
+| Arbitrum Sepolia | Factory, v1, v2 and v3 desks, 3 baskets; monthly plans on PlanDeskV3 | 8 labeled mirrors | sUSD mirror |
+| Base Sepolia | Factory, v1, v2 and v3 desks, 3 baskets; monthly plans on PlanDeskV3 | 8 labeled mirrors | sUSD mirror |
 | Hyperliquid (HyperEVM testnet) | Read only: a recipe priced from HyperCore stock perps through precompiles; nothing deployed | – | – |
+
+## Why not Kraken bundles, Bitget Basket, an xStocks index or Glider?
+
+Each of these is real, and most have more distribution than Sheaf will have for a long time. They do something different:
+
+| Product | What it is | What a Sheaf share is instead |
+|---|---|---|
+| [Kraken xStocks Bundles](https://blog.kraken.com/product/bundles/introducing-crypto-xstocks-bundles) | Themes inside Kraken's own accounts, rebalanced for you. Kraken's group also owns Backed, the xStocks issuer. | One token in your own wallet, which anyone can redeem for the stocks, with no account. |
+| [Bitget Wallet Basket](https://web3.bitget.com/wallet/basket-wallet) | A self-custody interface that buys a list of tokens by swap, with recurring buys, on Solana and Robinhood's chain. | One token for the whole list, so another wallet or app can list it or route it. It is backed in kind in a vault, not held as loose pieces. |
+| [CF Benchmarks xStocks Indices](https://www.cfbenchmarks.com/documentation/products/xstocks/indices) | Regulated reference prices for xStocks (price and total return), for settlement and valuation. | A holding, not a price. The program reads no price at all; the vault and the recipe are the proof. |
+| [Glider](https://www.businesswire.com/news/home/20250415391753/en/Glider-Raises-%244-Million-Strategic-Funding-Round-Led-by-a16z-CSX-to-Transform-Crypto-Portfolio-Management) with [Ondo](https://invezz.com/in/news/2026/03/24/ondo-price-surges-amid-glider-partnership-to-launch-automated-tokenized-stocks/) | Automated custom portfolios of tokenized stocks, rebalanced onchain (a16z CSX-backed; Ondo partnership since March 2026). | A fixed recipe that never rebalances, as one transferable token you hold yourself, with no yearly fee. |
+
+What they share is that a theme lives in one app. Sheaf makes the theme a token any of them could list, which is why its first customers are wallets and front ends rather than their users directly.
 
 ## Business
 
@@ -167,7 +180,7 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 - **Devnet, with mirror mints.** The program is unaudited, so it does not take custody of real stocks. Prices, dividend multipliers and the tape come from mainnet; vaults hold devnet mirrors. The mirrors match the real mints' decimals, metadata, `ScaledUiAmount` dividend multiplier and (for PreStocks) transfer fee. They do not carry the issuer powers the real mints have.
 - **Issuer powers.** Real xStocks and PreStocks carry a freeze authority, a permanent delegate and a pause authority held by their issuer. Sheaf accepts those powers only when Backed or PreStocks hold them (`KNOWN_ISSUERS` in `lib.rs`) and refuses them under anyone else, including the basket creator. This is tested against byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock; the devnet mirrors themselves carry only metadata, ScaledUiAmount and transfer-fee extensions. An issuer that pauses or freezes one component blocks redemption of the whole basket until it lifts it.
 - **The EVM contracts** have no owner, no pause and no upgrade path, and read no price; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labeled mirrors worth nothing.
-- **Fill competition.** Today the house keeper and a second filler running the published reference code (both ours) do the filling. A filler with no competition can wait for the bottom of every auction; a plan's hard floor is still the owner's own `min_ref`, trailing or not, and no fill can move it past that.
+- **Fill competition.** Today the house keeper and a second filler running the published reference code (both ours) do the filling. A filler with no competition can wait for the bottom of every auction; a plan's hard floor is still the owner's own limit, set at `open_plan` (on a trailing plan it sits in the plan's tail as `hard_min`, while the working `min_ref` trails), and no fill can move the plan past it.
 
 ## India
 
@@ -179,7 +192,15 @@ Rohan Borade, solo, in India ([GitHub](https://github.com/RohanGlitched)).
 
 ## History and disclosure
 
-Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window opened. The first commit that day (28,698 lines in 85 files) imported the Tessera codebase as it stood; treat everything in it as pre-existing. It was renamed Sheaf on Oct 8. Tessera was also entered in Stocklana, and the EVM vault contracts (`evm/contracts/Basket.sol`, `CreationDesk.sol`) were also entered in Arbitrum Open House (Robinhood Chain), submitted Oct 4. Everything in this repo after Sep 14 was built during the Crypto World's Fair window: the new program with dollar orders and monthly plans and its hardening release, the EVM vaults on five chains, the Panta and Solami integrations, the Meteora lifecycle, and the redesign.
+Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window opened. The first commit that day (28,698 lines in 85 files) imported the Tessera codebase as it stood; treat everything in it as pre-existing. It was renamed Sheaf on Oct 8.
+
+This work was also entered elsewhere:
+
+- **Stocklana.** Tessera was entered in Stocklana. The Meteora launch market (in the Tessera app from Sep 18) and the Solami mainnet reads (added to Tessera on Oct 3, during Stocklana's judging) were part of that entry too. The Stocklana version stays public at [github.com/RohanGlitched/Tessera](https://github.com/RohanGlitched/Tessera) (created Sep 13) and [teserra.world](https://www.teserra.world).
+- **Arbitrum Open House.** The EVM vault contracts (`evm/contracts/Basket.sol`, `CreationDesk.sol`) were entered in Arbitrum Open House (Robinhood Chain), submitted Oct 4.
+- **This repository** was created on Oct 8 from the Tessera history, so its commit dates come from that history; the Tessera repository is the independent record.
+
+Built during the Crypto World's Fair window: the new program with dollar orders, sell orders, monthly plans and its hardening release; the EVM vaults, the v2 and v3 desks and `PlanDeskV3` on five chains; Panta; the Solami tape and NAV path beyond the Oct 3 reads; the Meteora v2 preset, checks and full lifecycle; and the redesign.
 
 ## Repository
 

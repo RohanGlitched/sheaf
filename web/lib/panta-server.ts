@@ -1,5 +1,5 @@
 import "server-only";
-import { marketWindow, recipeText, resolutionRule } from "./panta-window";
+import { marketWindow, pantaTimes, recipeText, resolutionRule, weekEndingLabel } from "./panta-window";
 import { fetchBasketAt } from "./sheaf";
 import { stockForWriteMint } from "./mirror";
 
@@ -142,6 +142,10 @@ export function marketTrades(marketId: string) {
 export const basketQuestion = (name: string, symbol: string) =>
   `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
+/** The question a drafted market carries: dated, because the week it measures is not the week it is drafted in. */
+export const datedBasketQuestion = (name: string, symbol: string, toClose: number) =>
+  `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY in the week ending ${weekEndingLabel(toClose)}?`;
+
 export type CreateQuote = {
   createId: string;
   expectedEventPda: string;
@@ -154,9 +158,11 @@ export type CreateQuote = {
 /** The market Sheaf would open on a basket, exactly as it is sent to Panta. */
 export async function basketDraft(input: { wallet: string; basket: string; name: string; symbol: string }) {
   // Panta requires trading to open at least an hour out. The week is measured
-  // between two week-ending NYSE closes (lib/panta-window.ts), and the market
-  // ends at the second one, so the rule, the window and the NAV reader agree.
+  // between two week-ending NYSE closes (lib/panta-window.ts), and trading
+  // closes at the first one, so nothing of the measured week is known while it
+  // trades. The rule, the window and the NAV reader share one module.
   const w = marketWindow();
+  const times = pantaTimes(w);
   const [{ category, preferred }, basket] = await Promise.all([basketCategory(), fetchBasketAt(input.basket).catch(() => null)]);
   // The recipe's units go into the rule itself, so resolving does not depend on
   // the devnet basket account staying up.
@@ -170,8 +176,8 @@ export async function basketDraft(input: { wallet: string; basket: string; name:
     draft: {
       wallet: input.wallet,
       title: `${input.name} vs SPY`,
-      question: basketQuestion(input.name, input.symbol),
-      description: `${input.symbol} is a Sheaf basket (on Solana devnet today): a fixed recipe of tokenized stocks${recipe.length ? ` (${recipeText(recipe)} per share)` : ""}, valued at listed closes and each token's mainnet multiplier. This market asks whether one share outgrows SPY, total return, between two week-ending US closes.`,
+      question: datedBasketQuestion(input.name, input.symbol, w.toClose),
+      description: `${input.symbol} is a Sheaf basket (on Solana devnet today): a fixed recipe of tokenized stocks${recipe.length ? ` (${recipeText(recipe)} per share)` : ""}, valued at listed closes and each token's mainnet multiplier. This market asks whether one share outgrows SPY, total return, between two week-ending US closes; trading closes at the first of them.`,
       resolutionRule: resolutionRule(input.symbol, nav, w, recipe),
       sourcesOfTruth: [
         `${nav}?at=${w.fromClose}`,
@@ -181,22 +187,24 @@ export async function basketDraft(input: { wallet: string; basket: string; name:
       ],
       category,
       imageUrl: `${PUBLIC_SITE}/api/panta/image/${input.basket}`,
-      startTime: w.opens,
-      endTime: w.toClose,
-      resolutionTime: w.resolves,
+      startTime: times.startTime,
+      endTime: times.endTime,
+      resolutionTime: times.resolutionTime,
       marketType: "standard",
       region: "Global",
     },
     categoryPreferred: preferred,
+    // The two closes the week is measured between, for the page (endTime is only the first).
+    window: { fromClose: w.fromClose, toClose: w.toClose },
   };
 }
 
 /** What it would cost to open the basket's market. Identical quotes are reused for a minute. */
 export async function quoteBasketMarket(input: { wallet: string; basket: string; name: string; symbol: string }) {
   return remember(`create:${input.wallet}:${input.basket}:${input.name}:${input.symbol}`, 60_000, async () => {
-    const { draft, categoryPreferred } = await basketDraft(input);
+    const { draft, categoryPreferred, window } = await basketDraft(input);
     const quote = await call<CreateQuote>("/markets/create/quote/", { method: "POST", body: draft });
-    return { ...quote, draft, categoryPreferred };
+    return { ...quote, draft, categoryPreferred, window };
   });
 }
 

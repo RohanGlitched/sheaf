@@ -14,16 +14,18 @@ import { count, money } from "@/lib/format";
 import { useHistory } from "@/lib/use-history";
 import { trackRecord } from "@/lib/track";
 import { CardSkeletons } from "./skeletons";
-import { isTestBasket, splitTestBaskets } from "@/lib/hidden";
+import { isHouseBasket, isTestBasket, splitTestBaskets } from "@/lib/hidden";
 import { useLedger, walletCounts } from "./ledger";
 
 /**
  * Every basket, in an order the visitor chooses.
  *
- * There is no curation and no ranking algorithm here on purpose: the list is
- * what `getProgramAccounts` returns, sorted by a key the visitor picks. The one
- * editorial act is that baskets our own QA runs made start hidden, behind a
- * switch that shows them (lib/hidden.ts).
+ * There is no ranking algorithm here on purpose: the list is what
+ * `getProgramAccounts` returns, sorted by a key the visitor picks. Two editorial
+ * acts (lib/hidden.ts): the house's own baskets are what a visitor sees first,
+ * and baskets anyone else created sit behind a "community baskets" switch, so a
+ * lookalike name or ticker never appears beside them by default; baskets our QA
+ * runs made sit behind a switch of their own.
  */
 
 type SortKey = "held" | "newest" | "value" | "activity" | "components" | "year";
@@ -80,15 +82,20 @@ export function Explorer() {
   const [sort, setSort] = useState<SortKey>("held");
   const [query, setQuery] = useState("");
   const [showTests, setShowTests] = useState(false);
-  const { ledger } = useLedger();
-  const traction = useMemo(() => (ledger ? walletCounts(ledger.entries) : null), [ledger]);
+  const [showCommunity, setShowCommunity] = useState(false);
+  const { ledger, stats: served } = useLedger();
+  // Actions: every event the program emitted, the ledger's own count (the API's stats.actions).
+  const traction = useMemo(() => (ledger ? { actions: served?.actions ?? walletCounts(ledger.entries).actions } : null), [ledger, served]);
   const split = useMemo(() => splitTestBaskets(baskets ?? []), [baskets]);
   const testCount = split.tests;
+  const communityCount = useMemo(() => split.shown.filter((b) => !isHouseBasket(b)).length, [split]);
 
   const rows = useMemo(() => {
     if (!baskets) return [];
     const needle = query.trim().toLowerCase();
-    const visible = showTests ? baskets : baskets.filter((b) => !isTestBasket(b));
+    const visible = baskets.filter((b) =>
+      isTestBasket(b) ? showTests : isHouseBasket(b) ? true : showCommunity,
+    );
     const filtered = needle
       ? visible.filter(
           (b) =>
@@ -115,28 +122,33 @@ export function Explorer() {
       return track?.returnPct ?? -Infinity;
     };
 
-    switch (sort) {
-      case "held":
-        // Shares outstanding, most first; newest breaks a tie (and orders the list until supplies arrive).
-        return filtered.sort((a, b) => heldOf(b.shareMint) - heldOf(a.shareMint) || b.createdAt - a.createdAt);
-      case "value":
-        return filtered.sort((a, b) => navOf(b.address) - navOf(a.address));
-      case "year":
-        return filtered.sort((a, b) => yearOf(b.address) - yearOf(a.address));
-      case "activity":
-        return filtered.sort(
-          (a, b) =>
-            Number(b.mintCount + b.redeemCount) -
-            Number(a.mintCount + a.redeemCount),
-        );
-      case "components":
-        return filtered.sort(
-          (a, b) => b.components.length - a.components.length,
-        );
-      default:
-        return filtered.sort((a, b) => b.createdAt - a.createdAt);
-    }
-  }, [baskets, snapshot, history, sort, query, showTests, supplies]);
+    const sortRows = () => {
+      switch (sort) {
+        case "held":
+          // Shares outstanding, most first; newest breaks a tie (and orders the list until supplies arrive).
+          return filtered.sort((a, b) => heldOf(b.shareMint) - heldOf(a.shareMint) || b.createdAt - a.createdAt);
+        case "value":
+          return filtered.sort((a, b) => navOf(b.address) - navOf(a.address));
+        case "year":
+          return filtered.sort((a, b) => yearOf(b.address) - yearOf(a.address));
+        case "activity":
+          return filtered.sort(
+            (a, b) =>
+              Number(b.mintCount + b.redeemCount) -
+              Number(a.mintCount + a.redeemCount),
+          );
+        case "components":
+          return filtered.sort(
+            (a, b) => b.components.length - a.components.length,
+          );
+        default:
+          return filtered.sort((a, b) => b.createdAt - a.createdAt);
+      }
+    };
+    // The house's baskets lead whatever the sort; the rest follow in the same order.
+    const sorted = sortRows();
+    return [...sorted.filter((b) => isHouseBasket(b)), ...sorted.filter((b) => !isHouseBasket(b))];
+  }, [baskets, snapshot, history, sort, query, showTests, showCommunity, supplies]);
 
   // What every vault holds, at live prices: each share's value times the shares
   // outstanding. Adding up one share of each would be a number with no meaning.
@@ -156,9 +168,10 @@ export function Explorer() {
             Every basket
           </h1>
           <p className="mt-4 max-w-[54ch] text-base leading-relaxed text-ink-2">
-            Read straight from the program. Nothing here is listed,
-            approved, or promoted. If somebody created it, it is on this page;
-            demo baskets are behind the switch below.
+            Read straight from the program. Sheaf&apos;s own baskets come first.
+            Baskets anyone else created are one switch away under community
+            baskets, so a lookalike name never sits beside them by default;
+            test baskets have a switch of their own.
           </p>
         </div>
         {baskets && baskets.length > 0 && (
@@ -168,13 +181,14 @@ export function Explorer() {
               <dd className="display mt-1 text-xl text-ink">
                 {count(split.shown.length)}
               </dd>
-              {testCount > 0 && <dd className="mt-0.5 text-xs text-ink-3">+{count(testCount)} demo</dd>}
+              {testCount > 0 && <dd className="mt-0.5 text-xs text-ink-3">+{count(testCount)} test</dd>}
             </div>
             <div>
-              <dt className="text-xs text-ink-3">Held in vaults</dt>
+              <dt className="text-xs text-ink-3">Held in vaults, test tokens</dt>
               <dd className="display mt-1 text-xl text-ink">
                 {heldInVaults == null ? "…" : money(heldInVaults)}
               </dd>
+              <dd className="mt-0.5 text-xs text-ink-3">free from the faucet, valued at mainnet prices</dd>
             </div>
             <div>
               <dt className="text-xs text-ink-3">Actions</dt>
@@ -199,6 +213,15 @@ export function Explorer() {
             />
           </label>
           <div className="flex flex-wrap gap-2">
+            <label className="flex cursor-pointer items-center gap-2 border border-line px-3 py-2 text-xs text-ink-2 rounded-[var(--radius-control)]">
+              <input
+                type="checkbox"
+                checked={showCommunity}
+                onChange={(event) => setShowCommunity(event.target.checked)}
+                className="accent-[var(--color-bind)]"
+              />
+              Show community baskets ({count(communityCount)})
+            </label>
             {testCount > 0 && (
               <label className="flex cursor-pointer items-center gap-2 border border-line px-3 py-2 text-xs text-ink-2 rounded-[var(--radius-control)]">
                 <input
@@ -207,7 +230,7 @@ export function Explorer() {
                   onChange={(event) => setShowTests(event.target.checked)}
                   className="accent-[var(--color-bind)]"
                 />
-                Show demo baskets ({count(testCount)})
+                Show test baskets ({count(testCount)})
               </label>
             )}
             {SORTS.map((option) => (
@@ -261,8 +284,8 @@ export function Explorer() {
 
       {baskets && baskets.length > 0 && rows.length === 0 && (
         <p className="mt-12 text-sm leading-relaxed text-ink-2">
-          Nothing matches “{query.trim()}”. Clear the search to see all{" "}
-          {count(showTests ? baskets.length : split.shown.length)}.
+          Nothing matches “{query.trim()}”{!showCommunity && communityCount > 0 ? " among Sheaf's own baskets; switch on community baskets to search those too" : ""}.
+          Clear the search to see all {count(showTests ? baskets.length : showCommunity ? split.shown.length : split.shown.length - communityCount)}.
         </p>
       )}
 

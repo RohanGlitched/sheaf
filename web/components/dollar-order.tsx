@@ -92,18 +92,21 @@ const quotedAt = (at: string | number) => (typeof at === "string" ? Date.parse(a
 export const routeCostText = (bps: number) => (bps <= 0.5 ? "next to nothing" : `about ${(bps / 100).toFixed(2)}%`);
 
 /**
- * The route cost as one line, with the order size it was measured at, both
- * ways, and its age. Above the house filler's margin, it says the house will
- * wait deeper into the auction or not fill, though other fillers may.
+ * The route cost as one line, with the order size it was measured at and its
+ * age. Two different numbers, labelled as such: what buying the stocks costs a
+ * filler over the prices this site shows (`bps`, which includes any premium the
+ * route pays over those prices), and the route's own spread, buying and selling
+ * straight back (`roundTrip`). Above the house filler's margin, it says the house
+ * will wait deeper into the auction or not fill, though other fillers may.
  */
 export function RouteCostNote({
   cost,
   dollars,
-  verb = "buying",
   bandBps = 200,
 }: {
   cost: RouteCost | null;
   dollars: number;
+  /** Kept for callers; the line reads the same either way, since both numbers are measured buying. */
   verb?: "buying" | "selling";
   /** The auction's band: above it the form says plainly that nobody can fill, so this line stays quiet. */
   bandBps?: number;
@@ -113,9 +116,10 @@ export function RouteCostNote({
   const at = quotedAt(cost.at);
   return (
     <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
-      On mainnet routes, for a {moneyWhole(q.size)} order, {verb} these stocks costs a filler {routeCostText(q.bps)} one way
-      {q.roundTrip != null ? ` (${routeCostText(q.roundTrip).replace("about ", "")} round trip)` : ""}
-      {Number.isFinite(at) ? `, measured ${timeAgo(at)}` : ""}.
+      On mainnet routes, for a {moneyWhole(q.size)} order, buying these stocks costs a filler {routeCostText(q.bps)} over
+      the prices shown here
+      {q.roundTrip != null ? `; the route's own spread, buying and selling straight back, is ${routeCostText(q.roundTrip).replace("about ", "")}` : ""}
+      {Number.isFinite(at) ? ` (measured ${timeAgo(at)})` : ""}.
       {q.bps > HOUSE_MARGIN_BPS && q.bps <= bandBps
         ? ` That is above Sheaf's filler's ${(HOUSE_MARGIN_BPS / 100).toFixed(2)}% margin, so it waits deeper into the auction or doesn't fill; other fillers may.`
         : ""}
@@ -141,8 +145,9 @@ type Stage =
  * The dollars go into an escrow the program controls, and the number of shares
  * they buy falls over ninety seconds (AUCTION_SECS), from 2% above the fair
  * count to 2% below. The first filler to deliver the stocks at the current count gets
- * the dollars; the vault still receives the real stocks. Nobody's price is
- * trusted: competition between fillers sets it.
+ * the dollars; the vault still receives the real stocks. The program reads no
+ * price: the auction caps what the buyer pays at their own floor, and any filler
+ * can compete to fill sooner.
  */
 export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; navPerShare: number | null; onDone: () => void }) {
   const { connection } = useConnection();
@@ -371,8 +376,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   return (
     <div className="p-6">
       <p className="text-sm leading-relaxed text-ink-2">
-        Pay in dollars and let fillers compete to deliver the stocks. The vault still receives the real
-        components; you never trust anyone&apos;s price.
+        Pay in dollars. Any filler can deliver the stocks, the auction caps what you pay at the floor you set,
+        and the vault still receives the real components.
       </p>
 
       {(stage.kind === "idle" || stage.kind === "signing") && (
@@ -429,7 +434,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
           {blocked && (
             <p className="mt-4 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
               On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
-              {((routeBps ?? 0) / 100).toFixed(2)}% one way. Create shares in kind instead, from the In kind tab.
+              {((routeBps ?? 0) / 100).toFixed(2)}% over the prices shown here. Create shares in kind instead, from the In kind tab.
             </p>
           )}
 

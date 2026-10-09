@@ -22,8 +22,15 @@ export type FillLogEntry = {
   fair: number;
   /** (cash − fair) / fair on a buy, (fair − cash) / cash on a sell, in basis points. */
   marginBps: number;
-  /** True when any component was priced from a fallback source. */
+  /** True when any component was priced from a fallback source (no longer filled on since 10 Oct 2026). */
   fallback?: boolean;
+  /**
+   * True when the margin is the one at the second the fill executed (from its
+   * block time). Fills logged before the 10 Oct 2026 timing fix carry the margin
+   * the filler expected when it sent the fill, which is what the earlier figures
+   * measure.
+   */
+  landed?: boolean;
   at: number;
 };
 
@@ -79,12 +86,24 @@ const median = (xs: number[]) => {
   return Math.round((v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) * 10) / 10;
 };
 
-/** Median realized margin per filler and side, from the log. */
+/**
+ * Median realized margin per filler and side, from the log, plus the same split
+ * at the timing fix: `landed` (measured at the second each fill executed) and
+ * `earlier` (logged before it, at the filler's own estimate). `since` is the
+ * oldest entry: fills before it were never logged, which is why the log covers
+ * fewer fills than the ledger.
+ */
 export function realizedMargins(log: FillLogEntry[]) {
-  const pick = (filler: FillLogEntry["filler"], side?: FillLogEntry["side"]) =>
-    log.filter((e) => e.filler === filler && (!side || e.side === side)).map((e) => e.marginBps);
-  return {
-    house: { fills: pick("house").length, medianBps: median(pick("house")), buyMedianBps: median(pick("house", "buy")), sellMedianBps: median(pick("house", "sell")) },
-    second: { fills: pick("second").length, medianBps: median(pick("second")), buyMedianBps: median(pick("second", "buy")), sellMedianBps: median(pick("second", "sell")) },
-  };
+  const pick = (filler: FillLogEntry["filler"], side?: FillLogEntry["side"], landed?: boolean) =>
+    log.filter((e) => e.filler === filler && (!side || e.side === side) && (landed == null || !!e.landed === landed)).map((e) => e.marginBps);
+  const of = (filler: FillLogEntry["filler"]) => ({
+    fills: pick(filler).length,
+    medianBps: median(pick(filler)),
+    buyMedianBps: median(pick(filler, "buy")),
+    sellMedianBps: median(pick(filler, "sell")),
+    landed: { fills: pick(filler, undefined, true).length, medianBps: median(pick(filler, undefined, true)), buyMedianBps: median(pick(filler, "buy", true)) },
+    earlier: { fills: pick(filler, undefined, false).length, medianBps: median(pick(filler, undefined, false)), buyMedianBps: median(pick(filler, "buy", false)) },
+  });
+  const since = log.reduce<number | null>((a, e) => (a == null || e.at < a ? e.at : a), null);
+  return { house: of("house"), second: of("second"), since };
 }
