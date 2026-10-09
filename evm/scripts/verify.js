@@ -1,27 +1,37 @@
-// Verifies every Sheaf contract of a deployment on the chain's explorer.
-// Safe to re-run: already-verified contracts are skipped.
+// Verifies every Sheaf contract of a deployment on the chain's Blockscout
+// explorer, which needs no API key. Safe to re-run: already-verified contracts
+// are skipped.
 //
-//   npx hardhat run scripts/verify.js --network robinhoodTestnet   (Blockscout, no key)
-//   npx hardhat run scripts/verify.js --network baseSepolia        (Blockscout, no key)
-//   Tempo: use scripts/verify-sourcify.js (Sourcify v2 at contracts.tempo.xyz).
-//   ETHERSCAN_API_KEY=... npx hardhat run scripts/verify.js --network sepolia
+//   npx hardhat run scripts/verify.js --network robinhoodTestnet
+//   npx hardhat run scripts/verify.js --network sepolia
+//   npx hardhat run scripts/verify.js --network arbitrumSepolia
+//   npx hardhat run scripts/verify.js --network baseSepolia
+//
+// Tempo: use scripts/verify-sourcify.js (Sourcify v2 at contracts.tempo.xyz).
 const fs = require("fs");
 const path = require("path");
-const { run, ethers, network } = require("hardhat");
+const { run, network } = require("hardhat");
 
 async function verify(label, address, constructorArguments, contract) {
-  try {
-    await run("verify:verify", { address, constructorArguments, contract });
-    console.log(`verified ${label} ${address}`);
-    return true;
-  } catch (e) {
-    const msg = String(e.message || e);
-    if (/already verified/i.test(msg)) {
-      console.log(`already verified ${label} ${address}`);
+  // Explorers rate-limit bursts of submissions, so retry with a pause.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run("verify:verify", { address, constructorArguments, contract });
+      console.log(`verified ${label} ${address}`);
       return true;
+    } catch (e) {
+      const msg = String(e.message || e);
+      if (/already verified/i.test(msg)) {
+        console.log(`already verified ${label} ${address}`);
+        return true;
+      }
+      if (attempt < 4 && /failed to send|network request|timeout|429|rate/i.test(msg)) {
+        await new Promise((r) => setTimeout(r, 15000 * attempt));
+        continue;
+      }
+      console.log(`could not verify ${label} ${address} - ${msg.split("\n")[0]}`);
+      return false;
     }
-    console.log(`could not verify ${label} ${address} - ${msg.split("\n")[0]}`);
-    return false;
   }
 }
 
@@ -32,9 +42,10 @@ async function main() {
   ok.factory = await verify("SheafFactory", d.factory, [], "contracts/SheafFactory.sol:SheafFactory");
   ok.desk = await verify("CreationDesk", d.desk, [d.stable.address, d.factory], "contracts/CreationDesk.sol:CreationDesk");
   for (const b of d.baskets) {
-    const basket = await ethers.getContractAt("Basket", b.address);
-    const comps = (await basket.components()).map((c) => [c.token, c.unitsPerShare, c.weightBps]);
-    const args = [await basket.name(), await basket.symbol(), await basket.creator(), await basket.creatorFeeBps(), comps];
+    // Constructor arguments come from the deployment record, which deploy-chain.js
+    // copied from the chain right after creation.
+    const comps = b.components.map((c) => [c.token, BigInt(c.unitsPerShare), c.weightBps]);
+    const args = [b.name, b.symbol, d.deployer, b.feeBps, comps];
     ok[b.symbol] = await verify(`Basket ${b.symbol}`, b.address, args, "contracts/Basket.sol:Basket");
   }
   for (const t of d.tokens.filter((x) => x.isMirror)) {
@@ -43,7 +54,7 @@ async function main() {
   if (d.stable.isMirror) {
     ok[d.stable.symbol] = await verify("MockDollar", d.stable.address, [d.stable.name, d.stable.symbol], "contracts/mirrors/MockDollar.sol:MockDollar");
   }
-  d.verified = { via: "etherscan-compatible API (Blockscout on Robinhood Chain and Base Sepolia)", at: new Date().toISOString(), contracts: ok };
+  d.verified = { via: "Blockscout (etherscan-compatible API)", at: new Date().toISOString(), contracts: ok };
   fs.writeFileSync(file, `${JSON.stringify(d, null, 2)}\n`);
 }
 

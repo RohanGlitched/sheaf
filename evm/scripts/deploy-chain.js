@@ -52,10 +52,35 @@ async function main() {
   const save = () => fs.writeFileSync(file, `${JSON.stringify(d, null, 2)}\n`);
   console.log(`${cfg.label} (${chainId})  deployer ${deployer.address}`);
 
+  // Gas accounting across this run, so the cost of a deployment is on record.
+  const balanceBefore = await ethers.provider.getBalance(deployer.address);
+  let gasUsed = 0n;
+  // Public RPCs are often load-balanced across nodes that lag each other, so
+  // reads after a write are pinned to the block that write landed in, retrying
+  // until the node serving the read has it.
+  let tag = await ethers.provider.getBlockNumber();
+  const at = async (fn) => {
+    for (let i = 0; ; i++) {
+      try {
+        return await fn({ blockTag: tag });
+      } catch (e) {
+        if (i >= 20) throw e;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  };
+  const w = async (txp) => {
+    const r = await (await txp).wait();
+    gasUsed += r.gasUsed;
+    tag = Math.max(tag, r.blockNumber);
+    return r;
+  };
   const deploy = async (name, args) => {
     const c = await (await ethers.getContractFactory(name)).deploy(...args);
     await c.waitForDeployment();
     const rcpt = await c.deploymentTransaction().wait();
+    gasUsed += rcpt.gasUsed;
+    tag = Math.max(tag, rcpt.blockNumber);
     return { address: await c.getAddress(), block: rcpt.blockNumber };
   };
 
@@ -107,14 +132,16 @@ async function main() {
   for (const seed of cfg.seeds) {
     if (d.baskets.find((b) => b.symbol === seed.symbol)) continue;
     const key = ethers.keccak256(ethers.toUtf8Bytes(seed.symbol));
-    let addr = await factory.basketOf(deployer.address, key);
+    let addr = await at((o) => factory.basketOf(deployer.address, key, o));
     if (addr === ethers.ZeroAddress) {
       const comps = recipe(seed.weights, addressOf, prices);
-      await (await factory.createBasket(seed.name, seed.symbol, seed.feeBps, comps)).wait();
-      addr = await factory.basketOf(deployer.address, key);
+      // CREATE2: the static call returns the exact address the real call deploys to.
+      addr = await factory.createBasket.staticCall(seed.name, seed.symbol, seed.feeBps, comps);
+      await w(factory.createBasket(seed.name, seed.symbol, seed.feeBps, comps));
     }
     // Record the recipe as the chain holds it, so a resumed run cannot drift.
-    const onChain = await (await ethers.getContractAt("Basket", addr)).components();
+    const basket = await ethers.getContractAt("Basket", addr);
+    const onChain = await at((o) => basket.components(o));
     const symOf = Object.fromEntries(d.tokens.map((t) => [t.address.toLowerCase(), t.symbol]));
     d.baskets.push({
       symbol: seed.symbol,
@@ -139,26 +166,31 @@ async function main() {
   for (const b of d.baskets) {
     if (b.seeded) continue;
     const basket = await ethers.getContractAt("Basket", b.address);
-    const need = await basket.previewMint(seedShares);
-    const comps = await basket.components();
+    const need = await at((o) => basket.previewMint(seedShares, o));
+    const comps = await at((o) => basket.components(o));
     for (let i = 0; i < comps.length; i++) {
       const meta = d.tokens.find((t) => t.address.toLowerCase() === comps[i].token.toLowerCase());
       if (meta.isMirror) {
         const mirror = await ethers.getContractAt("MockStock", comps[i].token);
-        const have = await mirror.balanceOf(deployer.address);
-        if (have < need[i]) await (await mirror.faucet(need[i] - have)).wait();
+        const have = await at((o) => mirror.balanceOf(deployer.address, o));
+        if (have < need[i]) await w(mirror.faucet(need[i] - have));
       }
       const erc = await ethers.getContractAt(ERC20, comps[i].token);
-      if ((await erc.allowance(deployer.address, b.address)) < need[i]) {
-        await (await erc.approve(b.address, need[i])).wait();
+      if ((await at((o) => erc.allowance(deployer.address, b.address, o))) < need[i]) {
+        await w(erc.approve(b.address, need[i]));
       }
     }
-    await (await basket.mint(seedShares, deployer.address)).wait();
+    await w(basket.mint(seedShares, deployer.address));
     b.seeded = ethers.formatEther(seedShares);
     save();
     console.log(`seeded  ${b.symbol} with ${b.seeded} shares`);
   }
 
+  if (gasUsed > 0n) {
+    const spent = balanceBefore - (await ethers.provider.getBalance(deployer.address));
+    (d.runs = d.runs || []).push({ at: new Date().toISOString(), gasUsed: gasUsed.toString(), nativeSpent: ethers.formatEther(spent) });
+    console.log(`gas used ${gasUsed}  native spent ${ethers.formatEther(spent)}`);
+  }
   d.deployedAt = d.deployedAt || new Date().toISOString();
   save();
   console.log(`wrote deployments/${network.name}.json`);

@@ -1,0 +1,292 @@
+{
+  "network": "arbitrumSepolia",
+  "label": "Arbitrum Sepolia",
+  "chainId": 421614,
+  "rpc": "https://sepolia-rollup.arbitrum.io/rpc",
+  "explorer": "https://arbitrum-sepolia.blockscout.com",
+  "tokenSource": "mirror",
+  "deployer": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+  "tokens": [
+    {
+      "symbol": "TSLA",
+      "name": "Tesla (Sheaf testnet mirror)",
+      "address": "0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "NVDA",
+      "name": "Nvidia (Sheaf testnet mirror)",
+      "address": "0xf17DDb38765e74D1130330ac600bD6BE9CFb68ab",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "AAPL",
+      "name": "Apple (Sheaf testnet mirror)",
+      "address": "0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "MSFT",
+      "name": "Microsoft (Sheaf testnet mirror)",
+      "address": "0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "AMZN",
+      "name": "Amazon (Sheaf testnet mirror)",
+      "address": "0x22192F8114E74f69CCbf0edd5DC9e4482D57b490",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "GOOGL",
+      "name": "Alphabet (Sheaf testnet mirror)",
+      "address": "0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "META",
+      "name": "Meta (Sheaf testnet mirror)",
+      "address": "0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b",
+      "decimals": 18,
+      "isMirror": true
+    },
+    {
+      "symbol": "PLTR",
+      "name": "Palantir (Sheaf testnet mirror)",
+      "address": "0x40a5ac8738412f0Ae897452051BD81175eE7b986",
+      "decimals": 18,
+      "isMirror": true
+    }
+  ],
+  "stable": {
+    "name": "Sheaf Test Dollar (mirror)",
+    "symbol": "sUSD",
+    "decimals": 6,
+    "address": "0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7",
+    "isMirror": true
+  },
+  "factory": "0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0",
+  "desk": "0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0",
+  "startBlock": 317290459,
+  "baskets": [
+    {
+      "symbol": "MAG8",
+      "name": "Magnificent Eight",
+      "address": "0xc1238636d6171c59176fD10a8193E6E33f14095C",
+      "feeBps": 25,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "TSLA",
+          "token": "0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676",
+          "unitsPerShare": "3309592523000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "NVDA",
+          "token": "0xf17DDb38765e74D1130330ac600bD6BE9CFb68ab",
+          "unitsPerShare": "5370569280000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "AAPL",
+          "token": "0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a",
+          "unitsPerShare": "3671018047000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "MSFT",
+          "token": "0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646",
+          "unitsPerShare": "2387774594000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "AMZN",
+          "token": "0x22192F8114E74f69CCbf0edd5DC9e4482D57b490",
+          "unitsPerShare": "4888636853000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "GOOGL",
+          "token": "0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63",
+          "unitsPerShare": "3575821724000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "META",
+          "token": "0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b",
+          "unitsPerShare": "1733703190000000",
+          "weightBps": 1250
+        },
+        {
+          "symbol": "PLTR",
+          "token": "0x40a5ac8738412f0Ae897452051BD81175eE7b986",
+          "unitsPerShare": "6268020559000000",
+          "weightBps": 1250
+        }
+      ],
+      "pricedAt": {
+        "TSLA": 377.69,
+        "NVDA": 232.75,
+        "AAPL": 340.505,
+        "MSFT": 523.5,
+        "AMZN": 255.695,
+        "GOOGL": 349.57,
+        "META": 721,
+        "PLTR": 199.425
+      },
+      "seeded": "10.0"
+    },
+    {
+      "symbol": "AICORE",
+      "name": "AI Core",
+      "address": "0xE5A089FDDfA7907Ee8661b5CAfFb47562115645E",
+      "feeBps": 50,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "NVDA",
+          "token": "0xf17DDb38765e74D1130330ac600bD6BE9CFb68ab",
+          "unitsPerShare": "17185821697000000",
+          "weightBps": 4000
+        },
+        {
+          "symbol": "MSFT",
+          "token": "0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646",
+          "unitsPerShare": "4775549188000000",
+          "weightBps": 2500
+        },
+        {
+          "symbol": "GOOGL",
+          "token": "0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63",
+          "unitsPerShare": "5721314758000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "PLTR",
+          "token": "0x40a5ac8738412f0Ae897452051BD81175eE7b986",
+          "unitsPerShare": "7521624671000000",
+          "weightBps": 1500
+        }
+      ],
+      "pricedAt": {
+        "NVDA": 232.75,
+        "MSFT": 523.5,
+        "GOOGL": 349.57,
+        "PLTR": 199.425
+      },
+      "seeded": "10.0"
+    },
+    {
+      "symbol": "EVDY",
+      "name": "Everyday Tech",
+      "address": "0x7aa1d6065b1A5eeFd386f0A8B0A1E7C3136180Bd",
+      "feeBps": 0,
+      "navUsdAtLaunch": 10,
+      "components": [
+        {
+          "symbol": "AAPL",
+          "token": "0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a",
+          "unitsPerShare": "8810443312000000",
+          "weightBps": 3000
+        },
+        {
+          "symbol": "AMZN",
+          "token": "0x22192F8114E74f69CCbf0edd5DC9e4482D57b490",
+          "unitsPerShare": "11732728446000000",
+          "weightBps": 3000
+        },
+        {
+          "symbol": "META",
+          "token": "0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b",
+          "unitsPerShare": "2773925104000000",
+          "weightBps": 2000
+        },
+        {
+          "symbol": "TSLA",
+          "token": "0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676",
+          "unitsPerShare": "5295348037000000",
+          "weightBps": 2000
+        }
+      ],
+      "pricedAt": {
+        "AAPL": 340.505,
+        "AMZN": 255.695,
+        "META": 721,
+        "TSLA": 377.69
+      },
+      "seeded": "10.0"
+    }
+  ],
+  "deployedAt": "2026-10-09T05:06:12.617Z",
+  "runs": [
+    {
+      "at": "2026-10-09T05:06:12.862Z",
+      "gasUsed": "15383326",
+      "nativeSpent": "0.001108769605695326"
+    }
+  ],
+  "smoke": {
+    "passedAt": "2026-10-09T05:08:15.167Z",
+    "basket": "MAG8",
+    "orderId": 0,
+    "txs": {
+      "faucet_TSLA": "0xb585a853afe57bfd051ff490678ad76643eba976de6c905173c72b5f2a3a6756",
+      "faucet_NVDA": "0x6cc6ced309877d6fe907889b81bbf50a9991107394eef633c7aeca7db60c253f",
+      "faucet_AAPL": "0x3b33184fa28dea31eda079cff967398ba36e7b8eee0e5d72bfbcffe19c1f6556",
+      "faucet_MSFT": "0x2aad9edc6278e49352cdc3a78ad99e3397708092480012d92f12fdb57f173ba7",
+      "faucet_AMZN": "0x6595997b6a0da519cd83473547a52f63f046c586974dbac91ee4d843b4ca68f1",
+      "faucet_GOOGL": "0xcfbe9ad3c5bd65abd671e84063bf1aef0fbee964bdda6e218bce3479a7aba79a",
+      "faucet_META": "0xc00b51e8062570ad32f4f4aecfdcda7e2c503df71e250f7bbcc7a4f5e5df0fdc",
+      "faucet_PLTR": "0x9bcb8ebe1cadebf5d8aebbaf19dcf92a7c46c3cadf0e51668ed3b0c923f4d54a",
+      "faucet_dollar": "0x6b533ffdd6362cd1dfe438ef68449cbc865ae602c9891b2b10f92026dbee01eb",
+      "approve_basket_0": "0x7c778901bae9c212f4f312a14e3b432983752ded0c15f1aa6c88b63dd0e90d12",
+      "approve_basket_1": "0x66de012ebab331d3712c1d9c9f833724662b070a31cbf48bda41121c89840c4b",
+      "approve_basket_2": "0xd2f16956bfb2208332cef7045a2d51ae45860ccf52e28228119c5e2d62b0b2be",
+      "approve_basket_3": "0x59ea68f58665a5726067cb351d8ff7e11d2dd0808cbbe28832ee96ffaddcee3f",
+      "approve_basket_4": "0xa4f94b4fd23041b8d699b6f517757251abbfc3501b2d943fd30a5eb1aa70e5a4",
+      "approve_basket_5": "0xd75299101fc3fd40fd59b823aa989c60a717547faf4bca9a004c3e3c00775f35",
+      "approve_basket_6": "0xa6c6844d6ee69cfb70663897db06900aadf56480e2255b681ed572775023230e",
+      "approve_basket_7": "0xaf050ef89fc9f4881fc4533e6531046b455989ac37e71ba95a2d2e1201954e0c",
+      "mint": "0xf933e980af1d7a80dbb8f083642f117e9bd0e2d6c261776477003bf9f08f306a",
+      "redeem": "0x321d047b4ced5ec1448a4594c00edc110e1368c14b60125b64577cd1ad7be83f",
+      "approve_desk_cash": "0xb73b1eb70054e96ad217839323463f071911ee8fcd85371374f802c01642a85a",
+      "placeOrder": "0x2c1d1708cddacfb50ba71e03e8c32672abc466cc8cda896c01431fbc10709d4a",
+      "approve_desk_0": "0xdd8918c7b5a148121fae8525bd72dfe7c59a36fd400692e6bb6698f20f33064d",
+      "approve_desk_1": "0xd572003b69a2ce52837a44930d13b3e4e90ff94d8db584fb8c06b068237d72bc",
+      "approve_desk_2": "0x7c8e065d493452d5a2c63c1f2bbc2c776f7f743be530fcca2b858f4322773c0f",
+      "approve_desk_3": "0x6792c2986fac447f8fb1985da9a2f96988c862835d61fabd6c4b03699640ced9",
+      "approve_desk_4": "0xcb0b87623058d2709feb33a3d149582ae629a34ecdb682fc24343446db218063",
+      "approve_desk_5": "0xe8a2cc1dcd025ef0ace874318a2d687839d2d01cd5ba1a1092b978b9c9876de8",
+      "approve_desk_6": "0x5252620d9ac3d788c6a3a090cefe86de0aa6d6046b4cf4b914227931527ae595",
+      "approve_desk_7": "0xb49fe52e54a173a7ae73e5693d96cb94507f5a194f9be68c80e7d0d6b6d8d67e",
+      "fill": "0x21824f5dbd65a4abe594c25cfb3d5c2278c97b6f85c39e1c26cf9d1c33a8ab0d"
+    }
+  },
+  "verified": {
+    "via": "Sourcify https://sourcify.dev/server (exact match; Blockscout reads Sourcify). The arbitrum-sepolia.blockscout.com API sits behind a Cloudflare bot challenge, so it was not used.",
+    "at": "2026-10-09T05:20:26.059Z",
+    "contracts": {
+      "SheafFactory": true,
+      "CreationDesk": true,
+      "Basket MAG8": true,
+      "Basket AICORE": true,
+      "Basket EVDY": true,
+      "MockStock TSLA": true,
+      "MockStock NVDA": true,
+      "MockStock AAPL": true,
+      "MockStock MSFT": true,
+      "MockStock AMZN": true,
+      "MockStock GOOGL": true,
+      "MockStock META": true,
+      "MockStock PLTR": true,
+      "MockDollar": true
+    }
+  }
+}

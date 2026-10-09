@@ -15,10 +15,10 @@ Everything here runs on free testnets only.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Robinhood Chain testnet | 46630 | [`0xC836…89B1`](https://explorer.testnet.chain.robinhood.com/address/0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1#code) | [`0x4184…951C`](https://explorer.testnet.chain.robinhood.com/address/0x4184eb1540908CB0DbEd533c45Fba7123991951C#code) | HOOD5, CHIPS, PRIME | **real** Robinhood test stock tokens | **real** testnet USDG | Live, verified, smoke test passed |
 | Tempo testnet (Moderato) | 42431 | [`0x4925…95e7`](https://explore.testnet.tempo.xyz/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) | [`0x4EB6…2Eb0`](https://explore.testnet.tempo.xyz/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | MAG8, AICORE, EVDY | 8 labelled mirrors | **real** AlphaUSD (TIP-20) | Live, verified (Sourcify), smoke test and SIP demo passed |
-| Arbitrum Sepolia | 421614 | – | – | – | mirrors | sUSD mirror | Not deployed: deployer has no gas |
-| Ethereum Sepolia | 11155111 | – | – | – | mirrors | sUSD mirror | Not deployed: deployer has no gas |
-| Base Sepolia | 84532 | – | – | – | mirrors | sUSD mirror | Not deployed: deployer has no gas |
-| HyperEVM testnet | 998 | – | – | – | mirrors | sUSD mirror | Not deployed: deployer has no HYPE |
+| Ethereum Sepolia | 11155111 | [`0x08Ec…D9E0`](https://eth-sepolia.blockscout.com/address/0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0) | [`0x336c…26E4`](https://eth-sepolia.blockscout.com/address/0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4) | MAG8, AICORE, EVDY | 8 labelled mirrors | sUSD mirror | Live, 14/14 verified (Blockscout), smoke test passed |
+| Arbitrum Sepolia | 421614 | [`0x4EB6…2Eb0`](https://arbitrum-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b…09A0`](https://arbitrum-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | MAG8, AICORE, EVDY | 8 labelled mirrors | sUSD mirror | Live, 14/14 verified (Sourcify), smoke test passed |
+| Base Sepolia | 84532 | [`0x4EB6…2Eb0`](https://base-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b…09A0`](https://base-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | MAG8, AICORE, EVDY | 8 labelled mirrors | sUSD mirror | Live, 14/14 verified (Blockscout), smoke test passed |
+| HyperEVM testnet | 998 | – | – | – | mirrors | sUSD mirror | Not deployed: needs about 0.002 HYPE, has 0.0005 |
 
 The full addresses, token lists (symbol, address, decimals, `isMirror`), recipes, launch prices,
 smoke-test transaction hashes and verification results are in
@@ -65,6 +65,51 @@ Each basket was priced at $10 a share from live Robinhood quotes for the underly
 seeded with 10 shares. All 13 contracts are verified (exact match) on Tempo's Sourcify server,
 `contracts.tempo.xyz`.
 
+The three Sepolia-family chains use the same mirror plan as Tempo: eight MockStock tokens named
+"<Company> (Sheaf testnet mirror)" with a public faucet, a 6-decimal `sUSD` MockDollar as the desk's
+cash, and the same three seed baskets priced at $10 a share and seeded with 10 shares each.
+Arbitrum Sepolia and Base Sepolia share addresses because the deployer's nonces lined up on both;
+Sepolia's are shifted by the two bridge transactions sent from it first.
+
+### Ethereum Sepolia (11155111)
+
+| Contract | Address |
+| --- | --- |
+| SheafFactory | [`0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0`](https://eth-sepolia.blockscout.com/address/0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0) |
+| CreationDesk (cash: sUSD mirror) | [`0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4`](https://eth-sepolia.blockscout.com/address/0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4) |
+| MAG8 "Magnificent Eight" | [`0x6a47aC82a3eE22FCC2b80D5c1F45Daba23e06141`](https://eth-sepolia.blockscout.com/address/0x6a47aC82a3eE22FCC2b80D5c1F45Daba23e06141) |
+| AICORE "AI Core" | [`0xa8A54a6cd0136A645c36EAd5371016f32Ae6b121`](https://eth-sepolia.blockscout.com/address/0xa8A54a6cd0136A645c36EAd5371016f32Ae6b121) |
+| EVDY "Everyday Tech" | [`0xd77442895e899201D9C5Cc03b1661E88d9eB56e1`](https://eth-sepolia.blockscout.com/address/0xd77442895e899201D9C5Cc03b1661E88d9eB56e1) |
+| sUSD "Sheaf Test Dollar (mirror)", 6 decimals | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://eth-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) |
+
+Mirror stocks: TSLA `0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a`, NVDA `0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646`, AAPL `0x22192F8114E74f69CCbf0edd5DC9e4482D57b490`, MSFT `0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63`, AMZN `0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b`, GOOGL `0x40a5ac8738412f0Ae897452051BD81175eE7b986`, META `0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7`, PLTR `0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`.
+
+### Arbitrum Sepolia (421614)
+
+| Contract | Address |
+| --- | --- |
+| SheafFactory | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://arbitrum-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) |
+| CreationDesk (cash: sUSD mirror) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://arbitrum-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) |
+| MAG8 "Magnificent Eight" | [`0xc1238636d6171c59176fD10a8193E6E33f14095C`](https://arbitrum-sepolia.blockscout.com/address/0xc1238636d6171c59176fD10a8193E6E33f14095C) |
+| AICORE "AI Core" | [`0xE5A089FDDfA7907Ee8661b5CAfFb47562115645E`](https://arbitrum-sepolia.blockscout.com/address/0xE5A089FDDfA7907Ee8661b5CAfFb47562115645E) |
+| EVDY "Everyday Tech" | [`0x7aa1d6065b1A5eeFd386f0A8B0A1E7C3136180Bd`](https://arbitrum-sepolia.blockscout.com/address/0x7aa1d6065b1A5eeFd386f0A8B0A1E7C3136180Bd) |
+| sUSD "Sheaf Test Dollar (mirror)", 6 decimals | [`0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7`](https://arbitrum-sepolia.blockscout.com/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) |
+
+Mirror stocks: TSLA `0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676`, NVDA `0xf17DDb38765e74D1130330ac600bD6BE9CFb68ab`, AAPL `0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a`, MSFT `0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646`, AMZN `0x22192F8114E74f69CCbf0edd5DC9e4482D57b490`, GOOGL `0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63`, META `0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b`, PLTR `0x40a5ac8738412f0Ae897452051BD81175eE7b986`.
+
+### Base Sepolia (84532)
+
+| Contract | Address |
+| --- | --- |
+| SheafFactory | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://base-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) |
+| CreationDesk (cash: sUSD mirror) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://base-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) |
+| MAG8 "Magnificent Eight" | [`0xc49DCde2E4F0f9bC20F6FAc5aC5352dd5c2349B5`](https://base-sepolia.blockscout.com/address/0xc49DCde2E4F0f9bC20F6FAc5aC5352dd5c2349B5) |
+| AICORE "AI Core" | [`0xc0D0A036988ABE5A89312C131469C219F5Ad1FAb`](https://base-sepolia.blockscout.com/address/0xc0D0A036988ABE5A89312C131469C219F5Ad1FAb) |
+| EVDY "Everyday Tech" | [`0xe843E1Cc12aEb0824a054D2101333da12b4B3456`](https://base-sepolia.blockscout.com/address/0xe843E1Cc12aEb0824a054D2101333da12b4B3456) |
+| sUSD "Sheaf Test Dollar (mirror)", 6 decimals | [`0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7`](https://base-sepolia.blockscout.com/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) |
+
+Mirror stocks: TSLA `0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676`, NVDA `0xf17DDb38765e74D1130330ac600bD6BE9CFb68ab`, AAPL `0x26bCb45d2090e7FE4e4E307eB89128EB3d60C80a`, MSFT `0x200d5C9353fb8b3dECf2Da665a0033DC29dE4646`, AMZN `0x22192F8114E74f69CCbf0edd5DC9e4482D57b490`, GOOGL `0x2217FaFDeaEC218CFfbf250308c777EFB1C6BD63`, META `0xE2902eD38905Ec5431E4C86c05FB8f11063bA36b`, PLTR `0x40a5ac8738412f0Ae897452051BD81175eE7b986`.
+
 ## Contracts
 
 | File | What it is |
@@ -99,8 +144,11 @@ Hardhat warns that Node 21 is unsupported. The suite still passes on Node 21.7.0
 cp .env.example .env      # DEPLOYER_PRIVATE_KEY=... (testnet-only key)
 npx hardhat run scripts/deploy-chain.js --network <network>
 npx hardhat run scripts/smoke.js        --network <network>
-npx hardhat run scripts/verify.js       --network <network>   # Blockscout / Etherscan-style
-npx hardhat run scripts/verify-sourcify.js --network tempoTestnet
+npx hardhat run scripts/verify.js       --network <network>   # Blockscout, Etherscan-style API
+npx hardhat run scripts/verify-blockscout.js --network <network>   # Blockscout native v2 API
+npx hardhat run scripts/verify-sourcify.js --network tempoTestnet  # Tempo's Sourcify v2
+SOURCIFY_V2=https://sourcify.dev/server npx hardhat run scripts/verify-sourcify.js --network arbitrumSepolia
+BRIDGE_ETH=0.012 npx hardhat run scripts/bridge.js --network sepolia   # Sepolia -> Arbitrum + Base Sepolia
 node scripts/tempo-sip.mjs                                     # Tempo access-key SIP demo
 ```
 
@@ -119,7 +167,10 @@ The networks are `robinhoodTestnet`, `tempoTestnet`, `arbitrumSepolia`, `sepolia
 - **Seed supply:** a few shares minted into every basket.
 
 The script is resumable. Each address is written to `deployments/<network>.json` as soon as it
-exists, so after a flaky RPC you just re-run it. Set `FRESH=1` to start over.
+exists, so after a flaky RPC you just re-run it. Set `FRESH=1` to start over. Every read that
+follows a write is pinned to the block that write landed in (public RPCs are load-balanced
+across nodes that lag each other), and each run's total gas and native spend is appended under
+`runs`.
 
 `smoke.js` uses the deployer as minter, buyer and filler. It runs these steps and checks every
 balance delta exactly:
@@ -179,22 +230,46 @@ schedule.
     standard-JSON input directly.
 - **Robinhood Chain:** gas is about 0.01 gwei. The full deployment, verification and smoke test
   cost about 0.0001 testnet ETH. The explorer is Blockscout, which verifies without an API key.
-- **HyperEVM:** HYPE is the gas token. Small blocks have a 2M gas limit, which a contract the size
-  of SheafFactory may exceed. The deployer would have to opt into big blocks (an L1
-  `evmUserModify` action) before deploying.
+- **The 1 gwei tip trap:** hardhat-ethers asks for a 1 gwei priority fee unless told otherwise.
+  On Sepolia, where the base fee is a few wei and the going tip is about 0.001 gwei, that is
+  1000 times too much. The first seven Sepolia mirror deploys paid it (about 0.025 testnet ETH)
+  before `hardhat.config.js` pinned legacy gas prices for Sepolia (0.0012 gwei), Base Sepolia
+  (0.012 gwei) and HyperEVM (0.11 gwei). With the fix, the rest of the Sepolia deployment (factory,
+  desk, dollar, a mirror, three baskets, seeding) cost 0.00008 ETH for 68M gas.
+- **Sepolia state-creation gas:** contract creation on Sepolia now costs about 6.5 times what a
+  local Cancun node charges (a MockStock deploy is 3.54M gas there against 0.55M locally; the
+  factory is 14.8M). The full Sepolia deployment used about 93M gas. Arbitrum Sepolia and Base
+  Sepolia charge the usual amounts (Base: about 13.6M gas for everything).
+- **Bridging:** 0.012 ETH each went from Sepolia to Arbitrum Sepolia through the delayed Inbox
+  (`0xaAe2…ae21`, `depositEth`) and to Base Sepolia through the L1StandardBridge (`0xfd0B…3120`,
+  `depositETH`), via `scripts/bridge.js`. Both landed within minutes. The transaction hashes are
+  in `deployments/bridges.json`.
+- **Verification:** `eth-sepolia.blockscout.com` refused the mirror tokens through the
+  Etherscan-style route ("Failed to send contract verification request") but took them through its
+  native v2 API (`scripts/verify-blockscout.js`). `base-sepolia.blockscout.com` rate-limits bursts
+  (HTTP 429), so the script backs off. The `arbitrum-sepolia.blockscout.com` API sits behind a
+  Cloudflare bot challenge, so Arbitrum Sepolia is verified on Sourcify (`sourcify.dev`, exact
+  match), which Blockscout reads.
+- **HyperEVM:** HYPE is the gas token, and the base fee is about 0.1 gwei. Small blocks now
+  have a 3M gas limit, so SheafFactory (2.08M) and an 8-component basket (1.87M) fit without
+  opting into big blocks. A full mirror deployment needs about 13.6M gas, plus about 1.2M for the
+  smoke test, which comes to about 0.0017 HYPE. The deployer holds 0.0005 HYPE (enough for about
+  4.5M gas), so nothing was deployed: a partial stack would be useless. About 0.002 HYPE in total
+  is enough; a reduced plan of 5 mirrors and 2 baskets would need about 0.0012 HYPE.
   - HIP-3 stock perps (trade.xyz `xyz`, testnet dex 65) expose oracle and mark prices through
     precompiles `0x…0807` and `0x…0806`, at index `65*10000 + asset` (for example NVDA = 650002).
     A NAV-reporting basket view could read them for free on chain once gas is available.
-- **Same address, different contract:** the deployer's nonce-0 address on Tempo,
-  `0xaeF9…7676`, is the TSLA mirror there. On Robinhood Chain the same address is a predecessor project's
-  factory. EVM addresses are only meaningful together with a chain ID.
+- **Same address, different contract:** the deployer's nonce-0 address, `0xaeF9…7676`, is the TSLA
+  mirror on Tempo, Arbitrum Sepolia and Base Sepolia. On Robinhood Chain the same address is a
+  predecessor project's factory, and on Tempo `0x4925…95e7` is the factory while on the Sepolia
+  L2s it is the sUSD mirror. EVM addresses are only meaningful together with a chain ID.
 
-## Getting gas for the remaining chains
+## Getting more gas
 
-The deployer is `0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285`. Its balance is zero on Arbitrum
-Sepolia, Ethereum Sepolia, Base Sepolia and HyperEVM testnet. Every free faucet for these needs
-a browser, a login, a captcha or a mainnet balance, so none was attempted here. Once a chain has
-gas, run `deploy-chain.js`, `smoke.js` and `verify.js` for it.
+The deployer is `0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285`. Only HyperEVM testnet is still
+short: it needs about 0.0015 more HYPE. Every free faucet below needs a browser, a login, a
+captcha or a mainnet balance, so none was attempted from here. Once a chain has gas, run
+`deploy-chain.js`, `smoke.js` and one of the verify scripts for it.
 
 | Chain | Faucet | Requirement |
 | --- | --- | --- |

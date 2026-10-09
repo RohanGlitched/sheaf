@@ -23,9 +23,24 @@ async function main() {
   const d = JSON.parse(fs.readFileSync(file, "utf8"));
   const [me] = await ethers.getSigners();
   const txs = {};
+  // Public RPCs are often load-balanced across nodes that lag each other, so
+  // every read is pinned to the block of the last transaction mined (retrying
+  // until the node serving the read has that block).
+  let tag = await ethers.provider.getBlockNumber();
+  const at = async (fn) => {
+    for (let i = 0; ; i++) {
+      try {
+        return await fn({ blockTag: tag });
+      } catch (e) {
+        if (i >= 20) throw e;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  };
   const send = async (label, p) => {
     const r = await (await p).wait();
     txs[label] = r.hash;
+    tag = Math.max(tag, r.blockNumber);
     return r;
   };
 
@@ -45,7 +60,7 @@ async function main() {
     const meta = d.tokens.find((t) => t.address.toLowerCase() === comps[i].token.toLowerCase());
     if (!meta.isMirror) continue;
     const want = mintNeed[i] * 2n;
-    const have = await tokens[i].balanceOf(me.address);
+    const have = await at((o) => tokens[i].balanceOf(me.address, o));
     if (have < want) {
       const mirror = await ethers.getContractAt("MockStock", comps[i].token);
       await send(`faucet_${meta.symbol}`, mirror.faucet(want - have));
@@ -56,12 +71,12 @@ async function main() {
     await send("faucet_dollar", dollar.faucet(100n * 10n ** 6n));
   }
   const bal = async () => ({
-    shares: await basket.balanceOf(me.address),
-    supply: await basket.totalSupply(),
-    comps: await Promise.all(tokens.map((t) => t.balanceOf(me.address))),
-    vault: await basket.vaultBalances(),
-    cash: await cash.balanceOf(me.address),
-    deskCash: await cash.balanceOf(d.desk),
+    shares: await at((o) => basket.balanceOf(me.address, o)),
+    supply: await at((o) => basket.totalSupply(o)),
+    comps: await Promise.all(tokens.map((t) => at((o) => t.balanceOf(me.address, o)))),
+    vault: await at((o) => basket.vaultBalances(o)),
+    cash: await at((o) => cash.balanceOf(me.address, o)),
+    deskCash: await at((o) => cash.balanceOf(d.desk, o)),
   });
 
   // In-kind mint.
@@ -90,13 +105,14 @@ async function main() {
   const cashAmount = 10n ** BigInt(d.stable.decimals) * 101n / 10n; // 10.10 dollars
   await send("approve_desk_cash", cash.approve(d.desk, cashAmount));
   const expiry = (await ethers.provider.getBlock("latest")).timestamp + 3600;
-  const id = await desk.orderCount();
-  await send("placeOrder", desk.placeOrder(b.address, ONE, cashAmount, expiry));
-  check((await cash.balanceOf(d.desk)) - before.deskCash === cashAmount, "desk: escrowed 10.10 of the cash token");
+  const placed = await send("placeOrder", desk.placeOrder(b.address, ONE, cashAmount, expiry));
+  // The order id comes from the OrderPlaced event, never from a possibly stale read.
+  const id = placed.logs.map((l) => desk.interface.parseLog(l)).find((e) => e && e.name === "OrderPlaced").args.id;
+  check((await at((o) => cash.balanceOf(d.desk, o))) - before.deskCash === cashAmount, "desk: escrowed 10.10 of the cash token");
   for (let i = 0; i < tokens.length; i++) await send(`approve_desk_${i}`, tokens[i].approve(d.desk, mintNeed[i]));
   await send("fill", desk.fill(id));
   after = await bal();
-  const o = await desk.getOrder(id);
+  const o = await at((ov) => desk.getOrder(id, ov));
   check(Number(o.status) === 2, `desk: order ${id} is Filled`);
   check(after.shares - before.shares === net + (creatorIsMe ? fee : 0n), "desk: buyer received the shares");
   check(after.cash === before.cash, "desk: cash went out at placeOrder and back to the filler at fill (same account)");

@@ -1,0 +1,15 @@
+{
+  "from": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+  "at": "2026-10-09T04:37:19.425Z",
+  "value": "0.012",
+  "txs": {
+    "arbitrumSepolia": {
+      "via": "Inbox 0xaAe29B0366299461418F5324a79Afc425BE5ae21",
+      "tx": "0x1e5ce5ba7cb1b9f7b5373170f057fa53ebc191e4783513f068aaea8a893f417b"
+    },
+    "baseSepolia": {
+      "via": "L1StandardBridge 0xfd0Bf71F60660E2f608ed56e1659C450eB113120",
+      "tx": "0x8301f7ee43ef3b4e329fa912c997851f463844e799374307c8907e638d31b643"
+    }
+  }
+}

@@ -58,3 +58,4 @@ PITCH-VIDEO.md
 
 # Program and deploy keypairs
 .keys/
+.judge/

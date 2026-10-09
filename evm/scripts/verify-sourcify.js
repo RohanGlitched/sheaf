@@ -60,7 +60,9 @@ async function main() {
   if (d.stable.isMirror) items.push(["MockDollar", d.stable.address, "contracts/mirrors/MockDollar.sol:MockDollar"]);
   const ok = {};
   for (const [label, address, fqn] of items) ok[label] = await verifyOne(server, d.chainId, label, address, fqn);
-  d.verified = { via: server, at: new Date().toISOString(), contracts: ok };
+  // On chains that also verify on Blockscout, keep both records.
+  const key = SERVERS[hre.network.name] ? "verified" : "sourcify";
+  d[key] = { via: server, at: new Date().toISOString(), contracts: ok };
   fs.writeFileSync(file, `${JSON.stringify(d, null, 2)}\n`);
 }
 
