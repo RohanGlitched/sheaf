@@ -448,6 +448,49 @@ export async function buildRedeemShares(params: {
   return packSteps([accounts, redemption], params.owner);
 }
 
+/**
+ * Sign a quote-sensitive transaction while its quote is still fresh.
+ *
+ * An auction's times and prices are set when the transaction is built, and a
+ * wallet prompt can sit open for a minute: a 90-second auction signed late
+ * lands with seconds left. So `build` runs right before the prompt opens, and
+ * if the signature comes back more than `maxAgeMs` after the quote, the
+ * transaction is rebuilt with fresh times and prices and the wallet asked
+ * again (up to `attempts` times). Wallets that can only sign-and-send get the
+ * fresh build and a single prompt.
+ */
+export async function signFresh<R extends { transaction: Transaction }>(p: {
+  connection: Connection;
+  payer: PublicKey;
+  build: () => R;
+  signTransaction?: <T extends Transaction>(transaction: T) => Promise<T>;
+  sendTransaction: (transaction: Transaction, connection: Connection) => Promise<string>;
+  maxAgeMs?: number;
+  attempts?: number;
+  /** Called when a signature came back stale and a fresh quote is about to be signed. */
+  onStale?: () => void;
+}): Promise<R & { signature: string }> {
+  if (!p.signTransaction) {
+    const built = p.build();
+    return { ...built, signature: await p.sendTransaction(built.transaction, p.connection) };
+  }
+  const maxAge = p.maxAgeMs ?? 20_000;
+  for (let i = 0; i < (p.attempts ?? 3); i++) {
+    const { blockhash } = await p.connection.getLatestBlockhash("confirmed");
+    const quotedAt = Date.now();
+    const built = p.build();
+    built.transaction.recentBlockhash = blockhash;
+    built.transaction.feePayer = p.payer;
+    const signed = await p.signTransaction(built.transaction);
+    if (Date.now() - quotedAt <= maxAge) {
+      const signature = await p.connection.sendRawTransaction(signed.serialize(), { preflightCommitment: "confirmed" });
+      return { ...built, signature };
+    }
+    p.onStale?.();
+  }
+  throw new Error("The price went stale while the wallet was open. Approve within 20 seconds to place the order.");
+}
+
 /** Turn a program error code into the sentence the program itself wrote. */
 export const SHEAF_ERRORS: Record<number, string> = {
   6000: "The name has to be between 1 and 32 characters.",

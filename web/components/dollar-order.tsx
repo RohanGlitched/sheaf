@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
@@ -9,13 +9,15 @@ import type { Basket } from "@/lib/sheaf";
 import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, netSharesFor, type Order } from "@/lib/desk";
 import { eventsInLogs } from "@/lib/ledger";
 import { confirmSignature } from "@/lib/confirm";
-import { explainError } from "@/lib/tx";
+import { explainError, signFresh } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
 import { money, timeAgo } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 
 const AUCTION_SECS = 90;
+/** Seconds between signing and the auction's start, so confirmation never eats into it. The program allows a future start. */
+export const START_BUFFER_SECS = 8;
 const BAND_BPS = 200;
 /**
  * The house filler takes orders from $5 (keeper-server's fill filter). A smaller
@@ -85,7 +87,7 @@ type Stage =
  */
 export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; navPerShare: number | null; onDone: () => void }) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction, connected } = useWallet();
+  const { publicKey, sendTransaction, signTransaction, connected } = useWallet();
   const cash = useCash();
   const [dollars, setDollars] = useState("100");
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
@@ -101,14 +103,23 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   const protocolFeeBps = basket.protocolFeeBps ?? 0;
   // The order names the shares the buyer receives. The filler delivers the stocks for the gross count and the
   // basket's creator and protocol fees come out of it, so the auction runs ±2% around the fair count net of both.
-  const bounds = useMemo(() => {
-    if (!fair) return null;
-    const gross = BigInt(Math.floor(fair * 1e6));
-    return {
-      start: netSharesFor((gross * BigInt(10_000 + BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
-      end: netSharesFor((gross * BigInt(10_000 - BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
-    };
-  }, [fair, creatorFeeBps, protocolFeeBps]);
+  const quote = useCallback(
+    (fairShares: number) => {
+      const gross = BigInt(Math.floor(fairShares * 1e6));
+      return {
+        start: netSharesFor((gross * BigInt(10_000 + BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
+        end: netSharesFor((gross * BigInt(10_000 - BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
+      };
+    },
+    [creatorFeeBps, protocolFeeBps],
+  );
+  const bounds = useMemo(() => (fair ? quote(fair) : null), [fair, quote]);
+  // The latest fair price, read again when the order is built: the quote shown can be minutes old by the time the wallet signs.
+  const navRef = useRef(navPerShare);
+  useEffect(() => {
+    navRef.current = navPerShare;
+  }, [navPerShare]);
+  const [notice, setNotice] = useState<string | null>(null);
   const feeBps = creatorFeeBps + protocolFeeBps;
   const short = cash.balance != null && valid && cash.balance < toCashRaw(amount);
   const routeCost = useRouteCost(basket.address);
@@ -205,32 +216,47 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   async function place() {
     if (!publicKey || !bounds || !valid || blocked) return;
     setError(null);
+    setNotice(null);
     setStage({ kind: "signing" });
     try {
-      const t = Math.floor(Date.now() / 1000);
-      const nonce = freshNonce();
-      const { order, ix } = placeOrderIx({
-        buyer: publicKey,
-        basket: new PublicKey(basket.address),
-        cashMint: CASH.mint,
-        cashProgram: CASH.program,
-        nonce,
-        cashAmount: toCashRaw(amount),
-        startShares: bounds.start,
-        endShares: bounds.end,
-        startTs: t,
-        endTs: t + AUCTION_SECS,
+      // Built right before the wallet opens, and rebuilt if the signature comes back stale: the auction's clock and
+      // price start when the order can actually land, not when the quote was first shown.
+      const { order, signature } = await signFresh({
+        connection,
+        payer: publicKey,
+        signTransaction,
+        sendTransaction,
+        onStale: () => setNotice("The wallet was open a while, so the price and the auction clock were refreshed. Approve once more."),
+        build: () => {
+          const nav = navRef.current ?? navPerShare!;
+          const fresh = quote(amount / nav);
+          // A few seconds' head start so confirmation never eats into the auction; the program allows a future start.
+          const startTs = Math.floor(Date.now() / 1000) + START_BUFFER_SECS;
+          const { order, ix } = placeOrderIx({
+            buyer: publicKey,
+            basket: new PublicKey(basket.address),
+            cashMint: CASH.mint,
+            cashProgram: CASH.program,
+            nonce: freshNonce(),
+            cashAmount: toCashRaw(amount),
+            startShares: fresh.start,
+            endShares: fresh.end,
+            startTs,
+            endTs: startTs + AUCTION_SECS,
+          });
+          // The share account the fill will pay into, created by the buyer, idempotently.
+          const shareMint = new PublicKey(basket.shareMint);
+          const shareAccount = createAssociatedTokenAccountIdempotentInstruction(
+            publicKey,
+            tokenAccount(shareMint, publicKey, TOKEN_2022_PROGRAM_ID),
+            publicKey,
+            shareMint,
+            TOKEN_2022_PROGRAM_ID,
+          );
+          return { order, transaction: new Transaction().add(shareAccount, ix) };
+        },
       });
-      // The share account the fill will pay into, created by the buyer, idempotently.
-      const shareMint = new PublicKey(basket.shareMint);
-      const shareAccount = createAssociatedTokenAccountIdempotentInstruction(
-        publicKey,
-        tokenAccount(shareMint, publicKey, TOKEN_2022_PROGRAM_ID),
-        publicKey,
-        shareMint,
-        TOKEN_2022_PROGRAM_ID,
-      );
-      const signature = await sendTransaction(new Transaction().add(shareAccount, ix), connection);
+      setNotice(null);
       await confirmSignature(connection, signature);
       const info = await connection.getAccountInfo(order);
       const decoded = info ? decodeOrder(order, new Uint8Array(info.data)) : null;
@@ -240,6 +266,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
       cash.reload();
     } catch (err) {
       setError(explainError(err));
+      setNotice(null);
       setStage({ kind: "idle" });
     }
   }
@@ -377,7 +404,9 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         <div className="mt-5" aria-live="polite">
           <div className="flex items-baseline justify-between text-sm">
             <span className="text-ink">Waiting for a filler</span>
-            <span className="tnum text-ink-3">{Math.max(0, open.endTs - now)}s left</span>
+            <span className="tnum text-ink-3">
+              {now < open.startTs ? `starts in ${open.startTs - now}s` : `${Math.max(0, open.endTs - now)}s left`}
+            </span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-sunk">
             <div className="h-full rounded-full bg-bind transition-[width] duration-500" style={{ width: `${progress * 100}%` }} />
@@ -438,6 +467,11 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         </div>
       )}
 
+      {notice && (
+        <p className="mt-4 border-l-2 border-bind pl-3 text-sm text-ink-2" aria-live="polite">
+          {notice}
+        </p>
+      )}
       {(error || cash.error) && <p className="mt-4 border-l-2 border-loss pl-3 text-sm text-loss">{error ?? cash.error}</p>}
     </div>
   );

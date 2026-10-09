@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
@@ -8,12 +8,12 @@ import { placeSellOrderIx, cancelSellOrderIx, decodeSellOrder, freshNonce, requi
 import { fromBase64 } from "@/lib/ledger";
 import idl from "@/lib/sheaf-idl.json";
 import { confirmSignature } from "@/lib/confirm";
-import { explainError } from "@/lib/tx";
+import { explainError, signFresh } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, fromCashRaw } from "@/lib/use-cash";
 import { money, quantity } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
-import { MIN_ORDER_DOLLARS, routeBpsFor, routeCostText, routeOutsideBand, useRouteCost } from "./dollar-order";
+import { MIN_ORDER_DOLLARS, START_BUFFER_SECS, routeBpsFor, routeCostText, routeOutsideBand, useRouteCost } from "./dollar-order";
 
 const AUCTION_SECS = 90;
 const BAND_BPS = 200;
@@ -76,7 +76,7 @@ export function SellOrderPanel({
   onDone: () => void;
 }) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction, connected } = useWallet();
+  const { publicKey, sendTransaction, signTransaction, connected } = useWallet();
   const cash = useCash();
   const [unit, setUnit] = useState<"shares" | "dollars">("shares");
   const [input, setInput] = useState("1");
@@ -92,11 +92,17 @@ export function SellOrderPanel({
   const tooSmall = fairCash != null && shares > 0 && fairCash < MIN_ORDER_DOLLARS;
   const valid = rawShares > 0n && fairCash != null && fairCash >= MIN_ORDER_DOLLARS;
   const short = connected && valid && rawShares > shareBalance;
-  const bounds = useMemo(() => {
-    if (!valid || fairCash == null) return null;
-    const fair = BigInt(Math.floor(fairCash * 1e6));
+  const askFor = (cashValue: number) => {
+    const fair = BigInt(Math.floor(cashValue * 1e6));
     return { start: (fair * BigInt(10_000 + BAND_BPS)) / 10_000n, end: (fair * BigInt(10_000 - BAND_BPS)) / 10_000n };
-  }, [valid, fairCash]);
+  };
+  const bounds = useMemo(() => (valid && fairCash != null ? askFor(fairCash) : null), [valid, fairCash]);
+  // The latest fair price, read again when the order is built: the wallet prompt can sit open for a minute.
+  const navRef = useRef(navPerShare);
+  useEffect(() => {
+    navRef.current = navPerShare;
+  }, [navPerShare]);
+  const [notice, setNotice] = useState<string | null>(null);
   const routeCost = useRouteCost(basket.address);
   const routeBps = routeBpsFor(routeCost, fairCash ?? 100);
   const blocked = routeOutsideBand(routeBps, BAND_BPS);
@@ -155,22 +161,36 @@ export function SellOrderPanel({
   async function place() {
     if (!publicKey || !bounds || !valid || blocked || short) return;
     setError(null);
+    setNotice(null);
     setStage({ kind: "signing" });
     try {
-      const t = Math.floor(Date.now() / 1000);
-      const { sellOrder, ix } = placeSellOrderIx({
-        seller: publicKey,
-        basket,
-        cashMint: CASH.mint,
-        cashProgram: CASH.program,
-        nonce: freshNonce(),
-        shares: rawShares,
-        startCash: bounds.start,
-        endCash: bounds.end,
-        startTs: t,
-        endTs: t + AUCTION_SECS,
+      // Built right before the wallet opens and rebuilt if the signature comes back stale, so the ask and the
+      // auction clock start when the order can actually land.
+      const { sellOrder, signature } = await signFresh({
+        connection,
+        payer: publicKey,
+        signTransaction,
+        sendTransaction,
+        onStale: () => setNotice("The wallet was open a while, so the price and the auction clock were refreshed. Approve once more."),
+        build: () => {
+          const ask = askFor((Number(rawShares) / SHARE) * (navRef.current ?? navPerShare!));
+          const startTs = Math.floor(Date.now() / 1000) + START_BUFFER_SECS;
+          const { sellOrder, ix } = placeSellOrderIx({
+            seller: publicKey,
+            basket,
+            cashMint: CASH.mint,
+            cashProgram: CASH.program,
+            nonce: freshNonce(),
+            shares: rawShares,
+            startCash: ask.start,
+            endCash: ask.end,
+            startTs,
+            endTs: startTs + AUCTION_SECS,
+          });
+          return { sellOrder, transaction: new Transaction().add(ix) };
+        },
       });
-      const signature = await sendTransaction(new Transaction().add(ix), connection);
+      setNotice(null);
       await confirmSignature(connection, signature);
       const info = await connection.getAccountInfo(sellOrder);
       const decoded = info ? decodeSellOrder(sellOrder, new Uint8Array(info.data)) : null;
@@ -180,6 +200,7 @@ export function SellOrderPanel({
       onDone();
     } catch (err) {
       setError(explainError(err));
+      setNotice(null);
       setStage({ kind: "idle" });
     }
   }
@@ -330,7 +351,9 @@ export function SellOrderPanel({
         <div className="mt-5" aria-live="polite">
           <div className="flex items-baseline justify-between text-sm">
             <span className="text-ink">Waiting for a filler</span>
-            <span className="tnum text-ink-3">{Math.max(0, open.endTs - now)}s left</span>
+            <span className="tnum text-ink-3">
+              {now < open.startTs ? `starts in ${open.startTs - now}s` : `${Math.max(0, open.endTs - now)}s left`}
+            </span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-sunk">
             <div className="h-full rounded-full bg-bind transition-[width] duration-500" style={{ width: `${progress * 100}%` }} />
@@ -398,6 +421,11 @@ export function SellOrderPanel({
         </div>
       )}
 
+      {notice && (
+        <p className="mt-4 border-l-2 border-bind pl-3 text-sm text-ink-2" aria-live="polite">
+          {notice}
+        </p>
+      )}
       {(error || cash.error) && <p className="mt-4 border-l-2 border-loss pl-3 text-sm text-loss">{error ?? cash.error}</p>}
     </div>
   );
