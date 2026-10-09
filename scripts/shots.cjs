@@ -21,7 +21,7 @@ const mobile = process.env.MOBILE === "1";
     await page.waitForTimeout(Number(process.env.WAIT || 6000));
     const name = (r === "/" ? "home" : r.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")) + (mobile ? "-m" : "");
     const file = path.join(OUT, `${name}.png`);
-    await page.screenshot({ path: file, fullPage: true });
+    await page.screenshot({ path: file, fullPage: process.env.FULL !== "0" });
     console.log(file);
   }
   await browser.close();

@@ -1,0 +1,16 @@
+name: Keeper
+
+# Runs due monthly plans and fills fair dollar orders every few minutes, by
+# calling the site's keeper. Everything it does is permissionless on chain; this
+# only makes sure someone does it when no visitor is on the page.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the keeper
+        run: curl -fsS -X POST https://sheaf-index.vercel.app/api/keeper | head -c 2000

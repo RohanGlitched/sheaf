@@ -11,7 +11,6 @@ plans on top of them.
 | Source | `programs/sheaf/src/lib.rs` |
 | IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`) |
 | Tests | `tests/sheaf.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`) |
-| Predecessor | Tessera, `F8QLTZPe9mJuPgXCbccnU9G2kMSEE4inygdUw3QZbrQ`, still on devnet and untouched |
 
 The program never reads a price. Baskets are minted and redeemed in kind, so
 the vault can never back a share by less than its recipe. The desk turns cash
@@ -45,7 +44,7 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
 | Order escrow | ATA of the **order PDA** for the cash mint, under the cash token program | same instruction as the order (`init_if_needed`) | same instruction as the order |
 | `Plan` | `["plan", basket, owner, plan_id_le_u64]` | `open_plan` | `close_plan` |
 
-### `Basket` (unchanged from Tessera)
+### `Basket`
 
 `creator, share_mint, token_program, name (<=32), symbol (<=10), creator_fee_bps,
 component_count, components[8] {mint, units_per_share, weight_bps, decimals},
@@ -337,7 +336,7 @@ shares. A unit test checks exactness and minimality for every `net` in
 
 ## 7. Errors
 
-Codes 6000 to 6023 are identical to Tessera's, so existing error decoding keeps working.
+Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them cover orders and plans.
 
 | Code | Name | When |
 |---|---|---|
@@ -402,9 +401,9 @@ diverted to an impostor account.
 **Share mint** (authority: basket PDA). Shares are minted only against a
 completed in-kind deposit: in `mint_shares`, and in `fill_order` after
 `deposit_components` succeeds in the same instruction. Fee shares go only to
-an account **owned by the basket creator**. Tessera checked only that
-account's mint, so a depositor could pass their own share account and take
-the fee back. Sheaf closes that.
+an account **owned by the basket creator**, not merely one of the right
+mint, so a depositor cannot pass their own share account and take the fee
+back.
 
 **Order escrow** (authority: order PDA). It moves only by the order PDA's
 signature, in exactly two ways:
