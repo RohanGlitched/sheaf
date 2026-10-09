@@ -1,7 +1,9 @@
 // Opens the house's demo plan: test dollars into a basket every few minutes, so
 // /plans always has a live plan to show. The house is both the plan's owner and
 // its filler, so each run's dollars come straight back to it on the fill.
-//   node scripts/open-house-plan.mjs [basket] [dollarsPerRun] [periodSecs] [runs] [auctionSecs] [--close <old plan>]
+//   node scripts/open-house-plan.mjs [basket] [dollarsPerRun] [periodSecs] [runs] [auctionSecs] [trailStepBps] [--close <old plan>]
+// trailStepBps 0 (default) keeps the 6% bounds fixed; a step lets the plan
+// follow the market inside them.
 // --close first closes an earlier house plan (revoking its allowance), so only
 // one house demo plan runs at a time.
 // Run in WSL (Windows node breaks @solana/web3.js). Devnet only.
@@ -32,6 +34,7 @@ const dollars = Number(positional[1] ?? 25);
 const periodSecs = Number(positional[2] ?? 300);
 const runs = Number(positional[3] ?? 2000);
 const auctionSecs = Number(positional[4] ?? (periodSecs <= 300 ? 240 : 1800));
+const trailStepBps = Number(positional[5] ?? 0);
 const SITE = "https://sheaf-index.vercel.app";
 
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
@@ -78,6 +81,7 @@ const sig = await program.methods
     new anchor.BN(auctionSecs),
     new anchor.BN(minRef.toString()),
     new anchor.BN(maxRef.toString()),
+    trailStepBps,
   )
   .accounts({
     owner: house.publicKey,

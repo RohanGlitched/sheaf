@@ -102,14 +102,27 @@ pub const RATE_SCALE: u64 = 1_000_000_000;
 pub const MAX_BAND_BPS: u16 = 5_000;
 /// No order (or plan auction) may close more than 30 days out.
 pub const MAX_ORDER_SECS: i64 = 30 * 24 * 60 * 60;
-/// A plan opened since trailing bounds existed keeps its rate bounds this far
-/// either side of its last fill: after every fill, `min = ref × (1 − step)` and
-/// `max = ref × (1 + step)`. A plan follows the market, and no single run can
-/// move its reference more than 6%. Plans opened earlier keep fixed bounds.
+/// The trailing step clients are expected to offer (the owner picks it at
+/// `open_plan`; 0 means fixed bounds). With step `s`, after every fill the
+/// plan's working bounds become `ref × (1 ± s)`, intersected with the owner's
+/// hard limits, so the plan follows the market inside the owner's limits and
+/// no single run moves its reference more than `s`.
 pub const PLAN_STEP_BPS: u16 = 600;
-/// Bytes after a `Plan`'s serialized fields: `trail_step_bps: u16` and 6
-/// reserved. Plans opened before trailing bounds have no tail and read 0.
-pub const PLAN_TAIL_LEN: usize = 8;
+/// The largest trailing step `open_plan` accepts.
+pub const MAX_TRAIL_STEP_BPS: u16 = 5_000;
+/// Bytes after a `Plan`'s serialized fields: `trail_step_bps: u16`, 6
+/// reserved, then the owner's hard limits `hard_min_e9: u64` and
+/// `hard_max_e9: u64`, which only `update_plan` changes. Plans opened before
+/// trailing bounds have no tail (fixed bounds); plans opened in the first
+/// trailing release have only the 8-byte step part (no hard limits).
+pub const PLAN_TAIL_LEN: usize = 24;
+/// An order or sell order may not start more than this long before it lands,
+/// so a slow wallet or a slow clock cannot hand a filler most of the decay.
+pub const MAX_START_LAG_SECS: i64 = 60;
+/// The SPL Memo program, CPI'd before a transfer into an account that
+/// requires incoming memos (Token-2022 MemoTransfer).
+pub const MEMO_PROGRAM_ID: Pubkey =
+    anchor_lang::solana_program::pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 /// Backed Finance (xStocks): permanent delegate, confidential-transfer,
 /// transfer-hook and metadata authority on every xStock mint.
@@ -481,6 +494,7 @@ pub mod sheaf {
         require!(cash_amount > 0, SheafError::ZeroCash);
         let now = Clock::get()?.unix_timestamp;
         validate_auction(start_shares, end_shares, start_ts, end_ts, now)?;
+        require_fresh_start(start_ts, now)?;
         // No cash a third party (or the buyer) could pull back out of escrow,
         // freeze in place, or make untransferable before a filler is paid.
         check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
@@ -559,11 +573,20 @@ pub mod sheaf {
             SheafError::MathOverflow
         );
 
-        // Same deposit path, rounding and vault checks as `mint_shares`.
+        // Same deposit path, rounding and vault checks as `mint_shares`. One
+        // extra trailing account is allowed: the Memo program, for a filler
+        // whose cash account requires incoming memos.
+        let triples = basket.component_count as usize * 3;
+        let remaining = ctx.remaining_accounts;
+        require!(
+            remaining.len() == triples
+                || (remaining.len() == triples + 1 && remaining[triples].key == &MEMO_PROGRAM_ID),
+            SheafError::AccountCountMismatch
+        );
         let deposited = deposit_components(
             basket,
             &basket_key,
-            ctx.remaining_accounts,
+            &remaining[..triples],
             &ctx.accounts.component_token_program.to_account_info(),
             &ctx.accounts.filler.to_account_info(),
             gross,
@@ -594,6 +617,7 @@ pub mod sheaf {
             ctx.accounts.filler_cash_account.to_account_info(),
             ctx.accounts.rent_payer.to_account_info(),
             ctx.accounts.cash_token_program.to_account_info(),
+            remaining,
         )?;
 
         // A plan's reference rate follows the rate its last order filled at.
@@ -610,11 +634,11 @@ pub mod sheaf {
             // A plan that has since been closed, or that still has the
             // pre-hardening layout, is simply not updated: the buyer's fill
             // must never depend on it.
-            let (decoded, step) = if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
+            let (decoded, step, hard) = if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
                 let data = plan_info.try_borrow_data()?;
-                (Plan::try_deserialize(&mut &data[..]).ok(), plan_trail_step(&data))
+                (Plan::try_deserialize(&mut &data[..]).ok(), plan_trail_step(&data), plan_hard_limits(&data))
             } else {
-                (None, 0)
+                (None, 0, None)
             };
             if let Some(mut plan) = decoded {
                 // Same plan, and the same incarnation of it: an order left
@@ -632,7 +656,7 @@ pub mod sheaf {
                     // ± their step, so no single run moves it further.
                     let rate = shares_per_cash_e9(shares_out, order.cash_amount).unwrap_or(0);
                     if rate > 0 {
-                        let rate = apply_plan_fill(&mut plan, rate, step)?;
+                        let rate = apply_plan_fill(&mut plan, rate, step, hard)?;
                         plan.fills = plan.fills.saturating_add(1);
                         plan.last_fill_ts = now;
                         let mut data = plan_info.try_borrow_mut_data()?;
@@ -677,7 +701,7 @@ pub mod sheaf {
     /// Cancel an order and refund its cash to the buyer. The buyer may cancel
     /// at any time; after `end_ts` anyone may, as a clean-up crank. The refund
     /// always goes to a cash account the buyer owns.
-    pub fn cancel_order(ctx: Context<CancelOrder>) -> Result<()> {
+    pub fn cancel_order<'info>(ctx: Context<'_, '_, 'info, 'info, CancelOrder<'info>>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let order: Order = (**ctx.accounts.order).clone();
         let by = ctx.accounts.caller.key();
@@ -711,6 +735,7 @@ pub mod sheaf {
             ctx.accounts.buyer_cash_account.to_account_info(),
             ctx.accounts.rent_payer.to_account_info(),
             ctx.accounts.cash_token_program.to_account_info(),
+            ctx.remaining_accounts,
         )?;
 
         emit!(OrderCancelled {
@@ -730,10 +755,16 @@ pub mod sheaf {
     /// Open a recurring buy and delegate `cash_per_run * runs` of the owner's
     /// cash account to the plan PDA, in one instruction.
     ///
-    /// `min_ref_shares_per_cash_e9` is the worst rate the owner will ever
-    /// accept: no run's auction ends below it, and the reference rate can
-    /// never be walked under it. `max_ref_shares_per_cash_e9` caps how far up
-    /// fills can push the reference. `min <= ref <= max`.
+    /// `min_ref_shares_per_cash_e9` and `max_ref_shares_per_cash_e9` are the
+    /// owner's hard limits (`min <= ref <= max`): no run's auction ends below
+    /// `min`, and no fill moves the reference outside `[min, max]`, ever,
+    /// trailing or not. They change only through `update_plan`.
+    ///
+    /// `trail_step_bps` (0 to 5,000) chooses how the working bounds behave:
+    /// 0 keeps them at the hard limits for good (fixed bounds); a step `s`
+    /// moves them after every fill to `ref × (1 ± s)` intersected with the
+    /// hard limits, so the plan follows the market inside the owner's limits
+    /// and no single run moves the reference by more than `s`.
     #[allow(clippy::too_many_arguments)]
     pub fn open_plan(
         ctx: Context<OpenPlan>,
@@ -746,9 +777,11 @@ pub mod sheaf {
         auction_secs: i64,
         min_ref_shares_per_cash_e9: u64,
         max_ref_shares_per_cash_e9: u64,
+        trail_step_bps: u16,
     ) -> Result<()> {
         require!(cash_per_run > 0, SheafError::ZeroCash);
         require!(period_secs > 0 && runs > 0, SheafError::BadPlanSchedule);
+        require!(trail_step_bps <= MAX_TRAIL_STEP_BPS, SheafError::BadTrailStep);
         validate_plan_terms(
             cash_per_run,
             auction_secs,
@@ -830,16 +863,16 @@ pub mod sheaf {
             max_ref_shares_per_cash_e9,
         });
 
-        // The trailing step lives after the struct, so plans opened before it
-        // existed (and their clients) are untouched.
+        // The trailing step and the owner's hard limits live after the struct,
+        // so plans opened before them (and their clients) are untouched.
         {
             let info = ctx.accounts.plan.to_account_info();
             let mut data = info.try_borrow_mut_data()?;
-            data[PLAN_TAIL_AT..PLAN_TAIL_AT + 2].copy_from_slice(&PLAN_STEP_BPS.to_le_bytes());
+            write_plan_tail(&mut data, trail_step_bps, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9);
         }
         emit!(PlanTrail {
             plan: plan_key,
-            step_bps: PLAN_STEP_BPS,
+            step_bps: trail_step_bps,
         });
         Ok(())
     }
@@ -874,9 +907,14 @@ pub mod sheaf {
         // A new terms epoch: a fill of an order the plan placed before this
         // re-centre no longer moves the reference (`fill_order` updates the
         // plan only from orders created at or after `created_at`), so a stale
-        // order cannot undo the owner's update. The plan's opening time stays
+        // order cannot undo the owner's update. It starts one second ahead,
+        // so an order created in the same second as the update (which may
+        // predate it) is treated as stale too. The plan's opening time stays
         // in the `PlanOpened` event.
-        plan.created_at = Clock::get()?.unix_timestamp;
+        plan.created_at = Clock::get()?
+            .unix_timestamp
+            .checked_add(1)
+            .ok_or(SheafError::MathOverflow)?;
 
         emit!(PlanUpdated {
             plan: plan.key(),
@@ -887,6 +925,15 @@ pub mod sheaf {
             min_ref_shares_per_cash_e9,
             max_ref_shares_per_cash_e9,
         });
+        // The re-centred bounds are the owner's new hard limits.
+        {
+            let info = ctx.accounts.plan.to_account_info();
+            let mut data = info.try_borrow_mut_data()?;
+            if data.len() >= PLAN_TAIL_AT + PLAN_TAIL_LEN {
+                let step = plan_trail_step(&data);
+                write_plan_tail(&mut data, step, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9);
+            }
+        }
         Ok(())
     }
 
@@ -1026,6 +1073,7 @@ pub mod sheaf {
         require!(shares > 0, SheafError::ZeroShares);
         let now = Clock::get()?.unix_timestamp;
         validate_auction(start_cash, end_cash, start_ts, end_ts, now)?;
+        require_fresh_start(start_ts, now)?;
         // The seller is paid in this cash: nobody may be able to seize it,
         // block it, or change its fee once a filler has priced the order.
         check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
@@ -1089,7 +1137,7 @@ pub mod sheaf {
     /// be, grossed up for any transfer fee so the seller nets it) and takes the
     /// escrowed shares. Permissionless. The filler may redeem the shares in
     /// kind with `redeem_shares` in the same transaction.
-    pub fn fill_sell_order(ctx: Context<FillSellOrder>) -> Result<()> {
+    pub fn fill_sell_order<'info>(ctx: Context<'_, '_, 'info, 'info, FillSellOrder<'info>>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let key = ctx.accounts.sell_order.key();
         let order: SellOrder = (**ctx.accounts.sell_order).clone();
@@ -1103,6 +1151,7 @@ pub mod sheaf {
             Clock::get()?.epoch,
         )?;
         let before = ctx.accounts.seller_cash_account.amount;
+        memo_if_required(&ctx.accounts.seller_cash_account.to_account_info(), ctx.remaining_accounts)?;
         token_interface::transfer_checked(
             CpiContext::new(
                 ctx.accounts.cash_token_program.to_account_info(),
@@ -1135,6 +1184,7 @@ pub mod sheaf {
             ctx.accounts.filler_share_account.to_account_info(),
             ctx.accounts.rent_payer.to_account_info(),
             ctx.accounts.share_token_program.to_account_info(),
+            ctx.remaining_accounts,
         )?;
 
         emit!(SellOrderFilled {
@@ -1154,7 +1204,7 @@ pub mod sheaf {
     /// Cancel a sell order and return the shares. The seller may cancel at
     /// any time; after `end_ts` anyone may, and then the shares go only to
     /// the seller's canonical share account.
-    pub fn cancel_sell_order(ctx: Context<CancelSellOrder>) -> Result<()> {
+    pub fn cancel_sell_order<'info>(ctx: Context<'_, '_, 'info, 'info, CancelSellOrder<'info>>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let key = ctx.accounts.sell_order.key();
         let order: SellOrder = (**ctx.accounts.sell_order).clone();
@@ -1184,6 +1234,7 @@ pub mod sheaf {
             ctx.accounts.seller_share_account.to_account_info(),
             ctx.accounts.rent_payer.to_account_info(),
             ctx.accounts.share_token_program.to_account_info(),
+            ctx.remaining_accounts,
         )?;
         emit!(SellOrderCancelled {
             sell_order: key,
@@ -1985,20 +2036,108 @@ pub fn plan_trail_step(data: &[u8]) -> u16 {
     }
 }
 
-/// Record a plan fill at `rate`: clamp it into the plan's bounds and make it
-/// the reference. With a trailing step, the bounds then move to
-/// `rate × (1 ± step)`, so the next fill can move the reference at most that
-/// far; with step 0 they stay the owner's. Returns the recorded rate.
-pub fn apply_plan_fill(plan: &mut Plan, rate: u64, step_bps: u16) -> Result<u64> {
+/// A plan's hard limits `(min, max)`, from its tail; `None` for a plan
+/// opened before they existed.
+pub fn plan_hard_limits(data: &[u8]) -> Option<(u64, u64)> {
+    let b = data.get(PLAN_TAIL_AT + 8..PLAN_TAIL_AT + 24)?;
+    Some((
+        u64::from_le_bytes(b[0..8].try_into().unwrap()),
+        u64::from_le_bytes(b[8..16].try_into().unwrap()),
+    ))
+}
+
+fn write_plan_tail(data: &mut [u8], step: u16, hard_min: u64, hard_max: u64) {
+    let t = &mut data[PLAN_TAIL_AT..PLAN_TAIL_AT + PLAN_TAIL_LEN];
+    t[0..2].copy_from_slice(&step.to_le_bytes());
+    t[8..16].copy_from_slice(&hard_min.to_le_bytes());
+    t[16..24].copy_from_slice(&hard_max.to_le_bytes());
+}
+
+/// Record a plan fill at `rate`: clamp it into the plan's working bounds and
+/// make it the reference. With a trailing step, the working bounds then move
+/// to `rate × (1 ± step)` intersected with the owner's hard limits (`hard`),
+/// so the next fill can move the reference at most `step`, and never outside
+/// the owner's limits; with step 0 they stay where they are. Returns the
+/// recorded rate.
+pub fn apply_plan_fill(plan: &mut Plan, rate: u64, step_bps: u16, hard: Option<(u64, u64)>) -> Result<u64> {
     let rate = rate
         .max(plan.min_ref_shares_per_cash_e9)
         .min(plan.max_ref_shares_per_cash_e9);
     plan.ref_shares_per_cash_e9 = rate;
     if step_bps > 0 && (step_bps as u64) < BPS {
-        plan.min_ref_shares_per_cash_e9 = mul_div_floor(rate, BPS - step_bps as u64, BPS)?.max(1);
-        plan.max_ref_shares_per_cash_e9 = mul_div_floor(rate, BPS + step_bps as u64, BPS)?.max(rate);
+        let (hard_min, hard_max) = hard.unwrap_or((1, u64::MAX));
+        let lo = mul_div_floor(rate, BPS - step_bps as u64, BPS)?.max(1).max(hard_min);
+        let hi = mul_div_floor(rate, BPS + step_bps as u64, BPS)?.max(rate).min(hard_max);
+        // `rate` lies inside the hard limits (it was clamped into working
+        // bounds that never leave them), so lo <= rate <= hi.
+        plan.min_ref_shares_per_cash_e9 = lo.min(rate);
+        plan.max_ref_shares_per_cash_e9 = hi.max(rate);
     }
     Ok(rate)
+}
+
+/// An auction may start a little in the past (the transaction takes time to
+/// land), but not so far that the filler gets most of the decay for free.
+fn require_fresh_start(start_ts: i64, now: i64) -> Result<()> {
+    require!(
+        start_ts as i128 >= now as i128 - MAX_START_LAG_SECS as i128,
+        SheafError::StaleAuctionStart
+    );
+    Ok(())
+}
+
+/// Whether a token account requires a memo on incoming transfers (a
+/// Token-2022 account with MemoTransfer enabled). Read by extension number,
+/// like the mint policies.
+pub fn requires_incoming_memo(data: &[u8]) -> bool {
+    const ACCOUNT_TYPE_AT: usize = 165;
+    const MEMO_TRANSFER: u16 = 8;
+    if data.len() <= ACCOUNT_TYPE_AT || data[ACCOUNT_TYPE_AT] != 2 {
+        return false;
+    }
+    let mut at = ACCOUNT_TYPE_AT + 1;
+    while at + 4 <= data.len() {
+        let ty = u16::from_le_bytes([data[at], data[at + 1]]);
+        if ty == 0 {
+            break;
+        }
+        let len = u16::from_le_bytes([data[at + 2], data[at + 3]]) as usize;
+        let start = at + 4;
+        let Some(end) = start.checked_add(len) else { return false };
+        if end > data.len() {
+            return false;
+        }
+        if ty == MEMO_TRANSFER {
+            return data.get(start) == Some(&1);
+        }
+        at = end;
+    }
+    false
+}
+
+/// Before a transfer into `to`: if it requires incoming memos, CPI a memo
+/// (the token program checks the instruction just before the transfer), with
+/// the Memo program taken from the remaining accounts (`MemoProgramRequired`
+/// when it is not there). A refund, a sale or a release can then never be
+/// blocked by the recipient turning memos on.
+fn memo_if_required(to: &AccountInfo, remaining: &[AccountInfo]) -> Result<()> {
+    let needs = to.owner == &spl_token_2022::ID && requires_incoming_memo(&to.try_borrow_data()?);
+    if !needs {
+        return Ok(());
+    }
+    let memo = remaining
+        .iter()
+        .find(|a| a.key == &MEMO_PROGRAM_ID)
+        .ok_or(SheafError::MemoProgramRequired)?;
+    invoke(
+        &anchor_lang::solana_program::instruction::Instruction {
+            program_id: MEMO_PROGRAM_ID,
+            accounts: vec![],
+            data: b"Sheaf".to_vec(),
+        },
+        &[memo.clone()],
+    )?;
+    Ok(())
 }
 
 /// Size of a `Plan` account written before `min_ref`/`max_ref` existed.
@@ -2345,11 +2484,17 @@ fn check_component_extensions(data: &[u8]) -> Result<()> {
             | ext::TOKEN_GROUP_MEMBER
             | ext::SCALED_UI_AMOUNT => true,
             ext::DEFAULT_ACCOUNT_STATE => value.first() == Some(&ext::STATE_INITIALIZED),
-            // TransferFeeConfig = { transfer_fee_config_authority, .. }: its
-            // authority could raise the fee until every deposit overflows or
-            // pays it double (and harvest the difference), so only an issuer.
+            // TransferFeeConfig = { transfer_fee_config_authority,
+            // withdraw_withheld_authority, .. }: the first could raise the fee
+            // until every deposit overflows or pays it double; the second
+            // collects whatever fee is withheld. A creator holding either
+            // could skim every deposit past the 1% creator-fee cap, so both
+            // must be empty or an issuer.
             ext::TRANSFER_FEE_CONFIG => {
-                require!(none_or_known_issuer(value), SheafError::ComponentIssuerAuthority);
+                require!(
+                    none_or_known_issuer(value) && value.len() >= 64 && none_or_known_issuer(&value[32..64]),
+                    SheafError::ComponentIssuerAuthority
+                );
                 true
             }
             // PermanentDelegate = { delegate }; PausableConfig = { authority,
@@ -2630,6 +2775,7 @@ fn drain_and_close_escrow<'info>(
     to: AccountInfo<'info>,
     rent_to: AccountInfo<'info>,
     cash_token_program: AccountInfo<'info>,
+    remaining: &[AccountInfo<'info>],
 ) -> Result<u64> {
     let nonce_bytes = order.nonce.to_le_bytes();
     let bump = [order.bump];
@@ -2655,6 +2801,7 @@ fn drain_and_close_escrow<'info>(
 
     let amount = escrow.amount;
     if amount > 0 {
+        memo_if_required(&to, remaining)?;
         token_interface::transfer_checked(
             CpiContext::new_with_signer(
                 cash_token_program.clone(),
@@ -2718,6 +2865,7 @@ fn release_sell_escrow<'info>(
     to: AccountInfo<'info>,
     rent_to: AccountInfo<'info>,
     share_token_program: AccountInfo<'info>,
+    remaining: &[AccountInfo<'info>],
 ) -> Result<u64> {
     let nonce_bytes = order.nonce.to_le_bytes();
     let bump = [order.bump];
@@ -2732,6 +2880,7 @@ fn release_sell_escrow<'info>(
     let _ = order_key;
     let amount = escrow.amount;
     if amount > 0 {
+        memo_if_required(&to, remaining)?;
         token_interface::transfer_checked(
             CpiContext::new_with_signer(
                 share_token_program.clone(),
@@ -3176,6 +3325,12 @@ pub enum SheafError {
     RefundNotToSellerAta,
     #[msg("The seller would receive less cash than the auction asks")]
     SellerPaidShort,
+    #[msg("The auction starts more than 60 seconds before it was placed")]
+    StaleAuctionStart,
+    #[msg("A plan's trailing step can be at most 50%")]
+    BadTrailStep,
+    #[msg("The recipient requires a memo: pass the Memo program as a remaining account")]
+    MemoProgramRequired,
 }
 
 #[cfg(test)]
@@ -3550,7 +3705,7 @@ mod tests {
         let mut fixed = plan_at(r, lo, hi);
         for _ in 0..10 {
             let next = fixed.ref_shares_per_cash_e9 * 102 / 100; // shares per cash rise as the price falls
-            apply_plan_fill(&mut fixed, next, 0).unwrap();
+            apply_plan_fill(&mut fixed, next, 0, None).unwrap();
         }
         assert_eq!(fixed.ref_shares_per_cash_e9, hi, "pinned at the owner's ceiling");
         assert_eq!((fixed.min_ref_shares_per_cash_e9, fixed.max_ref_shares_per_cash_e9), (lo, hi));
@@ -3561,7 +3716,7 @@ mod tests {
         for _ in 0..10 {
             let next = trail.ref_shares_per_cash_e9 * 102 / 100;
             expect = next;
-            apply_plan_fill(&mut trail, next, PLAN_STEP_BPS).unwrap();
+            apply_plan_fill(&mut trail, next, PLAN_STEP_BPS, None).unwrap();
             let rr = trail.ref_shares_per_cash_e9;
             assert_eq!(trail.min_ref_shares_per_cash_e9, rr * 9_400 / 10_000);
             assert_eq!(trail.max_ref_shares_per_cash_e9, rr * 10_600 / 10_000);
@@ -3571,18 +3726,105 @@ mod tests {
 
         // No single fill moves a trailing plan more than the step.
         let mut jump = plan_at(r, r * 9_400 / 10_000, r * 10_600 / 10_000);
-        apply_plan_fill(&mut jump, r * 2, PLAN_STEP_BPS).unwrap();
+        apply_plan_fill(&mut jump, r * 2, PLAN_STEP_BPS, None).unwrap();
         assert_eq!(jump.ref_shares_per_cash_e9, r * 10_600 / 10_000);
-        apply_plan_fill(&mut jump, 1, PLAN_STEP_BPS).unwrap();
+        apply_plan_fill(&mut jump, 1, PLAN_STEP_BPS, None).unwrap();
         assert_eq!(jump.ref_shares_per_cash_e9, (r * 10_600 / 10_000) * 9_400 / 10_000);
+    }
+
+    /// Twelve runs of a trailing plan (step 6%, band 2%) against a market
+    /// (`market(run)` = raw shares per raw cash unit, x 10^9, that the market
+    /// pays). A run fills only if the market can cover the auction's floor;
+    /// a monopolist then fills at the floor (the worst count for the owner),
+    /// a competitive filler at the market, capped at the auction's start.
+    /// Returns every run's reference after the fill and its auction floor.
+    fn twelve_runs(market: impl Fn(usize) -> u64, hard: (u64, u64), monopolist: bool) -> Vec<(u64, u64)> {
+        let cash = 100_000_000u64;
+        let (r, band) = (4_000_000u64, 200u16);
+        let mut plan = plan_at(r, hard.0, hard.1);
+        plan.band_bps = band;
+        let mut out = Vec::new();
+        for run in 0..12 {
+            let (start, end) = plan_auction(cash, plan.ref_shares_per_cash_e9, band, plan.min_ref_shares_per_cash_e9).unwrap();
+            let fair = mul_div_floor(cash, market(run), RATE_SCALE).unwrap();
+            if fair >= end {
+                let filled = if monopolist { end } else { fair.min(start) };
+                let rate = shares_per_cash_e9(filled, cash).unwrap();
+                apply_plan_fill(&mut plan, rate, PLAN_STEP_BPS, Some(hard)).unwrap();
+            }
+            out.push((plan.ref_shares_per_cash_e9, end));
+        }
+        out
+    }
+
+    #[test]
+    fn trailing_plans_never_walk_past_the_owner_hard_limits() {
+        let cash = 100_000_000u64;
+        // The owner's hard limits: never fewer than 0.0035 shares per raw cash
+        // unit (a 12.5% worse price than at open), never more than 0.0050.
+        let hard = (3_500_000u64, 5_000_000u64);
+        let floor_shares = mul_div_floor(cash, hard.0, RATE_SCALE).unwrap();
+        let flat = |_: usize| 4_000_000u64;
+        // A rising price buys fewer shares per dollar each run; a falling one more.
+        let rising = |run: usize| 4_000_000u64 - 100_000 * run as u64;
+        let falling = |run: usize| 4_000_000u64 + 150_000 * run as u64;
+        for monopolist in [true, false] {
+            for (name, runs) in [
+                ("flat", twelve_runs(flat, hard, monopolist)),
+                ("rising", twelve_runs(rising, hard, monopolist)),
+                ("falling", twelve_runs(falling, hard, monopolist)),
+            ] {
+                for (i, (rf, end)) in runs.iter().enumerate() {
+                    assert!(*rf >= hard.0 && *rf <= hard.1, "{name} run {i}: ref {rf} left the hard limits");
+                    assert!(*end >= floor_shares, "{name} run {i}: auction floor {end} below the owner's");
+                }
+                for w in runs.windows(2) {
+                    assert!(w[1].0 <= w[0].0 * 10_600 / 10_000 + 1 && w[1].0 * 10_600 / 10_000 + 1 >= w[0].0, "{name}: one run moved more than the step");
+                }
+            }
+        }
+        // A monopolist walks even a flat market down 2% a run, and the owner's
+        // floor stops it there: pinned at the floor, never below.
+        let walked = twelve_runs(flat, hard, true);
+        assert!(walked[0].0 < 4_000_000);
+        assert_eq!(walked[11].0, hard.0);
+        // With competition a flat market stays put, and a falling price is
+        // followed up until the owner's ceiling.
+        assert!(twelve_runs(flat, hard, false).iter().all(|(rf, _)| *rf == 4_000_000));
+        let up = twelve_runs(falling, hard, false);
+        assert!(up[5].0 > up[0].0 && up[11].0 > up[5].0);
+        // Under a tighter ceiling the same market is followed up to it, and stops.
+        let capped = twelve_runs(falling, (hard.0, 4_500_000), false);
+        assert_eq!(capped[11].0, 4_500_000);
+    }
+
+    #[test]
+    fn stale_starts_and_memo_detection() {
+        assert!(require_fresh_start(1_000, 1_060).is_ok());
+        assert!(require_fresh_start(1_000, 1_061).is_err());
+        assert!(require_fresh_start(2_000, 1_000).is_ok(), "a future start is fine");
+        // A Token-2022 account image with MemoTransfer (type 8) on, then off.
+        let mut acct = vec![0u8; 166];
+        acct[165] = 2;
+        acct.extend_from_slice(&8u16.to_le_bytes());
+        acct.extend_from_slice(&1u16.to_le_bytes());
+        acct.push(1);
+        assert!(requires_incoming_memo(&acct));
+        *acct.last_mut().unwrap() = 0;
+        assert!(!requires_incoming_memo(&acct));
+        assert!(!requires_incoming_memo(&vec![0u8; 165]), "a legacy account has no extensions");
     }
 
     #[test]
     fn plan_tail_reads_zero_on_old_plans() {
         assert_eq!(plan_trail_step(&vec![0u8; 8 + Plan::INIT_SPACE]), 0, "a 296-byte plan has no tail");
         let mut new = vec![0u8; PLAN_TAIL_AT + PLAN_TAIL_LEN];
-        new[PLAN_TAIL_AT..PLAN_TAIL_AT + 2].copy_from_slice(&PLAN_STEP_BPS.to_le_bytes());
+        write_plan_tail(&mut new, PLAN_STEP_BPS, 7, 9);
         assert_eq!(plan_trail_step(&new), PLAN_STEP_BPS);
+        assert_eq!(plan_hard_limits(&new), Some((7, 9)));
+        // A plan from the first trailing release: an 8-byte tail, no hard limits.
+        assert_eq!(plan_hard_limits(&new[..PLAN_TAIL_AT + 8]), None);
+        assert_eq!(plan_trail_step(&new[..PLAN_TAIL_AT + 8]), PLAN_STEP_BPS);
         // The struct still decodes from the longer account.
         let mut buf = Vec::new();
         plan_at(1, 1, 1).try_serialize(&mut buf).unwrap();

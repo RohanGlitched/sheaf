@@ -997,10 +997,16 @@
         "Open a recurring buy and delegate `cash_per_run * runs` of the owner's",
         "cash account to the plan PDA, in one instruction.",
         "",
-        "`min_ref_shares_per_cash_e9` is the worst rate the owner will ever",
-        "accept: no run's auction ends below it, and the reference rate can",
-        "never be walked under it. `max_ref_shares_per_cash_e9` caps how far up",
-        "fills can push the reference. `min <= ref <= max`."
+        "`min_ref_shares_per_cash_e9` and `max_ref_shares_per_cash_e9` are the",
+        "owner's hard limits (`min <= ref <= max`): no run's auction ends below",
+        "`min`, and no fill moves the reference outside `[min, max]`, ever,",
+        "trailing or not. They change only through `update_plan`.",
+        "",
+        "`trail_step_bps` (0 to 5,000) chooses how the working bounds behave:",
+        "0 keeps them at the hard limits for good (fixed bounds); a step `s`",
+        "moves them after every fill to `ref × (1 ± s)` intersected with the",
+        "hard limits, so the plan follows the market inside the owner's limits",
+        "and no single run moves the reference by more than `s`."
       ],
       "discriminator": [
         61,
@@ -1101,6 +1107,10 @@
         {
           "name": "max_ref_shares_per_cash_e9",
           "type": "u64"
+        },
+        {
+          "name": "trail_step_bps",
+          "type": "u16"
         }
       ]
     },
@@ -2245,6 +2255,21 @@
       "code": 6055,
       "name": "SellerPaidShort",
       "msg": "The seller would receive less cash than the auction asks"
+    },
+    {
+      "code": 6056,
+      "name": "StaleAuctionStart",
+      "msg": "The auction starts more than 60 seconds before it was placed"
+    },
+    {
+      "code": 6057,
+      "name": "BadTrailStep",
+      "msg": "A plan's trailing step can be at most 50%"
+    },
+    {
+      "code": 6058,
+      "name": "MemoProgramRequired",
+      "msg": "The recipient requires a memo: pass the Memo program as a remaining account"
     }
   ],
   "types": [

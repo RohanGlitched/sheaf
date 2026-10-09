@@ -12,8 +12,9 @@ plans on top of them.
 | Real-issuer upgrade | devnet slot 509118619, tx `4BWEZTsENAXhe9GtFtX5uSN2x6teejqs8ya4z9w8dMj3wu5WLej9sA7BFQTvJDio2dCajeii5r8FN8P6udPpiGX7`; 515,664-byte build in the same 517,800-byte program account (no extend); on-chain IDL upgraded. Accepts real xStocks and PreStocks under their issuers (`KNOWN_ISSUERS`), refuses issuer powers held by anyone else, gates cash transfer-fee and hook authorities, refuses legacy SPL Token share mints. No account layout changed; existing baskets, orders and plans decode and work unchanged |
 | Protocol-fee upgrade | devnet slot 509146643, tx `VLvor95XugCfKvLxwZXHpbZCBWhbMbSc74R36UrKe5vnb3p1MjtG3XaraXPaVCYU9SwBUn3dgrh9TWucXrnPCes`; `devnet` build, 532,128 bytes (program account auto-extended from 517,800), sha256 `f9ccc2eb…5933ba`; on-chain IDL upgraded. Adds the fixed 0.10% protocol creation fee and `claim_protocol_fee`, gates a component's transfer-fee authority, makes the default build mainnet-safe, sends third-party refunds only to the buyer's ATA, makes `update_plan` a new terms epoch, embeds security.txt. `Basket` gained two fields inside its existing headroom; no account changed size, and all 8 live baskets (fee 0), 7 plans and 2 legacy plans decode; simulated mints succeed on old and new baskets |
 | Sell-desk upgrade | devnet slot 509175740, tx `2EfT8FqxZw49UzYL4fsH8LCphNWt3vPnR2cgTcH4k7RSkAYAaF19rgzRur9abJPBPV7crshQUTiALRZX5FLZZmRB`; `devnet` build, 608,520 bytes (auto-extended from 532,128), sha256 `72806cf5…0806d8` (matches `solana program dump`); on-chain IDL upgraded. Adds the dollar exit (`place_sell_order`, `fill_sell_order`, `cancel_sell_order`, account `SellOrder`) and trailing plan bounds for new plans (8-byte plan tail, step 600 bps). No existing account changed: all 10 baskets, 9 plans (296 B, fixed bounds), 2 legacy plans and 1 order decode; simulated `mint_shares` succeeds on BIG5 (no protocol fee) and MAG7 (protocol fee), and a simulated place + fill of a sell order on BIG5 paid a fresh seller $10.18 into a cash account the filler opened |
+| Round-5 upgrade | devnet slot 509220504, tx `Qn8CjBVVLkhakk5a3Atmq2Fs4zu8JdAXrkEu3NEkgx6nvCwzvjZ48RQiHuZy9f4wzG2gtp2rntYiLYXjk459juz`; `devnet` build, 612,824 bytes in a 618,760-byte program account (auto-extended), sha256 `b6e7929f…c08e63` (matches `solana program dump`, zero tail); on-chain IDL upgraded. Stale auction starts refused, plan hard limits and an owner-chosen trailing step (`open_plan` gained `trail_step_bps`), memos written before transfers into memo-required accounts, component withdraw-authority gate, `update_plan` epoch one second ahead. All 11 baskets, 9 plans (296 B), 2 plans (304 B), 2 legacy plans decode; simulated mints succeed on BIG5, FRNTR and MAG7, a sell order places and fills, and one starting 120 s back is refused |
 | Protocol fee, live | "The Magnificent Seven" (MAG7) `v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x`, created after the fee (creator 0.25%, protocol 0.10%, 7 equal-weight mirrors). In-kind mint of 10 shares `3n9GAvTimHGnMszhLykUedqifeupbpsxLp4GfaWeEwRpDVppEpbo8qyyvsRnEfuvSMdj4GyYDypRepTUVvinYZ5K` accrued 10,000 raw fee units; the house plan `46ZFfiJNxz61wQKL2KhwW9YbvuCENVmR85cvbSwyvtHg` ($25 every 15 min) was filled by the keeper through the basket's lookup table `7TazFm9hYKnv8Y6iQie3XNZKeSZq2nxnvSsFCMmnNq5N` (v0, 18 addresses looked up) in `43umSv1QNUSckXytPiijisV8FhirgujwxwpEFUVkXpUKps6fiVm4shqATxQGAe3jwZxL1WhmTMn71ZxLReC3jdhM`, accruing 245 more; `claim_protocol_fee` minted all 10,245 to the treasury's share account `EYiUUNiynqrEpzMyyu5fd5QXNDTTS9XsMGv9P62T5knQ` in `5zZHGfEUcixiJb3xPmg9cFczjW6rfxFqyAeZU4iyQkeu6SnKGsGGEB8DYT66dLYhUr3rLARPYP6TiMgkopYCyx8n`. Receipts: `web/lib/fee-receipts.json` |
-| Verifiable build | Not yet published. `scripts/handoff-upgrade-authority.mjs` holds the `solana-verify build` / `verify-from-repo` commands and the hand-off of the upgrade authority to a Squads vault, to run after the final upgrade |
+| Verifiable build | Not published: `solana-verify build` runs the build in its Docker image, and this machine has no Docker (WSL or Windows), so a source-to-binary verification could not be produced. What anyone can check today is that the deployed bytes equal this repository's `anchor build -- --features devnet` output (sha256 above). `scripts/handoff-upgrade-authority.mjs` holds the `solana-verify` commands and the Squads hand-off, to run after the final upgrade on a machine with Docker |
 | Source | `programs/sheaf/src/lib.rs` |
 | IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`; on chain at `Brx9QqE7Hzh9ReaoNvk9BMSM5Ci1U2C6qx6qukciugBS`, `anchor idl fetch`) |
 | Tests | `tests/sheaf.ts`, `tests/mainnet-clone.ts` (against real mainnet xStock and PreStocks mints) and `tests/tx-size.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`, and again with `--features devnet`) |
@@ -118,24 +119,41 @@ it (`AccountDidNotDeserialize`), a fill of one of its open orders still
 succeeds and simply leaves it alone, and its owner closes it with
 `close_legacy_plan`. `Basket` and `Order` are byte-for-byte unchanged.
 
-**Trailing bounds (tail).** A plan opened since the sell-desk upgrade is
-allocated 304 bytes: the 296-byte `Plan` plus an 8-byte tail holding
-`trail_step_bps: u16` (= `PLAN_STEP_BPS = 600`) and 6 reserved bytes. The
-struct, and so the IDL and every decoder, is unchanged; the tail is read by
-offset (`plan_trail_step`, `decodePlan`'s `trailStepBps`). After every fill of
-such a plan, `apply_plan_fill` clamps the filled rate into `[min, max]`,
-makes it the reference, and moves the bounds to
-`min = floor(ref × 0.94)`, `max = floor(ref × 1.06)`. So the plan follows the
-market as it fills, and no single run moves its reference more than 6%. A
-296-byte plan (opened earlier) has no tail, reads step 0 and keeps the
-owner's fixed bounds. The trade-off is stated plainly: fixed bounds stop a
-plan once the market leaves them (a ±6% window is left within a month about
-half the time at 30% volatility); trailing bounds keep it running, but a
-filler with no competition can walk the reference by up to the band (≤ the
-step) per run, which is what fixed bounds were for. A gap move larger than
-the band between runs still needs the owner's Re-centre (`update_plan`),
-because no auction inside the band reaches fair. The owner can always set
-new bounds with `update_plan`; trailing then continues from them.
+**Plan tail: trailing step and hard limits.** The `Plan` struct (and so the
+IDL and every decoder) is unchanged; anything new lives in a tail after it,
+read by offset (`plan_trail_step`, `plan_hard_limits`; `decodePlan` in
+`web/lib/desk.ts`):
+
+| Plan size | Opened | Tail | Behaviour |
+|---|---|---|---|
+| 280 bytes | first release | none | closed with `close_legacy_plan` |
+| 296 bytes | hardening release to sell-desk release | none | fixed bounds `[min, max]` |
+| 304 bytes | sell-desk release only | `trail_step_bps u16`, 6 reserved | trails ±6% with no hard limit (superseded) |
+| 320 bytes | since the round-5 release | `trail_step_bps u16`, 6 reserved, `hard_min_e9 u64` (byte 304), `hard_max_e9 u64` (byte 312) | as chosen at `open_plan` |
+
+On a 320-byte plan the owner's `min_ref`/`max_ref` given to `open_plan`
+(and later to `update_plan`) are written to the tail as **hard limits** that
+no fill can move. The owner also picks `trail_step_bps` (0 to 5,000):
+
+- **0, fixed bounds.** The working bounds stay at the hard limits. A plan
+  stops filling once the market leaves them (a ±6% window is left within a
+  month about half the time at 30% volatility); Re-centre to continue.
+- **A step `s` (the UI's choice is `PLAN_STEP_BPS = 600`).** After every fill
+  `apply_plan_fill` clamps the filled rate into the working bounds, makes it
+  the reference, and moves the working bounds to
+  `[max(floor(ref × (1 − s)), hard_min), min(floor(ref × (1 + s)), hard_max)]`.
+  The plan follows the market inside the owner's limits, and no single run
+  moves the reference more than `s`. A filler with no competition can still
+  walk the reference down by the band per run, **but never below the owner's
+  hard floor**: the unit test `trailing_plans_never_walk_past_the_owner_hard_limits`
+  runs 12 runs in a flat, a rising and a falling market, with a monopolist
+  filling at every auction's floor and with a competitive filler, and checks
+  every reference and every auction floor stay inside the hard limits (the
+  monopolist pins a flat market at the floor; competition holds it flat and
+  follows a falling price up to the ceiling). Trailing is only worth choosing
+  with hard limits wider than the band. A gap move larger than the band
+  between runs still needs Re-centre, because no auction inside the band
+  reaches fair.
 
 ### `SellOrder`
 
@@ -190,7 +208,7 @@ a lever over the vault:
 | Power | Authority checked | What it could do to a basket |
 |---|---|---|
 | Freeze authority | the mint's freeze authority | freeze the vault, blocking every redemption |
-| `TransferFeeConfig` | the fee-config authority | raise the fee until every deposit overflows or pays double (and harvest the difference); a deposit grosses up for the fee in force |
+| `TransferFeeConfig` | the fee-config authority **and** the withdraw-withheld authority | raise the fee until every deposit overflows or pays double; collect whatever fee is withheld, which would let a creator skim every deposit past the 1% creator-fee cap even with a fixed fee; a deposit grosses up for the fee in force |
 | `PermanentDelegate` | the delegate | move or burn vault balances |
 | `Pausable` | the pause authority | block every transfer, so every redemption |
 | `ConfidentialTransferMint`, `ConfidentialTransferFeeConfig` | the config authority | reconfigure confidential transfers |
@@ -283,6 +301,11 @@ Checks:
 - `cash_amount > 0`, `end_shares > 0`, `start_shares >= end_shares`.
 - `start_ts < end_ts`, `end_ts > now`, and `end_ts <= now + 30 days`
   (`MAX_ORDER_SECS`), so no one's cash or rent can be parked for a century.
+- `start_ts >= now − 60 s` (`MAX_START_LAG_SECS`, `StaleAuctionStart`): an
+  order whose auction started more than a minute before it landed (a slow
+  wallet approval, a slow clock) is refused rather than handing the filler
+  most of the decay. A future start is still allowed. The same rule applies
+  to `place_sell_order`. Clients should take `start_ts` from the chain clock.
 - The cash mint passes the cash policy (`CashMintExtension`,
   `CashMintAuthority`, §8).
 
@@ -366,7 +389,11 @@ the buyer owns, and when anyone but the buyer cancels it must be the buyer's
 steer it into a side account it opened in the buyer's name that no client
 reads. Emits `OrderCancelled { expired }`.
 
-### `open_plan(plan_id, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9)`
+### `open_plan(plan_id, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9, trail_step_bps)`
+
+`min`/`max` are the owner's hard limits; `trail_step_bps` (0 = fixed bounds,
+at most 5,000, `BadTrailStep`) is described under "Plan tail" in §2. The plan
+account is 320 bytes.
 
 | Account | Constraint |
 |---|---|
@@ -731,6 +758,9 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6053 | RefundNotToBuyerAta | a third party's refund aimed at a buyer-owned account that isn't the buyer's associated cash account |
 | 6054 | RefundNotToSellerAta | a third party's return of a sell order's shares aimed at a seller-owned account that isn't the seller's associated share account |
 | 6055 | SellerPaidShort | the seller's cash account received less than the sell auction asks |
+| 6056 | StaleAuctionStart | an order or sell order whose auction starts more than 60 s before it is placed |
+| 6057 | BadTrailStep | a plan's trailing step above 5,000 bps |
+| 6058 | MemoProgramRequired | the account being paid requires incoming memos and the Memo program was not passed as a remaining account |
 
 Anchor's own constraint errors also apply: `ConstraintTokenOwner` (a refund to a
 non-buyer account), `ConstraintAssociated` (shares to a non-canonical account),
@@ -785,6 +815,25 @@ holder's account, an escrow or a filler's cash account included. That is the
 trust every holder of that cash already has; fillers should fill only
 against cash mints they allowlist (`scripts/filler.mjs --cash-mint`).
 `fill_order` independently requires `escrow.amount >= order.cash_amount`.
+
+**Recipients that require memos.** A Token-2022 account can require a memo
+on every incoming transfer (MemoTransfer), and its owner can turn that on
+after placing an order. Every transfer the program makes to an account it
+does not control (the refund in `cancel_order`, the payout in `fill_order`,
+the seller's cash in `fill_sell_order`, the shares in `cancel_sell_order`
+and `fill_sell_order`) first checks the recipient's MemoTransfer extension
+and, if set, CPIs a memo ("Sheaf") immediately before the transfer, which is
+what the token program checks. The Memo program
+(`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`) is passed as a remaining
+account (after the component triples in `fill_order`); without it the
+instruction fails with `MemoProgramRequired`, so a keeper knows to retry
+with it. A memo-required account can no longer wedge a refund. (Tested: a
+buyer turns memos on after placing; a stranger's refund fails without the
+Memo program and lands with it.)
+
+**Plan terms epoch.** `update_plan` sets `plan.created_at = now + 1`, so an
+order created in the same second as the update (which may predate it) is
+treated as stale and cannot steer the re-centred plan.
 
 **Order escrow** (authority: order PDA). It moves only by the order PDA's
 signature, in exactly two ways:
@@ -900,12 +949,12 @@ valid fill fail.
 
 ## 9. Tests
 
-`anchor test` runs 71 integration tests, as mocha counts them: 8 against real
+`anchor test` runs 74 integration tests, as mocha counts them: 8 against real
 mainnet mints (`tests/mainnet-clone.ts`), 11 basket tests, 2 protocol-fee
-tests, 28 desk and plan tests, 4 sell-order tests, 14 hardening tests and 4
+tests, 28 desk and plan tests, 4 sell-order tests, 17 hardening tests and 4
 transaction-size measurements (`tests/tx-size.ts`; one `it` in a loop runs at
 6, 7 and 8 components, which is why the source has two fewer `it(` than mocha
-reports). `cargo test -p sheaf --lib` runs 14 unit tests, on both
+reports). `cargo test -p sheaf --lib` runs 16 unit tests, on both
 the default and the `devnet` build: the auction line, the gross-up, the fee
 split (every `g < 50,000` at five fee pairs, and the two-fee gross-up for
 every `net` in `1..20,000`), the plan bounds and floor, the three extension
@@ -916,8 +965,19 @@ schedule read by number, the issuer keys and treasury themselves (the
 default build trusts no stand-in), the Basket fee fields fitting the
 headroom and reading 0 on an old account, trailing versus fixed plan bounds
 over ten fills (and one fill never moving a trailing reference more than
-6%), the plan tail reading 0 on a 296-byte plan, and the size of the plan
-layout.
+6%), twelve-run trailing plans in flat, rising and falling markets under a
+monopolist and a competitive filler never leaving the owner's hard limits,
+stale-start and memo detection, the plan tail (step and hard limits, and
+none on a 296-byte plan), and the size of the plan layout.
+
+**Round-5 additions (integration).** An order starting 120 s before it lands
+is refused (`StaleAuctionStart`), one 10 s back is accepted, and the same for
+sell orders; a memo-required refund (above); a fixed-bounds plan
+(`trail_step_bps = 0`) keeps the owner's bounds after a fill; a trailing
+plan's account is 320 bytes with the hard limits in its tail and its working
+bounds after a fill the intersection of ±6% and those limits; `BadTrailStep`
+above 5,000; a component whose fee is fixed but whose withheld fees the
+creator collects is refused.
 
 **Sell orders.** Escrow of exactly the shares; rising, floorless and empty
 auctions refused; a fill mid-auction pays the seller exactly the auction's

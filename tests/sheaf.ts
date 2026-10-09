@@ -51,6 +51,8 @@ import {
   getScaledUiAmountConfig,
   createInitializeTransferFeeConfigInstruction,
   createInitializeAccount3Instruction,
+  createReallocateInstruction,
+  createEnableRequiredMemoTransfersInstruction,
   getTransferFeeAmount,
   ACCOUNT_SIZE,
 } from "@solana/spl-token";
@@ -669,12 +671,12 @@ describe("sheaf", () => {
         lamports,
         programId: TOKEN_2022_PROGRAM_ID,
       }),
-      // No fee-config authority: a component's fee may be set only by its
-      // issuer (or nobody), never by the basket creator.
+      // No fee-config or withdraw authority: a component's fee may be set and
+      // collected only by its issuer (or nobody), never by the basket creator.
       createInitializeTransferFeeConfigInstruction(
         mint.publicKey,
         null,
-        payer.publicKey,
+        null,
         feeBps,
         BigInt("18446744073709551615"), // uncapped, same as a live PreStocks mint
         TOKEN_2022_PROGRAM_ID,
@@ -1400,7 +1402,7 @@ describe("sheaf", () => {
 
     it("fills mid-auction at exactly the linearly decayed count", async () => {
       const now = await chainNow();
-      const o = { s: 3_000_000n, e: 1_000_000n, t0: now - 60, t1: now + 60 };
+      const o = { s: 3_000_000n, e: 1_000_000n, t0: now - 40, t1: now + 80 };
       const { order } = await place({ cash: 400n * USDC, start: o.s, end: o.e, t0: o.t0, t1: o.t1 });
       const before = await snapshot(buyer.publicKey);
 
@@ -1610,6 +1612,7 @@ describe("sheaf", () => {
         await expectError(placeSell({ shares: 1n, start: 1n, end: 2n, t0: now, t1: now + 60 }), "BadAuctionShares");
         await expectError(placeSell({ shares: 1n, start: 1n, end: 0n, t0: now, t1: now + 60 }), "BadAuctionShares");
         await expectError(placeSell({ shares: 0n, start: 2n, end: 1n, t0: now, t1: now + 60 }), "ZeroShares");
+        await expectError(placeSell({ shares: 1n, start: 2n, end: 1n, t0: now - 120, t1: now + 60 }), "StaleAuctionStart");
       });
 
       it("pays the seller exactly the auction's cash into a cash account the filler opens, and the filler can redeem in kind in the same transaction", async () => {
@@ -1808,6 +1811,7 @@ describe("sheaf", () => {
         auction: 120,
         min: 2_000_000n, // never accept fewer than 0.002 shares per raw cash unit ($500 a share)
         max: 8_000_000n,
+        trail: 600, // trailing step; 0 = fixed bounds
       };
       const bounds = (cash: bigint, ref: bigint) => ({
         s: (cash * ref * (10_000n + PLAN.band)) / (1_000_000_000n * 10_000n),
@@ -1826,7 +1830,7 @@ describe("sheaf", () => {
       ) {
         const p = { ...PLAN, ...args };
         return program.methods
-          .openPlan(bn(planId), bn(p.cash), bn(p.period), p.runs, bn(p.ref), Number(p.band), bn(p.auction), bn(p.min), bn(p.max))
+          .openPlan(bn(planId), bn(p.cash), bn(p.period), p.runs, bn(p.ref), Number(p.band), bn(p.auction), bn(p.min), bn(p.max), Number(p.trail))
           .accountsPartial({
             owner: who.publicKey,
             basket,
@@ -1893,6 +1897,7 @@ describe("sheaf", () => {
         await expectError(openPlan(91, { runs: 0 }), "BadPlanSchedule");
         await expectError(openPlan(92, { ref: 0n }), "BadReferenceRate");
         await expectError(openPlan(93, { cash: 1n, ref: 1n, min: 1n, max: 1n }), "PlanAmountTooSmall");
+        await expectError(openPlan(94, { trail: 5_001 }), "BadTrailStep");
       });
 
       it("opens a plan and delegates exactly cash × runs to it in the same instruction", async () => {
@@ -1982,12 +1987,18 @@ describe("sheaf", () => {
         assert.equal(p.refSharesPerCashE9.toString(), rate.toString(), "reference follows the fill");
         assert.equal(ev.planRefSharesPerCashE9.toString(), rate.toString());
         assert.equal(p.fills, 1);
-        // A plan opened today trails: its bounds move to ±6% of the new reference.
-        assert.equal(p.minRefSharesPerCashE9.toString(), ((rate * 9_400n) / 10_000n).toString(), "trailing floor");
-        assert.equal(p.maxRefSharesPerCashE9.toString(), ((rate * 10_600n) / 10_000n).toString(), "trailing ceiling");
+        // This plan trails (step 6%): its working bounds move to ±6% of the new
+        // reference, inside the owner's hard limits (0.002 to 0.008), which
+        // stay in the tail untouched.
+        const lo = (rate * 9_400n) / 10_000n;
+        const hi = (rate * 10_600n) / 10_000n;
+        assert.equal(p.minRefSharesPerCashE9.toString(), (lo > PLAN.min ? lo : PLAN.min).toString(), "trailing floor");
+        assert.equal(p.maxRefSharesPerCashE9.toString(), (hi < PLAN.max ? hi : PLAN.max).toString(), "trailing ceiling");
         const raw = (await provider.connection.getAccountInfo(plan, "processed"))!.data;
-        assert.equal(raw.length, 304, "296-byte plan plus its 8-byte tail");
+        assert.equal(raw.length, 320, "296-byte plan plus its 24-byte tail");
         assert.equal(raw.readUInt16LE(296), 600, "trail_step_bps");
+        assert.equal(raw.readBigUInt64LE(304).toString(), PLAN.min.toString(), "the owner's hard floor");
+        assert.equal(raw.readBigUInt64LE(312).toString(), PLAN.max.toString(), "the owner's hard ceiling");
         assert.equal(
           ((await lamports(cranker.publicKey)) - crankerLamports).toString(),
           rent.toString(),
@@ -2317,7 +2328,13 @@ describe("sheaf", () => {
           // stock issuer): a permanent delegate, a pause switch, a hook
           // authority that could later set a hook program, a transfer-fee
           // authority that could raise the fee, a freeze authority.
-          for (const power of [...issuerPowers(CREATOR_KEY), feeUnder(CREATOR_KEY)]) {
+          const withdrawTo = (who: PublicKey): Ext => ({
+            name: "TransferFeeConfig(withdraw)",
+            type: ExtensionType.TransferFeeConfig,
+            init: (m) => createInitializeTransferFeeConfigInstruction(m, null, who, 10, 1_000_000n, TOKEN_2022_PROGRAM_ID),
+          });
+          // ...including a fixed fee whose withheld amounts the creator collects.
+          for (const power of [...issuerPowers(CREATOR_KEY), feeUnder(CREATOR_KEY), withdrawTo(CREATOR_KEY)]) {
             const mint = await mintWith([power], 8, payer.publicKey);
             await expectError(
               createBasketWith(symbol, share, [components[0], mint]),
@@ -2416,6 +2433,79 @@ describe("sheaf", () => {
               "CashMintExtension",
             );
           }
+        });
+
+        it("refuses an auction that starts more than 60 seconds before it lands", async () => {
+          const now = await chainNow();
+          await expectError(
+            place({ who: hodler, from: hodlerCash, cash: USDC, start: 2n, end: 1n, t0: now - 120, t1: now + 60 }),
+            "StaleAuctionStart",
+          );
+          // A start a few seconds back, or in the future, is still fine.
+          const ok = await place({ who: hodler, from: hodlerCash, cash: USDC, start: 2n, end: 1n, t0: now - 10, t1: now + 60 });
+          await cancel(ok.order, { by: hodler, owner: hodler.publicKey, refundTo: hodlerCash });
+        });
+
+        it("refunds into a cash account that requires memos, writing the memo first", async () => {
+          const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+          const { mint, ata } = await hostileCash([], hodler.publicKey);
+          const now = await chainNow();
+          const { order } = await place({
+            who: hodler,
+            from: ata,
+            mint,
+            cashProgram: TOKEN_2022_PROGRAM_ID,
+            cash: 10n * USDC,
+            start: 50_000n,
+            end: 40_000n,
+            t0: now,
+            t1: now + 2,
+          });
+          // After placing, the buyer turns on required incoming memos.
+          await sendAndConfirmTransaction(
+            provider.connection,
+            new Transaction().add(
+              createReallocateInstruction(ata, payer.publicKey, [ExtensionType.MemoTransfer], hodler.publicKey, [], TOKEN_2022_PROGRAM_ID),
+              createEnableRequiredMemoTransfersInstruction(ata, hodler.publicKey, [], TOKEN_2022_PROGRAM_ID),
+            ),
+            [payer, hodler],
+          );
+          await waitUntil(now + 3);
+          const refund = (withMemo: boolean) =>
+            program.methods
+              .cancelOrder()
+              .accountsPartial({
+                caller: stranger.publicKey,
+                order,
+                buyer: hodler.publicKey,
+                cashMint: mint,
+                escrow: escrowFor(order, mint, TOKEN_2022_PROGRAM_ID),
+                buyerCashAccount: ata,
+                rentPayer: hodler.publicKey,
+                cashTokenProgram: TOKEN_2022_PROGRAM_ID,
+              })
+              .remainingAccounts(withMemo ? [{ pubkey: MEMO, isSigner: false, isWritable: false }] : [])
+              .signers([stranger])
+              .rpc();
+          await expectError(refund(false), "MemoProgramRequired");
+          const before = await balance(ata, TOKEN_2022_PROGRAM_ID);
+          await refund(true);
+          assert.equal(((await balance(ata, TOKEN_2022_PROGRAM_ID)) - before).toString(), (10n * USDC).toString());
+        });
+
+        it("keeps a fixed-bounds plan (trail 0) at the owner's bounds after a fill", async () => {
+          const id = 66;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, { trail: 0 }, hodler, () => hodlerCash);
+          const raw = (await provider.connection.getAccountInfo(p, "processed"))!.data;
+          assert.equal(raw.readUInt16LE(296), 0, "no trailing step");
+          const { order } = await runPlan(p, 6601, () => hodlerCash);
+          await fill(order, { owner: hodler.publicKey, rentPayer: cranker.publicKey, plan: p });
+          const after = await program.account.plan.fetch(p);
+          assert.equal(after.fills, 1);
+          assert.equal(after.minRefSharesPerCashE9.toString(), PLAN.min.toString(), "floor unmoved");
+          assert.equal(after.maxRefSharesPerCashE9.toString(), PLAN.max.toString(), "ceiling unmoved");
+          await closePlan(p, hodler, () => hodlerCash);
         });
 
         // --------------------------------------------------- window bounds (H3)
