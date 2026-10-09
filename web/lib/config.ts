@@ -42,6 +42,9 @@ export const WRITE_WS = WRITE_CLUSTER === "localnet" ? "ws://127.0.0.1:8900" : "
 
 export const serverRpcUrl = serverWriteRpc;
 
+/** The endpoint shown to people who check a vault themselves: public, keyless, the same on server and client. */
+export const PUBLIC_WRITE_RPC = WRITE_CLUSTER === "localnet" ? "http://127.0.0.1:8899" : "https://api.devnet.solana.com";
+
 export const SHEAF_PROGRAM_ID =
   process.env.NEXT_PUBLIC_SHEAF_PROGRAM_ID ??
   "GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz";

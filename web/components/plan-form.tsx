@@ -61,7 +61,8 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
         runs,
         refSharesPerCashE9: refE9,
         bandBps: 200,
-        auctionSecs: 90,
+        // Half an hour, so a scheduled keeper always gets a turn before it ends.
+        auctionSecs: 1800,
       });
       const signature = await sendTransaction(new Transaction().add(ix), connection);
       await confirmSignature(connection, signature);

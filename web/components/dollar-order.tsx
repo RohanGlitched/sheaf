@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
-import { placeOrderIx, freshNonce, requiredShares, decodeOrder, type Order } from "@/lib/desk";
+import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, type Order } from "@/lib/desk";
+import { eventsInLogs } from "@/lib/ledger";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
@@ -20,7 +21,8 @@ type Stage =
   | { kind: "signing" }
   | { kind: "open"; order: Order; signature: string }
   | { kind: "filled"; shares: number; cash: number; signature: string }
-  | { kind: "expired"; signature: string };
+  | { kind: "expired"; order: Order; signature: string }
+  | { kind: "refunded"; cash: number; signature: string };
 
 /**
  * Buy shares with dollars.
@@ -63,23 +65,28 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     const watch = async () => {
       // Ask the house keeper to look; any filler may beat it.
       fetch("/api/keeper", { method: "POST" }).catch(() => {});
-      for (let i = 0; i < 120 && live; i++) {
+      for (let i = 0; i < 200 && live; i++) {
         await new Promise((r) => setTimeout(r, 2500));
-        const info = await connection.getAccountInfo(new PublicKey(order.address)).catch(() => undefined);
+        const key = new PublicKey(order.address);
+        const info = await connection.getAccountInfo(key).catch(() => undefined);
         if (info === null) {
-          const sigs = await connection.getSignaturesForAddress(new PublicKey(order.address), { limit: 3 }).catch(() => []);
+          // The order closed: read what closed it, a fill or a refund, from its last transaction.
+          const sigs = await connection.getSignaturesForAddress(key, { limit: 3 }).catch(() => []);
+          const last = sigs[0]?.signature;
+          const tx = last ? await connection.getTransaction(last, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }).catch(() => null) : null;
+          const events = eventsInLogs(tx?.meta?.logMessages);
           if (!live) return;
-          const t = Math.floor(Date.now() / 1000);
-          if (t > order.endTs) setStage({ kind: "expired", signature: sigs[0]?.signature ?? stage.signature });
-          else
-            setStage({
-              kind: "filled",
-              shares: Number(requiredShares(order, t)) / 1e6,
-              cash: fromCashRaw(order.cashAmount),
-              signature: sigs[0]?.signature ?? stage.signature,
-            });
+          const filled = events.find((e) => e.kind === "filled");
+          const returned = events.find((e) => e.kind === "returned");
+          if (filled) setStage({ kind: "filled", shares: filled.shares ?? 0, cash: filled.cash ?? fromCashRaw(order.cashAmount), signature: last! });
+          else if (returned) setStage({ kind: "refunded", cash: returned.cash ?? fromCashRaw(order.cashAmount), signature: last! });
+          else setStage({ kind: "filled", shares: Number(requiredShares(order, Math.floor(Date.now() / 1000))) / 1e6, cash: fromCashRaw(order.cashAmount), signature: last ?? stage.signature });
           cash.reload();
           onDone();
+          return;
+        }
+        if (Math.floor(Date.now() / 1000) > order.endTs + 3) {
+          setStage({ kind: "expired", order, signature: stage.signature });
           return;
         }
         if (i % 2 === 1) fetch("/api/keeper", { method: "POST" }).catch(() => {});
@@ -126,6 +133,20 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     }
   }
 
+  async function refund(order: Order) {
+    if (!publicKey) return;
+    setError(null);
+    try {
+      const signature = await sendTransaction(new Transaction().add(cancelOrderIx({ caller: publicKey, order })), connection);
+      await confirmSignature(connection, signature);
+      setStage({ kind: "refunded", cash: fromCashRaw(order.cashAmount), signature });
+      cash.reload();
+      onDone();
+    } catch (err) {
+      setError(explainError(err));
+    }
+  }
+
   const open = stage.kind === "open" ? stage.order : null;
   const progress = open ? Math.min(1, Math.max(0, (now - open.startTs) / (open.endTs - open.startTs))) : 0;
   const current = open ? Number(requiredShares(open, now)) / 1e6 : null;
@@ -137,7 +158,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         components; you never trust anyone&apos;s price.
       </p>
 
-      {stage.kind !== "open" && stage.kind !== "filled" && (
+      {(stage.kind === "idle" || stage.kind === "signing") && (
         <>
           <label className="mt-5 block">
             <span className="text-xs text-ink-3">Dollars to spend</span>
@@ -172,7 +193,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
                 The offer starts 2% above the fair count at {money(navPerShare)} a share and falls to 2% below over ninety seconds.
-                The first filler to deliver takes your dollars; if nobody does, you get them back.
+                The first filler to deliver takes your dollars; if nobody does, the order can be refunded in full.
               </p>
             </div>
           )}
@@ -190,9 +211,6 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
             >
               {stage.kind === "signing" ? "Approve in your wallet…" : short ? "Not enough test dollars" : `Place a ${money(amount)} order`}
             </button>
-          )}
-          {stage.kind === "expired" && (
-            <p className="mt-4 text-sm text-ink-2">Nobody filled that one in time, so the dollars went back to you.</p>
           )}
         </>
       )}
@@ -212,6 +230,28 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
           <a href={explorerTx(stage.kind === "open" ? stage.signature : "")} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-ink-3 underline decoration-line-strong underline-offset-4">
             The order on Explorer
           </a>
+        </div>
+      )}
+
+      {stage.kind === "expired" && (
+        <div className="mt-5 rounded-[var(--radius-control)] bg-raised p-4" aria-live="polite">
+          <p className="text-sm text-ink">Nobody filled this one before the auction ended.</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-3">
+            The dollars are still in the order&apos;s escrow. Anyone may return them now; the keeper does on its next run.
+          </p>
+          <button type="button" onClick={() => refund(stage.order)} className="mt-3 rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white hover:bg-bind-deep">
+            Return my {money(fromCashRaw(stage.order.cashAmount))}
+          </button>
+        </div>
+      )}
+
+      {stage.kind === "refunded" && (
+        <div className="mt-5 rounded-[var(--radius-control)] bg-raised p-4" aria-live="polite">
+          <p className="text-sm text-ink">Returned. {money(stage.cash)} is back in your wallet.</p>
+          <div className="mt-3 flex gap-4 text-xs">
+            <a href={explorerTx(stage.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4">The refund on Explorer</a>
+            <button type="button" onClick={() => setStage({ kind: "idle" })} className="text-bind underline decoration-bind/40 underline-offset-4">Place another</button>
+          </div>
         </div>
       )}
 

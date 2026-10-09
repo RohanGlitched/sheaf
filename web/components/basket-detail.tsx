@@ -28,7 +28,7 @@ import { DollarOrder } from "./dollar-order";
 import { PlanForm } from "./plan-form";
 import { BasketPredict } from "./basket-predict";
 import { ConnectButton } from "./connect-button";
-import { explorerAddress, explorerTx, WRITE_RPC } from "@/lib/config";
+import { explorerAddress, explorerTx, PUBLIC_WRITE_RPC } from "@/lib/config";
 import { slotColor } from "@/lib/palette";
 import {
   money,
@@ -553,7 +553,7 @@ function Backing({
 // ----------------------------------------------------------------------- proof
 
 const rpcCall = (method: string, address: string) =>
-  `curl -s ${WRITE_RPC} -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"${method}","params":["${address}"]}'`;
+  `curl -s ${PUBLIC_WRITE_RPC} -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"${method}","params":["${address}"]}'`;
 
 /**
  * The backing check, as two RPC calls anyone can run.

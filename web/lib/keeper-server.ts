@@ -4,7 +4,7 @@ import { createAssociatedTokenAccountIdempotentInstruction, createMintToInstruct
 import { WRITE_RPC } from "./config";
 import { faucetKeypair } from "./faucet-server";
 import { fetchBaskets, tokenAccount, TOKEN_2022_PROGRAM_ID, type Basket } from "./sheaf";
-import { fetchOrders, fetchPlans, fillOrderIx, runPlanIx, requiredShares, grossSharesForNet, freshNonce, type Order } from "./desk";
+import { fetchOrders, fetchPlans, fillOrderIx, runPlanIx, cancelOrderIx, requiredShares, grossSharesForNet, freshNonce, type Order } from "./desk";
 import { fetchMarket } from "./market";
 import { stockForWriteMint, symbolForWriteMint } from "./mirror";
 import { BY_SYMBOL_PRESTOCKS } from "./prestocks";
@@ -23,7 +23,7 @@ import { CASH_MINT } from "./cash.generated";
 
 const ONE_SHARE = 1_000_000n;
 
-type Report = { plansRun: string[]; ordersFilled: { order: string; shares: string; cash: string }[]; skipped: string[]; errors: string[] };
+type Report = { plansRun: string[]; ordersFilled: { order: string; shares: string; cash: string }[]; refunded: string[]; skipped: string[]; errors: string[] };
 
 function priceShareUsd(basket: Basket, market: Awaited<ReturnType<typeof fetchMarket>>): number | null {
   const bySymbol = new Map(market.quotes.map((q) => [q.symbol, q]));
@@ -77,7 +77,8 @@ async function fill(connection: Connection, order: Order, basket: Basket, gross:
 }
 
 export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Report> {
-  const report: Report = { plansRun: [], ordersFilled: [], skipped: [], errors: [] };
+  const started = Date.now();
+  const report: Report = { plansRun: [], ordersFilled: [], refunded: [], skipped: [], errors: [] };
   const keeper = faucetKeypair();
   if (!keeper) {
     report.errors.push("No keeper key on this deployment.");
@@ -85,7 +86,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   }
   const connection = new Connection(WRITE_RPC, "confirmed");
   const now = Math.floor(Date.now() / 1000);
-  let budget = opts.maxActions ?? 4;
+  let budget = opts.maxActions ?? 6;
 
   // 1. Plans that are due.
   const plans = await fetchPlans(connection);
@@ -102,34 +103,68 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     }
   }
 
-  // 2. Orders worth filling.
-  const orders = (await fetchOrders(connection)).filter((o) => o.cashMint === CASH_MINT && o.endTs >= now + 2);
+  // 2. Every order whose auction has ended unfilled: return the dollars. Anyone may
+  // do this once the auction is over; the buyer gets the cash, the payer the rent.
+  const all = (await fetchOrders(connection)).filter((o) => o.cashMint === CASH_MINT);
+  for (const order of all.filter((o) => o.endTs < now)) {
+    if (budget <= 0) break;
+    try {
+      await send(connection, [cancelOrderIx({ caller: keeper.publicKey, order })]);
+      report.refunded.push(order.address);
+      budget--;
+    } catch (err) {
+      report.errors.push(`refund ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+    }
+  }
+
+  // 3. Live orders worth filling. An order still above fair is waited for, inside this
+  // call, when its auction reaches fair within the next ~40 seconds; later ones are
+  // left for the next run (plans keep a half-hour auction so the schedule catches them).
+  const orders = all.filter((o) => o.endTs >= now + 2);
   if (!orders.length) return report;
   const [baskets, market] = await Promise.all([fetchBaskets(connection), fetchMarket()]);
   const byAddress = new Map(baskets.map((b) => [b.address, b]));
-  for (const order of orders) {
+  const deadline = started + 45_000;
+  const plan = orders
+    .map((order) => {
+      const basket = byAddress.get(order.basket);
+      const nav = basket ? priceShareUsd(basket, market) : null;
+      if (!basket || nav == null || nav <= 0) return null;
+      const cash = Number(order.cashAmount) / 1e6;
+      // The first second at which the dollars cover the shares owed (with the creator fee).
+      const costAt = (t: number) => (Number(grossSharesForNet(requiredShares(order, t), basket.creatorFeeBps)) / Number(ONE_SHARE)) * nav;
+      let fairAt: number | null = null;
+      for (let t = Math.max(now, order.startTs); t <= order.endTs; t++) {
+        if (costAt(t + 4) <= cash + 1e-9) {
+          fairAt = t;
+          break;
+        }
+      }
+      return { order, basket, nav, cash, fairAt };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null)
+    .sort((x, y) => (x.fairAt ?? Infinity) - (y.fairAt ?? Infinity));
+  for (const job of plan) {
     if (budget <= 0) break;
-    const basket = byAddress.get(order.basket);
-    const nav = basket ? priceShareUsd(basket, market) : null;
-    if (!basket || nav == null || nav <= 0) {
-      report.skipped.push(`${order.address.slice(0, 6)}: no price`);
+    if (job.fairAt == null) {
+      report.skipped.push(`${job.order.address.slice(0, 6)}: never fair at today's prices`);
       continue;
     }
-    // Fill a few seconds ahead, so the auction is no worse when the transaction lands.
-    const shares = requiredShares(order, now + 4);
-    const gross = grossSharesForNet(shares, basket.creatorFeeBps);
-    const cost = (Number(gross) / Number(ONE_SHARE)) * nav;
-    const cash = Number(order.cashAmount) / 1e6;
-    if (cash + 1e-9 < cost) {
-      report.skipped.push(`${order.address.slice(0, 6)}: auction still above fair (${(cost / cash).toFixed(3)}x)`);
+    const wait = job.fairAt * 1000 - Date.now();
+    if (wait > 0 && Date.now() + wait > deadline) {
+      report.skipped.push(`${job.order.address.slice(0, 6)}: fair in ${Math.round(wait / 1000)}s`);
       continue;
     }
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const t = Math.floor(Date.now() / 1000);
+    const shares = requiredShares(job.order, t + 4);
+    const gross = grossSharesForNet(shares, job.basket.creatorFeeBps);
     try {
-      await fill(connection, order, basket, gross);
-      report.ordersFilled.push({ order: order.address, shares: (Number(shares) / 1e6).toFixed(6), cash: cash.toFixed(2) });
+      await fill(connection, job.order, job.basket, gross);
+      report.ordersFilled.push({ order: job.order.address, shares: (Number(shares) / 1e6).toFixed(6), cash: job.cash.toFixed(2) });
       budget--;
     } catch (err) {
-      report.errors.push(`order ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      report.errors.push(`order ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
     }
   }
   return report;

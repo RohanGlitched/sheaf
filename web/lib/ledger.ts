@@ -115,7 +115,7 @@ class Reader {
 const matches = (data: Uint8Array, discriminator: number[]) =>
   discriminator.every((b, i) => data[i] === b);
 
-function fromBase64(text: string): Uint8Array {
+export function fromBase64(text: string): Uint8Array {
   const bin = atob(text);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -342,4 +342,15 @@ export async function readLedger(
     saveKnown(known);
   }
   return snapshot(done);
+}
+
+/** The program's events in one transaction's logs, decoded. */
+export function eventsInLogs(logs: string[] | null | undefined) {
+  const out: NonNullable<ReturnType<typeof decodeEvent>>[] = [];
+  for (const line of logs ?? []) {
+    if (!line.startsWith(PREFIX)) continue;
+    const e = decodeEvent(fromBase64(line.slice(PREFIX.length)));
+    if (e) out.push(e);
+  }
+  return out;
 }
