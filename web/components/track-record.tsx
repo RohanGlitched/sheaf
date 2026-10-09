@@ -75,7 +75,7 @@ export function TrackRecord({
       </div>
 
       {loading && !track ? (
-        <div className="mt-7 flex h-[280px] items-center justify-center border border-line bg-surface text-sm text-ink-3">
+        <div className="mt-7 flex h-[280px] items-center justify-center rounded-[var(--radius-panel)] border border-line bg-surface text-sm text-ink-3">
           Reading a year of closes…
         </div>
       ) : !track ? (
@@ -96,7 +96,7 @@ export function TrackRecord({
             <Chart track={track} symbol={symbol} benchmark={history?.benchmark ?? "SPY"} createdAt={createdAt} />
           </div>
 
-          <dl className="mt-px grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
+          <dl className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
             <Figure
               label={`${RANGES.find((r) => r.key === range)?.label ?? ""}, total return`}
               value={signedPercent(track.returnPct)}
@@ -125,12 +125,12 @@ export function TrackRecord({
             />
             <Figure
               label="Deepest fall"
-              value={percent(Math.abs(track.maxDrawdownPct))}
+              value={signedPercent(-Math.abs(track.maxDrawdownPct))}
               note="from a high to the low that followed it"
               tone={track.maxDrawdownPct < -10 ? "loss" : undefined}
             />
             <Figure
-              label="Volatility, annualised"
+              label="Volatility, annualized"
               value={track.volPct == null ? "—" : percent(track.volPct, 1)}
               note={
                 track.worstDay
@@ -394,11 +394,12 @@ export function CardTrack({ components }: { components: TrackComponent[] }) {
     return <span className="text-ink-3">{history ? "pre-IPO, no history" : "…"}</span>;
   }
   return (
-    <span className="flex items-center gap-2">
+    /* Stacked, so on a phone-width card the line never runs into the next column. */
+    <span className="flex flex-col items-start gap-1">
       <span style={{ color: track.returnPct >= 0 ? "var(--color-gain)" : "var(--color-loss)" }}>
         {signedPercent(track.returnPct, 1)}
       </span>
-      <Sparkline track={track} width={56} height={18} />
+      <Sparkline track={track} width={56} height={16} />
     </span>
   );
 }

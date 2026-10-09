@@ -40,14 +40,25 @@ export function moneyCompact(value: number | null | undefined): string {
   return `${sign}$${v.toFixed(0)}`;
 }
 
-/** A signed percentage, using a real minus sign rather than a hyphen. */
+/**
+ * A signed percentage, using a real minus sign rather than a hyphen. A value
+ * that rounds to zero at the shown precision carries no sign, so nothing ever
+ * reads "−0.00%".
+ */
 export function signedPercent(
   value: number | null | undefined,
   digits = 2,
 ): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${Math.abs(value).toFixed(digits)}%`;
+  const shown = Math.abs(value).toFixed(digits);
+  if (Number(shown) === 0) return `${shown}%`;
+  const sign = value > 0 ? "+" : "−";
+  return `${sign}${shown}%`;
+}
+
+/** "1 share", "2 shares": the noun follows the number. */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return n === 1 ? one : many;
 }
 
 export function percent(value: number | null | undefined, digits = 2): string {

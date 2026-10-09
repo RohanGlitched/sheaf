@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMarket } from "./market-provider";
 import { MarketMosaic } from "./market-mosaic";
-import { moneyCompact, count, timeAgo } from "@/lib/format";
+import { moneyCompact, count, timeAgo, signedPercent } from "@/lib/format";
 import { PRESTOCK_SYMBOLS } from "@/lib/prestocks";
 import { MosaicSkeleton } from "./skeletons";
 
@@ -38,7 +38,6 @@ export function HomeMosaic() {
           {snapshot.chain ? (
             <>
               {" "}· multipliers read from the mints at mainnet slot {count(snapshot.chain.slot)}
-              {snapshot.chain.via === "solami" ? " via Solami" : ""}
             </>
           ) : (
             snapshot.blockId != null && <> · mainnet slot {count(snapshot.blockId)}</>
@@ -75,16 +74,16 @@ export function HomeStats() {
       label: "Tokens you can compose",
       value: quotes.length ? String(quotes.length) : "—",
       note: prestocks
-        ? `${quotes.length - prestocks} xStocks, ${prestocks} PreStocks, all live mints`
+        ? `${quotes.length - prestocks} xStocks, ${prestocks} PreStocks, all trading on Solana`
         : "every one a Token-2022 mint on mainnet",
     },
     {
       label: "Components per basket",
       value: "up to 8",
-      note: "the program's own ceiling, not a plan tier",
+      note: "set by the program, the same for everyone",
     },
     {
-      label: "Paying dividends on chain",
+      label: "Paying dividends onchain",
       value: dividendPayers.length ? String(dividendPayers.length) : "—",
       note: best
         ? `${best.base} has accrued ${best.accruedYieldPct.toFixed(2)}%`
@@ -92,9 +91,7 @@ export function HomeStats() {
     },
     {
       label: "Widest gap to the listed share",
-      value: widest?.premiumBps != null
-        ? `${widest.premiumBps > 0 ? "+" : "−"}${Math.abs(widest.premiumBps / 100).toFixed(2)}%`
-        : "—",
+      value: widest?.premiumBps != null ? signedPercent(widest.premiumBps / 100) : "—",
       note: widest ? `${widest.base}, right now` : "premium or discount",
     },
   ];
@@ -122,7 +119,7 @@ export function ComposeCta({
   return (
     <Link
       href="/compose"
-      className="inline-flex items-center gap-2.5 rounded-[10px] bg-bind px-5 py-3 text-sm font-medium text-white shadow-[0_8px_20px_-10px_rgb(52_56_201/0.7)] transition-colors hover:bg-bind-deep"
+      className="inline-flex items-center gap-2.5 rounded-[var(--radius-control)] bg-bind px-5 py-3 text-sm font-medium text-white shadow-[0_8px_20px_-10px_rgb(52_56_201/0.7)] transition-colors hover:bg-bind-deep"
     >
       {children}
     </Link>

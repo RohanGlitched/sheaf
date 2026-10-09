@@ -7,7 +7,7 @@ export const revalidate = 3600;
 
 /** The fixed pages, then every basket on the program. */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const pages = ["", "/compose", "/explore", "/portfolio", "/ledger", "/method"].map((path) => ({
+  const pages = ["", "/compose", "/explore", "/plans", "/chains", "/portfolio", "/ledger", "/method"].map((path) => ({
     url: `${SITE_URL}${path}`,
     changeFrequency: "daily" as const,
   }));

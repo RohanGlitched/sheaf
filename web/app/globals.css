@@ -4,7 +4,7 @@
   Sheaf is a light, cool field: a pale haze ground, white surfaces, text in a
   deep chlorophyll ink, and one ultramarine "binding" color for the band that
   ties a basket together and for every action. Data colors live in
-  lib/palette.ts — never hand-pick a chart color here.
+  lib/palette.ts, never hand-picked here.
 */
 @theme {
   --color-page: #eef1ec;
@@ -14,7 +14,7 @@
 
   --color-ink: #14251c;
   --color-ink-2: #44544a;
-  --color-ink-3: #65726a;
+  --color-ink-3: #56635b;
 
   --color-line: #dbe1d6;
   --color-line-strong: #c2cbbd;
@@ -28,7 +28,7 @@
 
   --color-gain: #0b7a6b;
   --color-loss: #b8432c;
-  --color-flat: #6b736e;
+  --color-flat: #5d6560;
 
   --font-display: var(--font-funnel), system-ui, sans-serif;
   --font-sans: var(--font-host), system-ui, sans-serif;

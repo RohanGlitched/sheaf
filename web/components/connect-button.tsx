@@ -20,7 +20,9 @@ export function ConnectButton({
   block = false,
   label = "Connect wallet",
 }: {
-  /** Full width and filled, for when connecting is the next step on a page. */
+  /** Full width and filled, for when connecting is the next step on a page.
+   *  Otherwise it is the white secondary button, so it never competes with the
+   *  page's one primary action. */
   block?: boolean;
   label?: string;
 }) {
@@ -121,14 +123,14 @@ export function ConnectButton({
         className={
           block
             ? "w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-60"
-            : "rounded-[var(--radius-control)] bg-ink px-4 py-2 text-sm font-medium text-page transition-colors hover:bg-[#23382c] disabled:opacity-60"
+            : "whitespace-nowrap rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink-3 disabled:opacity-60"
         }
       >
         {connecting ? "Connecting…" : label}
       </button>
       {open && (
         <div
-          className={`absolute top-full z-50 mt-1.5 border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] ${
+          className={`absolute top-full z-50 mt-1.5 rounded-[var(--radius-control)] border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] ${
             block ? "left-0 right-0" : "right-0 w-64"
           }`}
         >

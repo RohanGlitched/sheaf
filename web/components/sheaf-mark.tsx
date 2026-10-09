@@ -43,6 +43,8 @@ const CX = 280;
 const CY = 420;
 
 const deg = (r: number) => (r * 180) / Math.PI;
+/** Two decimals: server and browser must print identical numbers or React refuses to hydrate. */
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export const SHEAF_BOX = { W, H, CX, CY };
 
@@ -67,15 +69,15 @@ export function sheafLayout(stalks: Stalk[]) {
     const down = 104 + ((i * 37) % 17);
     const ux = Math.sin(angle);
     const uy = -Math.cos(angle);
-    const tip = { x: CX + ux * up, y: CY + uy * up };
+    const tip = { x: r2(CX + ux * up), y: r2(CY + uy * up) };
     // The lower half flares at a little over half the angle.
     const la = angle * 0.62;
-    const foot = { x: CX - Math.sin(la) * down, y: CY + Math.cos(la) * down };
+    const foot = { x: r2(CX - Math.sin(la) * down), y: r2(CY + Math.cos(la) * down) };
     // Bow the upper stalk outward, more for the outer stalks.
     const bow = 22 * t;
     const ctrl = {
-      x: CX + ux * up * 0.55 + Math.cos(angle) * bow,
-      y: CY + uy * up * 0.55 + Math.sin(angle) * bow,
+      x: r2(CX + ux * up * 0.55 + Math.cos(angle) * bow),
+      y: r2(CY + uy * up * 0.55 + Math.sin(angle) * bow),
     };
     return { s, i, angle, tip, foot, ctrl, ux, uy };
   });
@@ -89,37 +91,37 @@ export function earSeeds(x: number, y: number, ux: number, uy: number, k = 1) {
   return Array.from({ length: 7 }, (_, i) => {
     const side = i % 2 === 0 ? 1 : -1;
     const along = (6.4 * i + 4) * k;
-    return { cx: x - ux * along + px * 3.4 * k * side, cy: y - uy * along + py * 3.4 * k * side, rot: a + side * 22, rx: 3.5 * k, ry: 7.2 * k };
+    return { cx: r2(x - ux * along + px * 3.4 * k * side), cy: r2(y - uy * along + py * 3.4 * k * side), rot: r2(a + side * 22), rx: r2(3.5 * k), ry: r2(7.2 * k) };
   });
 }
 
 function Ear({ x, y, ux, uy, color, k = 1 }: { x: number; y: number; ux: number; uy: number; color: string; k?: number }) {
   const px = -uy;
   const py = ux;
-  const a = deg(Math.atan2(uy, ux)) + 90;
+  const a = r2(deg(Math.atan2(uy, ux)) + 90);
   const seeds = earSeeds(x, y, ux, uy, k).map((g, i) => (
     <ellipse key={i} cx={g.cx} cy={g.cy} rx={g.rx} ry={g.ry} transform={`rotate(${g.rot} ${g.cx} ${g.cy})`} fill={color} />
   ));
   return (
     <g>
       {seeds}
-      <ellipse cx={x + ux * 3} cy={y + uy * 3} rx={3} ry={6.4} transform={`rotate(${a} ${x + ux * 3} ${y + uy * 3})`} fill={color} />
+      <ellipse cx={r2(x + ux * 3)} cy={r2(y + uy * 3)} rx={3} ry={6.4} transform={`rotate(${a} ${r2(x + ux * 3)} ${r2(y + uy * 3)})`} fill={color} />
       {/* Awns: the fine bristles that make an ear read as grain, not a leaf. */}
       <line
-        x1={x + ux * 6}
-        y1={y + uy * 6}
-        x2={x + ux * 24 + px * 4}
-        y2={y + uy * 24 + py * 4}
+        x1={r2(x + ux * 6)}
+        y1={r2(y + uy * 6)}
+        x2={r2(x + ux * 24 + px * 4)}
+        y2={r2(y + uy * 24 + py * 4)}
         stroke={color}
         strokeWidth={1}
         strokeLinecap="round"
         opacity={0.7}
       />
       <line
-        x1={x + ux * 6}
-        y1={y + uy * 6}
-        x2={x + ux * 22 - px * 5}
-        y2={y + uy * 22 - py * 5}
+        x1={r2(x + ux * 6)}
+        y1={r2(y + uy * 6)}
+        x2={r2(x + ux * 22 - px * 5)}
+        y2={r2(y + uy * 22 - py * 5)}
         stroke={color}
         strokeWidth={1}
         strokeLinecap="round"
@@ -169,7 +171,7 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
               transformOrigin: `${CX}px ${CY}px`,
               animation: `sheaf-gather 1150ms cubic-bezier(0.2, 0.8, 0.2, 1) both`,
               animationDelay: `${i * 70}ms`,
-              "--a0": `${deg(angle) * 1.5 + (i % 2 ? 9 : -9)}deg`,
+              "--a0": `${r2(deg(angle) * 1.5 + (i % 2 ? 9 : -9))}deg`,
             } as CSSProperties)
           : undefined;
         return (
@@ -223,8 +225,8 @@ export function SheafMark({ stalks, labels = false, animate = false, bandNote, c
       {labels &&
         placed.map(({ s, i, tip, ux, uy }) => {
           if (!s.label) return null;
-          const lx = tip.x + ux * 40;
-          const ly = tip.y + uy * 40;
+          const lx = r2(tip.x + ux * 40);
+          const ly = r2(tip.y + uy * 40);
           const anchor = ux > 0.12 ? "start" : ux < -0.12 ? "end" : "middle";
           const tone =
             s.subTone === "gain"

@@ -4,9 +4,12 @@ import { ImageResponse } from "next/og";
 import { sheafDataUri } from "@/lib/sheaf-svg";
 import { slotColor } from "@/lib/palette";
 
-export const alt = "Sheaf: bind any eight stocks into one share";
+export const alt = "Sheaf: bind up to eight stocks into one share";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
+
+/** Where a Sheaf vault is deployed today. Keep in step with /chains. */
+const CHAINS = ["Solana", "Robinhood Chain", "Tempo", "Ethereum", "Arbitrum", "Base"];
 
 const RECIPE = [
   { t: "NVDA", w: 0.26 },
@@ -36,20 +39,19 @@ export default async function Image() {
             </svg>
             <span style={{ fontFamily: "Funnel", fontSize: 42, letterSpacing: -1.5 }}>sheaf</span>
           </div>
-          <div style={{ fontFamily: "Funnel", fontSize: 76, lineHeight: 0.98, letterSpacing: -3, marginTop: 56 }}>
-            Bind any eight stocks into one share.
+          <div style={{ fontFamily: "Funnel", fontSize: 68, lineHeight: 0.98, letterSpacing: -2.6, marginTop: 48 }}>
+            Bind up to eight stocks into one share.
           </div>
           <div style={{ fontSize: 26, lineHeight: 1.4, color: "#44544a", marginTop: 30, maxWidth: 540 }}>
             Index funds of tokenized stocks, backed by the real stocks in an onchain vault.
           </div>
-          <div style={{ display: "flex", marginTop: "auto", fontSize: 20, color: "#65726a", gap: 10 }}>
-            <span>Solana</span>
-            <span>·</span>
-            <span>Robinhood Chain</span>
-            <span>·</span>
-            <span>Tempo</span>
-            <span>·</span>
-            <span>Arbitrum</span>
+          <div style={{ display: "flex", marginTop: "auto", fontSize: 18, color: "#56635b", gap: 8 }}>
+            {CHAINS.map((c, i) => (
+              <span key={c} style={{ display: "flex", gap: 8 }}>
+                {i > 0 && <span>·</span>}
+                <span>{c}</span>
+              </span>
+            ))}
           </div>
         </div>
         <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center" }}>

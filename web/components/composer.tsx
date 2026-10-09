@@ -40,7 +40,7 @@ type Preset = { id: string; label: string; hint: string; symbols: string[] };
 const PRESETS: Preset[] = [
   {
     id: "mag",
-    label: "The big five",
+    label: "The Big Five",
     hint: "Equal weight across the largest tokenized names",
     symbols: ["NVDAx", "AAPLx", "MSFTx", "GOOGLx", "METAx"],
   },
@@ -53,13 +53,13 @@ const PRESETS: Preset[] = [
   {
     id: "income",
     label: "Dividend payers",
-    hint: "Only tickers already accruing dividends on chain",
+    hint: "Only tickers already accruing dividends onchain",
     symbols: [],
   },
   {
     id: "frontier",
     label: "Frontier Labs",
-    hint: "Pre-IPO SPVs from PreStocks — Anthropic, OpenAI, SpaceX, Anduril",
+    hint: "Pre-IPO SPVs from PreStocks: Anthropic, OpenAI, SpaceX, Anduril",
     symbols: ["ANTHROPIC", "OPENAI", "SPACEX", "ANDURIL"],
   },
 ];
@@ -83,6 +83,12 @@ export function Composer() {
   const [done, setDone] = useState<{ signature: string; basket: string } | null>(
     null,
   );
+
+  // The success view replaces the form, so start it at the top: otherwise its
+  // headline sits under the header at the old scroll position.
+  useEffect(() => {
+    if (done) window.scrollTo({ top: 0 });
+  }, [done]);
 
   const quotes = useMemo(() => snapshot?.quotes ?? [], [snapshot]);
 
@@ -370,7 +376,7 @@ export function Composer() {
         title: "Open a launch market",
         body: "Put a Meteora bonding curve in front of the basket, priced off its own NAV. You earn half its trading fees.",
         href: `/basket/${done.basket}#launch`,
-        cta: "Open the market",
+        cta: "Open the launch market",
       },
       {
         n: "3",
@@ -400,7 +406,7 @@ export function Composer() {
             </a>
           </p>
         </div>
-        <ol className="mt-14 grid gap-px border border-line bg-line md:grid-cols-3">
+        <ol className="mt-14 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line md:grid-cols-3">
           {next.map((step) => (
             <li key={step.n} className="flex flex-col bg-raised p-6">
               <p className="display text-2xl text-bind">{step.n}</p>
@@ -419,8 +425,8 @@ export function Composer() {
                 }}
                 className={
                   step.n === "1"
-                    ? "mt-6 bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
-                    : "mt-6 border border-line-strong px-4 py-2.5 text-sm text-ink transition-colors hover:border-bind hover:text-bind"
+                    ? "mt-6 rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
+                    : "mt-6 rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2.5 text-sm text-ink transition-colors hover:border-ink-3"
                 }
               >
                 {step.copy && copied ? "Copied" : step.cta}
@@ -443,8 +449,8 @@ export function Composer() {
         <h1 className="display text-title text-ink">Create a basket</h1>
         <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
           Pick a tile to put that company in the basket, or pick it from the
-          Table, then set the weights. Up to {MAX_COMPONENTS} components, and every one of them is
-          a token already trading on Solana — public equities as xStocks, and
+          table, then set the weights. Up to {MAX_COMPONENTS} components, and every one of them is
+          a token already trading on Solana: public companies as xStocks, and
           pre-IPO companies as PreStocks, composed the same way.
         </p>
 
@@ -497,7 +503,7 @@ export function Composer() {
         <div className="mt-10 border-t border-line pt-8">
           <h2 className="display text-xl text-ink">Name the token</h2>
           <p className="mt-1.5 max-w-[62ch] text-sm leading-relaxed text-ink-2">
-            The share carries this name and symbol on chain. The target price
+            The share carries this name and symbol onchain. The target price
             only sets how much of each component stands behind one share.
           </p>
 
@@ -509,7 +515,7 @@ export function Composer() {
                 onChange={(e) => setName(e.target.value)}
                 maxLength={32}
                 placeholder="Semiconductors, equal weight"
-                className="mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60 rounded-[var(--radius-control)]"
+                className="mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3 rounded-[var(--radius-control)]"
               />
             </label>
             <label className="block">
@@ -519,7 +525,7 @@ export function Composer() {
                 onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                 maxLength={10}
                 placeholder="CHIPS"
-                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3/60 rounded-[var(--radius-control)]"
+                className="tnum mt-1.5 w-full border border-line bg-page px-3 py-2 text-sm text-ink placeholder:text-ink-3 rounded-[var(--radius-control)]"
               />
             </label>
             <label className="block sm:col-span-2 lg:col-span-1">
@@ -570,7 +576,7 @@ export function Composer() {
 
       {/* ------------------------------------------------------------ basket */}
       <div ref={panel} className="scroll-mt-4 sm:scroll-mt-24 lg:sticky lg:top-24 lg:self-start">
-        <div className="border border-line bg-surface">
+        <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
           <div className="border-b border-line px-6 py-5">
             <h2 className="display text-xl text-ink">
               {trimmedName || "Your basket"}
@@ -610,7 +616,7 @@ export function Composer() {
                     <li key={row.pick.symbol}>
                       <div className="flex items-baseline gap-2.5">
                         <span
-                          className="size-2.5 shrink-0"
+                          className="size-2.5 shrink-0 rounded-full"
                           style={{ background: slotColor(row.pick.slot) }}
                           aria-hidden
                         />
@@ -703,7 +709,7 @@ export function Composer() {
                     : `${percent(recipe.accruedShare)}`
                 }
                 note="of the basket's value, accrued into the mints"
-                tone={recipe.accruedShare ? "gold" : undefined}
+                tone={recipe.accruedShare ? "bind" : undefined}
               />
               <Figure
                 label="Thinnest component"
@@ -770,7 +776,7 @@ export function Composer() {
               <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-3">
                 {picks.map((pick) => (
                   <span key={pick.symbol} className="flex items-center gap-1">
-                    <span aria-hidden className="size-2" style={{ background: slotColor(pick.slot) }} />
+                    <span aria-hidden className="size-2 rounded-full" style={{ background: slotColor(pick.slot) }} />
                     {quoteBySymbol.get(pick.symbol)?.base ?? pick.symbol}
                   </span>
                 ))}

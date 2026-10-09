@@ -37,7 +37,7 @@ export function FeaturedBaskets() {
         </div>
         <Link
           href="/explore"
-          className="border border-line px-4 py-2.5 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink rounded-[var(--radius-control)]"
+          className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2.5 text-sm text-ink transition-colors hover:border-ink-3"
         >
           {baskets ? `See all ${baskets.length}` : "See all"}
         </Link>
@@ -52,7 +52,7 @@ export function FeaturedBaskets() {
       )}
 
       {baskets && baskets.length === 0 && (
-        <div className="mt-10 border border-dashed border-line-strong/60 px-8 py-14 text-center">
+        <div className="mt-10 rounded-[var(--radius-panel)] border border-dashed border-line-strong/60 px-8 py-14 text-center">
           <p className="display text-xl text-ink">Nobody has created one yet.</p>
           <p className="mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed text-ink-2">
             The program is deployed and waiting. The first basket takes one

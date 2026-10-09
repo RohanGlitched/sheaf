@@ -6,7 +6,7 @@ import { useConnection } from "@solana/wallet-adapter-react";
 import { readLedger, type Ledger, type LedgerEntry } from "@/lib/ledger";
 import { useBaskets } from "@/lib/use-baskets";
 import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
-import { count, quantity, shortAddress, timeAgo } from "@/lib/format";
+import { count, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
 
@@ -88,6 +88,27 @@ function describe(entry: LedgerEntry, basket: Basket | undefined): string {
   return parts.join(" · ");
 }
 
+/** What moved, with its unit: shares, holdings or dollars, never a bare number. */
+function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
+  const notes: string[] = [];
+  let main: string;
+  if (e.kind === "created") {
+    const n = e.componentCount ?? 0;
+    main = `${n} ${plural(n, "holding")}`;
+  } else if (e.kind === "ordered" || e.kind === "planRun" || e.kind === "returned") {
+    main = money(e.cash ?? 0);
+  } else if (e.kind === "planOpened") {
+    main = `${money(e.cash ?? 0)} × ${e.runs ?? 0}`;
+    notes.push("per run");
+  } else {
+    const n = e.shares ?? 0;
+    main = `${quantity(n, 4)} ${plural(n, "share")}`;
+    if (e.kind === "filled" && e.cash != null) notes.push(`for ${money(e.cash)}`);
+  }
+  if (e.feeShares) notes.push(`+${quantity(e.feeShares, 4)} to the creator`);
+  return { main, notes };
+}
+
 export function LedgerTable({
   entries,
   baskets,
@@ -98,70 +119,102 @@ export function LedgerTable({
   showBasket?: boolean;
 }) {
   return (
-    <div className="min-w-0 overflow-x-auto border border-line">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-line text-left text-xs text-ink-3">
-            <th className="px-3 py-3 font-normal sm:px-4">When</th>
-            <th className="px-3 py-3 font-normal sm:px-4">What</th>
-            {showBasket && <th className="px-3 py-3 font-normal sm:px-4">Basket</th>}
-            <th className="px-3 py-3 font-normal sm:px-4">Wallet</th>
-            <th className="px-3 py-3 text-right font-normal sm:px-4">Shares</th>
-            <th className="hidden px-4 py-3 font-normal md:table-cell">Moved through the vault</th>
-            <th className="px-3 py-3 text-right font-normal sm:px-4">Tx</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e) => {
-            const basket = baskets.get(e.basket);
-            const kind = KIND[e.kind];
-            return (
-              <tr key={`${e.signature}-${e.kind}`} className="border-b border-line/60 last:border-0">
-                <td className="tnum whitespace-nowrap px-3 py-3 text-ink-2 sm:px-4" title={new Date(e.time * 1000).toISOString()}>
-                  {timeAgo(e.time)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 sm:px-4">
-                  <span className="flex items-center gap-2">
-                    <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: kind.color }} />
-                    <span className="text-ink">{kind.label}</span>
-                  </span>
-                </td>
-                {showBasket && (
-                  <td className="px-3 py-3 sm:px-4">
-                    <Link href={`/basket/${e.basket}`} className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
+    <>
+      {/* A phone gets one card per event: what and when, then how much and the proof. */}
+      <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface sm:hidden">
+        {entries.map((e) => {
+          const basket = baskets.get(e.basket);
+          const kind = KIND[e.kind];
+          const amount = amountOf(e);
+          return (
+            <li key={`${e.signature}-${e.kind}`} className="px-4 py-3 text-sm">
+              <p className="flex items-baseline justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: kind.color }} />
+                  <span className="text-ink">{kind.label}</span>
+                  {showBasket && (
+                    <Link href={`/basket/${e.basket}`} className="text-ink-2 underline decoration-line-strong underline-offset-4">
                       {basket?.symbol ?? e.symbol ?? shortAddress(e.basket)}
                     </Link>
-                    <span className="ml-2 hidden text-xs text-ink-3 lg:inline">{basket?.name ?? e.name}</span>
+                  )}
+                </span>
+                <span className="tnum shrink-0 text-xs text-ink-3">{timeAgo(e.time)}</span>
+              </p>
+              <p className="tnum mt-1.5 flex items-baseline justify-between gap-3 pl-4">
+                <span className="min-w-0 text-ink-2">
+                  {amount.main}
+                  {amount.notes.length > 0 && <span className="text-xs text-ink-3"> · {amount.notes.join(" · ")}</span>}
+                </span>
+                <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-ink-2 underline decoration-line-strong underline-offset-4">
+                  Tx {shortAddress(e.signature, 4, 4)}
+                </a>
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="hidden min-w-0 overflow-x-auto rounded-[var(--radius-panel)] border border-line bg-surface sm:block">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-ink-3">
+              <th className="px-4 py-3 font-normal">When</th>
+              <th className="px-4 py-3 font-normal">What</th>
+              {showBasket && <th className="px-4 py-3 font-normal">Basket</th>}
+              <th className="px-4 py-3 font-normal">Wallet</th>
+              <th className="px-4 py-3 text-right font-normal">Amount</th>
+              <th className="hidden px-4 py-3 font-normal md:table-cell">Moved through the vault</th>
+              <th className="px-4 py-3 text-right font-normal">Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => {
+              const basket = baskets.get(e.basket);
+              const kind = KIND[e.kind];
+              const amount = amountOf(e);
+              return (
+                <tr key={`${e.signature}-${e.kind}`} className="border-b border-line/60 last:border-0">
+                  <td className="tnum whitespace-nowrap px-4 py-3 text-ink-2" title={new Date(e.time * 1000).toISOString()}>
+                    {timeAgo(e.time)}
                   </td>
-                )}
-                <td className="tnum whitespace-nowrap px-3 py-3 sm:px-4">
-                  <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
-                    {shortAddress(e.actor)}
-                  </a>
-                </td>
-                <td className="tnum px-3 py-3 text-right text-ink sm:px-4">
-                  {e.kind === "created"
-                    ? `${e.componentCount} ${e.componentCount === 1 ? "holding" : "holdings"}`
-                    : e.kind === "ordered" || e.kind === "planRun" || e.kind === "returned"
-                      ? `$${(e.cash ?? 0).toFixed(2)}`
-                      : e.kind === "planOpened"
-                        ? `$${(e.cash ?? 0).toFixed(2)} × ${e.runs}`
-                        : quantity(e.shares ?? 0, 4)}
-                  {e.kind === "filled" && e.cash != null ? <span className="block text-xs text-ink-3">for ${e.cash.toFixed(2)}</span> : null}
-                  {e.feeShares ? <span className="block text-xs text-ink-3">+{quantity(e.feeShares, 4)} to the creator</span> : null}
-                </td>
-                <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">{describe(e, basket)}</td>
-                <td className="tnum whitespace-nowrap px-3 py-3 text-right sm:px-4">
-                  <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
-                    {shortAddress(e.signature, 4, 4)}
-                  </a>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <span className="flex items-center gap-2">
+                      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: kind.color }} />
+                      <span className="text-ink">{kind.label}</span>
+                    </span>
+                  </td>
+                  {showBasket && (
+                    <td className="px-4 py-3">
+                      <Link href={`/basket/${e.basket}`} className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
+                        {basket?.symbol ?? e.symbol ?? shortAddress(e.basket)}
+                      </Link>
+                      <span className="ml-2 hidden text-xs text-ink-3 lg:inline">{basket?.name ?? e.name}</span>
+                    </td>
+                  )}
+                  <td className="tnum whitespace-nowrap px-4 py-3">
+                    <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+                      {shortAddress(e.actor)}
+                    </a>
+                  </td>
+                  <td className="tnum whitespace-nowrap px-4 py-3 text-right text-ink">
+                    {amount.main}
+                    {amount.notes.map((n) => (
+                      <span key={n} className="block text-xs text-ink-3">{n}</span>
+                    ))}
+                  </td>
+                  <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">{describe(e, basket)}</td>
+                  <td className="tnum whitespace-nowrap px-4 py-3 text-right">
+                    <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+                      {shortAddress(e.signature, 4, 4)}
+                    </a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -173,11 +226,14 @@ export function LedgerPage() {
   const stats = useMemo(() => {
     const entries = ledger?.entries ?? [];
     const wallets = new Set(entries.map((e) => e.actor));
-    const created = entries.filter((e) => e.kind === "minted").reduce((a, e) => a + (e.shares ?? 0) + (e.feeShares ?? 0), 0);
+    // A filled dollar order creates shares exactly as an in-kind deposit does,
+    // and the basket's own count includes both, so the ledger does too.
+    const creations = entries.filter((e) => e.kind === "minted" || e.kind === "filled");
+    const created = creations.reduce((a, e) => a + (e.shares ?? 0) + (e.feeShares ?? 0), 0);
     const redeemed = entries.filter((e) => e.kind === "redeemed").reduce((a, e) => a + (e.shares ?? 0), 0);
     return {
       baskets: entries.filter((e) => e.kind === "created").length,
-      creations: entries.filter((e) => e.kind === "minted").length,
+      creations: creations.length,
       redemptions: entries.filter((e) => e.kind === "redeemed").length,
       wallets: wallets.size,
       created,
@@ -257,11 +313,10 @@ export function LedgerPage() {
             <code className="text-ink-2">SharesMinted</code>, <code className="text-ink-2">SharesRedeemed</code>,{" "}
             <code className="text-ink-2">OrderPlaced</code>, <code className="text-ink-2">OrderFilled</code> and the rest), decoded from
             the <code className="text-ink-2">Program data</code> lines of the
-            transaction log, in your browser, against the public RPC. The decoder is{" "}
-            <code className="text-ink-2">web/lib/ledger.ts</code>. The repository
-            carries what was decoded at the last release, and what this browser decodes
+            transaction log, in your browser, against the public RPC. The site
+            ships with what was decoded at the last release, and what this browser decodes
             on top stays here, so a visit only reads the transactions that are new. Every
-            row links to its transaction, so neither is the source of truth; the chain is.
+            row links to its transaction, so neither is the source of truth: the chain is.
           </p>
         </>
       )}
@@ -277,8 +332,8 @@ export function BasketHistory({ basket }: { basket: Basket }) {
     <section className="mt-16">
       <h2 className="display text-title text-ink">Everything that has happened to it</h2>
       <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-        Every creation and redemption since the basket was made, decoded from the
-        program&rsquo;s own events. The full ledger across every basket is on{" "}
+        Every creation, redemption, dollar order and plan run since the basket was
+        made, decoded from the program&rsquo;s own events. The full ledger across every basket is on{" "}
         <Link href="/ledger" className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
           one page
         </Link>

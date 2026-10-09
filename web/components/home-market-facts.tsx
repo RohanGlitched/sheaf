@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMarket } from "./market-provider";
 import { changeColor, inkOn } from "@/lib/palette";
 import { money, signedPercent } from "@/lib/format";
@@ -27,7 +28,7 @@ export function Premiums() {
           return (
             <li
               key={q.symbol}
-              className="mosaic-tile relative aspect-[5/4] rounded-[6px] p-2.5"
+              className="mosaic-tile relative aspect-[5/4] rounded-[var(--radius-control)] p-2.5"
               style={{ background: changeColor(pct * 3), color: inkOn(changeColor(pct * 3)) }}
               title={`${q.base}: token ${money(q.price)}, share ${money(q.sharePrice)}`}
             >
@@ -54,32 +55,63 @@ export function Premiums() {
  */
 export function Dividends() {
   const { snapshot } = useMarket();
+  const [all, setAll] = useState(false);
   const payers = (snapshot?.quotes ?? []).filter((q) => q.paysDividend).sort((a, b) => b.accruedYieldPct - a.accruedYieldPct);
-  if (!snapshot) return <div className="skeleton h-40 border border-line" />;
+  if (!snapshot) return <div className="skeleton h-40 rounded-[var(--radius-panel)] border border-line" />;
   if (!payers.length) return null;
   const max = Math.max(...payers.map((p) => p.accruedYieldPct), 0.01);
+  // Eight fill two rows of four, or four rows of two, with no empty cell. The
+  // rest are one click away rather than another screen of cards on a phone.
+  const shown = all ? payers : payers.slice(0, 8);
+  const fillPhone = shown.length % 2;
+  const fillWide = (4 - (shown.length % 4)) % 4;
 
   return (
-    <ul className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4" aria-label="Tokens that pay dividends through their multiplier">
-      {payers.map((q) => (
-        <li key={q.symbol} className="bg-page p-5">
-          <p className="flex items-baseline justify-between gap-3">
-            <span className="text-ink">{q.base}</span>
-            <span className="text-xs text-ink-3">{q.company}</span>
-          </p>
-          <p className="tnum display mt-3 text-3xl text-ink">×{q.multiplier.toFixed(4)}</p>
-          <p className="mt-1 text-xs text-ink-3">one raw unit reads as this many</p>
-          <div className="mt-4 h-1 bg-line-strong">
-            <div className="h-full bg-bind" style={{ width: `${Math.max(2, (q.accruedYieldPct / max) * 100)}%` }} />
-          </div>
-          <p className="tnum mt-2 text-xs text-ink-2">
-            {q.accruedYieldPct.toFixed(2)}% accrued
-            {q.nextMultiplier != null && q.nextMultiplierAt
-              ? ` · next step ×${q.nextMultiplier.toFixed(4)} on ${new Date(q.nextMultiplierAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
-              : ""}
-          </p>
-        </li>
-      ))}
-    </ul>
+    <div>
+      <ul
+        className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4"
+        aria-label="Tokens that pay dividends through their multiplier"
+      >
+        {shown.map((q) => (
+          <li key={q.symbol} className="min-w-0 bg-page p-4 sm:p-5">
+            <p className="flex items-baseline justify-between gap-3">
+              <span className="text-ink">{q.base}</span>
+              <span className="hidden truncate text-xs text-ink-3 sm:inline">{q.company}</span>
+            </p>
+            <p className="tnum display mt-3 text-2xl text-ink sm:text-3xl">×{q.multiplier.toFixed(4)}</p>
+            <p className="mt-1 hidden text-xs text-ink-3 sm:block">one raw unit reads as this many</p>
+            <div className="mt-4 h-1 overflow-hidden rounded-full bg-line-strong">
+              <div className="h-full rounded-full bg-bind" style={{ width: `${Math.max(2, (q.accruedYieldPct / max) * 100)}%` }} />
+            </div>
+            <p className="tnum mt-2 text-xs text-ink-2">
+              {q.accruedYieldPct.toFixed(2)}% accrued
+              {q.nextMultiplier != null && q.nextMultiplierAt ? (
+                <span className="hidden sm:inline">
+                  {` · next step ×${q.nextMultiplier.toFixed(4)} on ${new Date(q.nextMultiplierAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                </span>
+              ) : null}
+            </p>
+          </li>
+        ))}
+        {/* Blank cells close the last row, so the grid never shows a grey hole. */}
+        {Array.from({ length: Math.max(fillPhone, fillWide) }, (_, i) => (
+          <li
+            key={`fill-${i}`}
+            aria-hidden
+            className={`bg-page ${i < fillPhone ? "" : "hidden"} ${i < fillWide ? "lg:block" : "lg:hidden"}`}
+          />
+        ))}
+      </ul>
+      {payers.length > 8 && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          aria-expanded={all}
+          className="mt-5 rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2.5 text-sm text-ink transition-colors hover:border-ink-3"
+        >
+          {all ? "Show the top eight" : `Show all ${payers.length}`}
+        </button>
+      )}
+    </div>
   );
 }

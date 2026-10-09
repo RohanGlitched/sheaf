@@ -1,53 +1,73 @@
 import Link from "next/link";
-import { SHEAF_PROGRAM_ID, explorerAddress } from "@/lib/config";
+import { MAX_CREATOR_FEE_BPS, SHEAF_PROGRAM_ID, explorerAddress } from "@/lib/config";
 import { TREASURY } from "@/lib/dbc";
 import { shortAddress } from "@/lib/format";
 
-const REVENUE = [
+/** Money is made where backed shares are made. These two come first. */
+const SHARE_FEES = [
   {
-    share: "½",
-    title: "of every curve's trading fees",
-    body: "From the 4% opening fee down to the settled 1%. The basket's creator earns the other half, which is why creators open one.",
+    share: `up to ${MAX_CREATOR_FEE_BPS / 100}%`,
+    title: "of every creation, to the basket's creator",
+    body: "Paid in newly created shares, never out of the vault, so what each share can redeem is unchanged. It is the reason to build a basket and bring holders to it.",
   },
   {
-    share: "1%",
-    title: "of the SOL raised when a curve graduates",
-    body: "Taken as the migration fee at the moment the launch market becomes a permanent Meteora pool.",
-  },
-  {
-    share: "½",
-    title: "of the graduated pool's fees, for good",
-    body: "Half of the migrated liquidity is locked forever in a position the treasury owns, so every basket that trades keeps paying.",
+    share: "the spread",
+    title: "on every dollar order, to the filler who delivers",
+    body: "A dollar order is an auction on share count that falls toward the buyer's floor. The filler keeps the gap between what the auction pays and what the stocks cost. Sheaf runs the house filler; anyone can run another and compete for it.",
   },
 ];
 
-/** Nothing is charged for a basket, a creation or a redemption. The launch markets pay for the rest. */
+/** The launch markets pay too, but they sit beside the backed share, not inside it. */
+const LAUNCH_FEES = [
+  { share: "½", title: "of every launch curve's trading fees", body: "From the 4% opening fee down to the settled 1%. The basket's creator earns the other half." },
+  { share: "1%", title: "of the SOL raised at graduation", body: "Taken as the migration fee when the curve becomes a permanent Meteora pool." },
+  { share: "½", title: "of the graduated pool's fees", body: "Half the migrated liquidity is locked in a position the treasury owns, so it keeps paying." },
+];
+
+/** Nothing is charged for a basket, a creation or a redemption. Fees sit where shares are made. */
 export function Revenue() {
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
       <div className="max-w-[40ch]">
-        <h2 className="display text-title text-ink">Nothing is charged for a basket. The markets pay.</h2>
+        <h2 className="display text-title text-ink">Paid where backed shares are made.</h2>
         <p className="mt-5 text-base leading-relaxed text-ink-2">
-          Creating a basket, creating shares and redeeming them cost nothing beyond Solana&rsquo;s fee, and the creator fee is the creator&rsquo;s in
-          full. Sheaf&rsquo;s treasury is the Meteora partner on every launch curve instead, and is paid for as long as the token trades.
+          Nothing is charged for a basket. Creating one, creating shares in kind and redeeming them cost
+          nothing beyond Solana&rsquo;s fee. The money is in making shares: the creator&rsquo;s fee on
+          every creation, and the spread a filler earns delivering the stocks for a dollar order or a
+          monthly plan. Sheaf runs the house filler, so that spread is its first income.
         </p>
         <p className="mt-4 text-sm leading-relaxed text-ink-3">
-          Treasury{" "}
+          Launch markets add a second, smaller line. Their fees go to the treasury{" "}
           <a href={explorerAddress(TREASURY.toBase58())} target="_blank" rel="noreferrer" className="tnum text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
             {shortAddress(TREASURY.toBase58(), 6, 4)}
           </a>
-          : it claims fees and does nothing else.
+          , which claims fees and does nothing else.
         </p>
       </div>
-      <ol className="grid gap-px bg-line sm:grid-cols-3">
-        {REVENUE.map((r) => (
-          <li key={r.title} className="bg-page p-6">
-            <p className="tnum display text-5xl text-bind">{r.share}</p>
-            <p className="mt-3 text-sm text-ink">{r.title}</p>
-            <p className="mt-2 text-xs leading-relaxed text-ink-3">{r.body}</p>
-          </li>
-        ))}
-      </ol>
+      <div>
+        <ol className="grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2">
+          {SHARE_FEES.map((r) => (
+            <li key={r.title} className="bg-surface p-6 sm:p-7">
+              <p className="tnum display text-4xl text-bind sm:text-5xl">{r.share}</p>
+              <p className="mt-3 text-sm text-ink">{r.title}</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink-2">{r.body}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-8 text-sm text-ink">Then, from launch markets</p>
+        <ol className="mt-3 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3">
+          {LAUNCH_FEES.map((r) => (
+            <li key={r.title} className="bg-page p-5">
+              <p className="tnum display text-2xl text-ink">{r.share}</p>
+              <p className="mt-2 text-sm text-ink-2">{r.title}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-3">{r.body}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-4 text-xs leading-relaxed text-ink-3">
+          A launch token is its own market and is not redeemable for the stocks. Only a basket share is backed.
+        </p>
+      </div>
     </div>
   );
 }
@@ -84,6 +104,12 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
     cannot: "Touch a basket, a vault or anything on mainnet.",
   },
   {
+    what: "The house filler",
+    who: "Sheaf's server",
+    can: "Fill dollar orders and plan runs by delivering the stocks, like any other filler.",
+    cannot: "Fill outside an order's auction, or take anything out of a vault.",
+  },
+  {
     what: "The treasury key",
     who: "Sheaf",
     can: "Claim the partner fees from launch markets.",
@@ -113,8 +139,25 @@ export function Keys() {
           Program {shortAddress(SHEAF_PROGRAM_ID, 6, 4)} on Solana Explorer
         </a>
       </div>
-      <div className="mt-8 overflow-x-auto border border-line">
-        <table className="w-full min-w-[720px] border-collapse text-sm">
+      {/* A phone gets one card per key; four columns of sentences will not fit. */}
+      <ul className="mt-8 divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface sm:hidden">
+        {KEYS.map((k) => (
+          <li key={k.what} className="px-4 py-4 text-sm leading-relaxed">
+            <p className="font-medium text-ink">{k.what}</p>
+            <p className="mt-1 text-ink-2">
+              <span className="text-ink-3">Held by:</span> {k.who}
+            </p>
+            <p className="mt-2 text-ink-2">
+              <span className="text-gain">Can:</span> {k.can}
+            </p>
+            <p className="mt-1 text-ink-2">
+              <span className="text-loss">Cannot:</span> {k.cannot}
+            </p>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-8 hidden overflow-hidden rounded-[var(--radius-panel)] border border-line sm:block">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-surface text-left text-xs text-ink-3">
               <th className="px-4 py-3 font-normal">What</th>
@@ -137,8 +180,8 @@ export function Keys() {
       </div>
       <p className="mt-4 text-xs leading-relaxed text-ink-3">
         Not yet audited. Sheaf runs on devnet, holds no real assets, and will not hold real tokenized equities before an audit.{" "}
-        <Link href="/method" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
-          How the program is built
+        <Link href="/method#risks" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+          What could still go wrong
         </Link>
       </p>
     </div>

@@ -22,7 +22,7 @@ export function Anatomy() {
   const { onChain } = useOnChainBasket(basket);
 
   if (state === "missing" || state === "error") return null;
-  if (!basket) return <div className="skeleton h-[420px] border border-line" />;
+  if (!basket) return <div className="skeleton h-[420px] rounded-[var(--radius-panel)] border border-line" />;
 
   const v = valueBasket(basket, snapshot);
   const tiles = v.components.map((c) => ({
@@ -48,7 +48,7 @@ export function Anatomy() {
         </div>
         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-xs text-ink-3">
           <span>
-            ${basket.symbol} · {v.components.length} components · by {shortAddress(basket.creator)}
+            {basket.symbol} · {v.components.length} components · by {shortAddress(basket.creator)}
           </span>
           <Link href={`/basket/${basket.address}`} className="text-bind underline decoration-bind/40 underline-offset-4 hover:decoration-bind">
             Open the basket
@@ -107,7 +107,7 @@ export function Anatomy() {
           </tfoot>
         </table>
 
-        <dl className="mt-7 grid grid-cols-2 gap-px bg-line sm:grid-cols-3">
+        <dl className="mt-7 grid grid-cols-1 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3">
           <div className="bg-surface p-4">
             <dt className="text-xs text-ink-3">Shares outstanding</dt>
             <dd className="tnum display mt-1 text-xl text-ink">{onChain ? quantity(onChain.shares, 2) : "—"}</dd>
@@ -115,7 +115,7 @@ export function Anatomy() {
           <div className="bg-surface p-4">
             <dt className="text-xs text-ink-3">Vault covers the shares</dt>
             <dd className="tnum display mt-1 text-xl" style={{ color: coverage != null && coverage >= 1 ? "var(--color-gain)" : "var(--color-ink)" }}>
-              {coverage == null ? "—" : `${(coverage * 100).toFixed(2)}%`}
+              {coverage == null ? "—" : `${(Math.min(coverage, 9.999) * 100).toFixed(1)}%`}
             </dd>
           </div>
           <div className="bg-surface p-4">

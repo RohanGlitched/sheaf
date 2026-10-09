@@ -13,7 +13,7 @@ export function SiteFooter() {
             <p className="mt-4 text-sm leading-relaxed text-ink-2">
               Sheaf composes tokenized equities into one token, backed share for
               share in a vault anyone can read. Prices and dividend multipliers come
-              from Solana mainnet. Minting and redeeming settle on {WRITE_CLUSTER}.
+              from Solana mainnet. Creating and redeeming shares settle on {WRITE_CLUSTER}.
             </p>
           </div>
 
@@ -24,12 +24,29 @@ export function SiteFooter() {
             <Link href="/explore" className="text-ink-2 hover:text-ink">
               Explore baskets
             </Link>
+            <Link href="/plans" className="text-ink-2 hover:text-ink">
+              Monthly plans
+            </Link>
+            <Link href="/chains" className="text-ink-2 hover:text-ink">
+              Chains
+            </Link>
             <Link href="/portfolio" className="text-ink-2 hover:text-ink">
-              Your holdings
+              Portfolio
+            </Link>
+            <Link href="/ledger" className="text-ink-2 hover:text-ink">
+              Ledger
             </Link>
             <Link href="/method" className="text-ink-2 hover:text-ink">
               How it works
             </Link>
+            <a
+              href="https://github.com/RohanGlitched/sheaf"
+              target="_blank"
+              rel="noreferrer"
+              className="text-ink-2 hover:text-ink"
+            >
+              Source on GitHub
+            </a>
             <a
               href={explorerAddress(SHEAF_PROGRAM_ID)}
               target="_blank"

@@ -29,7 +29,7 @@ export function CardSkeletons({ count = 3 }: { count?: number }) {
       className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3"
     >
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="border border-line bg-surface">
+        <div key={i} className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
           <div className="flex justify-between gap-4 px-5 pt-5">
             <div className="flex-1">
               <Bar className="h-5 w-2/3" />

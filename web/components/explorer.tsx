@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { PublicKey } from "@solana/web3.js";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { ONE_SHARE } from "@/lib/config";
 import { useBaskets } from "@/lib/use-baskets";
 import { useMarket } from "./market-provider";
 import { valueBasket } from "@/lib/basket-view";
@@ -30,8 +33,43 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "components", label: "Most holdings" },
 ];
 
+/** Share supply per basket, read in one call for every share mint. */
+function useSupplies(shareMints: string[]) {
+  const { connection } = useConnection();
+  const key = shareMints.join(",");
+  const [supplies, setSupplies] = useState<{ key: string; byMint: Map<string, number> } | null>(null);
+
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    const mints = key.split(",");
+    connection
+      .getMultipleAccountsInfo(mints.map((m) => new PublicKey(m)))
+      .then((infos) => {
+        if (!live) return;
+        const byMint = new Map<string, number>();
+        infos.forEach((info, i) => {
+          if (!info) return;
+          const data = new Uint8Array(info.data);
+          // Mint layout: mint_authority COption (36 bytes), then supply as a u64.
+          const supply = new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(36, true);
+          byMint.set(mints[i], Number(supply) / ONE_SHARE);
+        });
+        setSupplies({ key, byMint });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [connection, key]);
+
+  return supplies?.key === key ? supplies.byMint : null;
+}
+
 export function Explorer() {
   const { baskets, error, loading } = useBaskets();
+  const shareMints = useMemo(() => (baskets ?? []).map((b) => b.shareMint), [baskets]);
+  const supplies = useSupplies(shareMints);
   const launched = useOpenLaunches(baskets);
   const { snapshot } = useMarket();
   const { history } = useHistory();
@@ -86,14 +124,15 @@ export function Explorer() {
     }
   }, [baskets, snapshot, history, sort, query]);
 
-  const totalValue = useMemo(
-    () =>
-      (baskets ?? []).reduce(
-        (sum, b) => sum + (valueBasket(b, snapshot).nav ?? 0),
-        0,
-      ),
-    [baskets, snapshot],
-  );
+  // What every vault holds, at live prices: each share's value times the shares
+  // outstanding. Adding up one share of each would be a number with no meaning.
+  const heldInVaults = useMemo(() => {
+    if (!baskets || !supplies) return null;
+    return baskets.reduce(
+      (sum, b) => sum + (valueBasket(b, snapshot).nav ?? 0) * (supplies.get(b.shareMint) ?? 0),
+      0,
+    );
+  }, [baskets, snapshot, supplies]);
 
   return (
     <div>
@@ -116,9 +155,9 @@ export function Explorer() {
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-ink-3">Combined share price</dt>
+              <dt className="text-xs text-ink-3">Held in vaults</dt>
               <dd className="display mt-1 text-xl text-ink">
-                {money(totalValue)}
+                {heldInVaults == null ? "…" : money(heldInVaults)}
               </dd>
             </div>
           </dl>
@@ -172,7 +211,7 @@ export function Explorer() {
       )}
 
       {baskets && baskets.length === 0 && (
-        <div className="mt-12 border border-dashed border-line-strong/60 px-8 py-16 text-center">
+        <div className="mt-12 rounded-[var(--radius-panel)] border border-dashed border-line-strong/60 px-8 py-16 text-center">
           <p className="display text-xl text-ink">The program is empty.</p>
           <p className="mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed text-ink-2">
             No baskets exist on this cluster yet. Creating one takes a

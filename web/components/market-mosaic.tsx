@@ -18,7 +18,7 @@ import { Ticker } from "./ticker";
 export type SizeBy = "liquidity" | "volume24h";
 
 const SIZE_LABEL: Record<SizeBy, string> = {
-  liquidity: "on-chain liquidity",
+  liquidity: "onchain liquidity",
   volume24h: "24h volume",
 };
 
@@ -97,7 +97,7 @@ export function MarketMosaic({
                 style={{ background: COMPONENT_SLOTS[3] }}
                 aria-hidden
               />{" "}
-              mark is PreStocks — a pre-IPO SPV, not a listed company.
+              mark is PreStocks: a pre-IPO SPV, not a listed company.
             </p>
           </div>
           <div className="flex items-center gap-1 text-xs">
@@ -198,6 +198,7 @@ export function MarketMosaic({
                       animationDelay: `${Math.min(index, 30) * 14}ms`,
                     }}
                   >
+                    <title>{`${q.base}, ${q.company}: ${money(q.price)}, ${change} over 24 hours`}</title>
                     <rect
                       x={tile.x}
                       y={tile.y}
@@ -219,11 +220,10 @@ export function MarketMosaic({
                     )}
                     {q.paysDividend && tile.width > 40 && tile.height > 40 && (
                       // A dividend is accruing into this mint's multiplier.
-                      <rect
-                        x={tile.x + tile.width - 9}
-                        y={tile.y + 5}
-                        width={4}
-                        height={4}
+                      <circle
+                        cx={tile.x + tile.width - 8}
+                        cy={tile.y + 8}
+                        r={2.5}
                         fill="var(--color-bind)"
                       />
                     )}
@@ -231,11 +231,10 @@ export function MarketMosaic({
                       tile.width > 40 &&
                       tile.height > 40 && (
                         // A PreStocks pre-IPO token, not a public xStock equity.
-                        <rect
-                          x={tile.x + 5}
-                          y={tile.y + 5}
-                          width={4}
-                          height={4}
+                        <circle
+                          cx={tile.x + 8}
+                          cy={tile.y + 8}
+                          r={2.5}
                           fill={COMPONENT_SLOTS[3]}
                         />
                       )}
@@ -424,16 +423,16 @@ export function ChangeLegend() {
         <span className="ml-1.5">24h move, −3% to +3%</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="size-1.5 bg-bind" aria-hidden />
+        <span className="size-1.5 rounded-full bg-bind" aria-hidden />
         <span>pays a dividend into its multiplier</span>
       </div>
       <div className="flex items-center gap-1.5">
         <span
-          className="size-1.5"
+          className="size-1.5 rounded-full"
           style={{ background: COMPONENT_SLOTS[3] }}
           aria-hidden
         />
-        <span>PreStocks — pre-IPO SPV, not a public equity</span>
+        <span>PreStocks: a pre-IPO SPV, not a public company</span>
       </div>
     </div>
   );

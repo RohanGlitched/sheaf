@@ -15,14 +15,15 @@ export function Figure({
   label: string;
   value: string;
   note: string;
-  tone?: "gain" | "loss" | "gold";
+  /** "gold" is the old name for "bind", kept while other callers move over. */
+  tone?: "gain" | "loss" | "bind" | "gold";
 }) {
   const color =
     tone === "gain"
       ? "var(--color-gain)"
       : tone === "loss"
         ? "var(--color-loss)"
-        : tone === "gold"
+        : tone === "bind" || tone === "gold"
           ? "var(--color-bind)"
           : "var(--color-ink)";
   return (

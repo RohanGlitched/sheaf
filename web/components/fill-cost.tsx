@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Figure } from "./figure";
 import { priceMint } from "@/lib/mirror";
 import { money, percent } from "@/lib/format";
@@ -73,12 +73,32 @@ export function FillCostPanel({
     [components],
   );
 
+  // Open on a number, not on three buttons: quote one share the first time the
+  // section scrolls into view. It is a read, nothing is bought.
+  const root = useRef<HTMLElement>(null);
+  const asked = useRef(false);
+  useEffect(() => {
+    const el = root.current;
+    if (!el || !priceable || asked.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || asked.current) return;
+        asked.current = true;
+        observer.disconnect();
+        void run(1);
+      },
+      { rootMargin: "200px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [priceable, run]);
+
   return (
-    <section className="mt-16 border-t border-line pt-10">
+    <section ref={root} className="mt-16 border-t border-line pt-16">
       <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-5">
         <div className="max-w-[62ch]">
-          <h2 className="display text-xl text-ink">The last mile</h2>
-          <p className="mt-2 text-sm leading-relaxed text-ink-2">
+          <h2 className="display text-title text-ink">What it costs to build a share from dollars</h2>
+          <p className="mt-3 text-sm leading-relaxed text-ink-2">
             Creating shares means handing the vault the components themselves,
             which is what lets the program refuse to trust a price. Somebody
             holding only dollars has to buy those components first, so here is
@@ -95,7 +115,7 @@ export function FillCostPanel({
               onClick={() => void run(size)}
               disabled={loading || !priceable}
               aria-pressed={cost != null && shares === size}
-              className={`border px-3 py-2 transition-colors disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3/50 ${
+              className={`rounded-[var(--radius-control)] border px-3 py-2 transition-colors disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3 ${
                 cost != null && shares === size
                   ? "border-bind/60 bg-bind/10 text-ink"
                   : "border-line text-ink-2 hover:border-line-strong hover:text-ink"
@@ -128,14 +148,14 @@ export function FillCostPanel({
 
       {!loading && !error && !cost && priceable && (
         <p className="mt-7 text-sm text-ink-3">
-          Pick a size to price it. Nothing is bought — this asks for a quote and
+          Pick a size to price it. Nothing is bought: this asks for a quote and
           reads the answer.
         </p>
       )}
 
       {cost && !loading && (
         <>
-          <dl className="mt-7 grid grid-cols-1 gap-px bg-line sm:grid-cols-3">
+          <dl className="mt-7 grid grid-cols-1 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3">
             <Figure
               label={`Buying the components for ${shares === 1 ? "one share" : `${shares} shares`}`}
               value={money(cost.usdcIn)}
@@ -151,7 +171,7 @@ export function FillCostPanel({
               }
             />
             <Figure
-              label="The cost of the last mile"
+              label="The cost of assembling it"
               value={
                 cost.roundTripBps == null
                   ? "—"
@@ -167,14 +187,14 @@ export function FillCostPanel({
               tone={
                 cost.roundTripBps != null && cost.roundTripBps > 100
                   ? "loss"
-                  : "gold"
+                  : "bind"
               }
             />
           </dl>
 
           {/* Six columns of numbers will not fit a phone, so this one scrolls
               sideways. `min-w-0` keeps the scrolling inside the box. */}
-          <div className="mt-6 min-w-0 overflow-x-auto border border-line">
+          <div className="mt-6 min-w-0 overflow-x-auto rounded-[var(--radius-panel)] border border-line bg-surface">
             <table className="w-full border-collapse text-sm sm:min-w-[40rem]">
               <caption className="sr-only">
                 Every component, with the USDC a route would take, how much of the
@@ -258,8 +278,8 @@ export function FillCostPanel({
           </div>
 
           <p className="mt-5 max-w-[80ch] text-xs leading-relaxed text-ink-3">
-            Each component is quoted twice through the same router — dollars in,
-            then straight back out — so the round trip is what a buyer pays to
+            Each component is quoted twice through the same router, dollars in and
+            then straight back out, so the round trip is what a buyer pays to
             hold the component instead of the dollars, measured against itself
             rather than against a price feed that might disagree.
             &ldquo;Fills&rdquo; is how much of the recipe the buy leg covers, which

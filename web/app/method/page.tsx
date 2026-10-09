@@ -20,7 +20,7 @@ import { FeaturedLaunch } from "@/components/launch-market";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Four stages from a list of companies to a token you can trade: an immutable recipe, a Meteora launch market, in-kind creation, and one token to hold.",
+    "Six steps from a list of companies to a token you can hold, buy with dollars, buy every month and trade before it exists. Each one has already happened on devnet and links to the transaction that proves it.",
 };
 
 export const revalidate = 300;
@@ -31,11 +31,39 @@ const EXAMPLE_MINT_TX =
 
 const STAGES = [
   { id: "recipe", title: "Write the recipe" },
-  { id: "market", title: "Open a market" },
   { id: "create", title: "Create shares in kind" },
   { id: "hold", title: "Hold one token" },
-  { id: "dollars", title: "Or pay in dollars" },
+  { id: "dollars", title: "Or buy with dollars" },
   { id: "plans", title: "Then every month" },
+  { id: "market", title: "Open a launch market" },
+];
+
+/** Plainly, what the program cannot promise. */
+const RISKS = [
+  {
+    title: "The issuers keep their own powers",
+    body: "xStocks and PreStocks are Token-2022 mints, and their issuers keep controls over their own tokens: pausing transfers, freezing an account, or a permanent delegate that can move tokens, depending on the mint. Sheaf cannot override them. If an issuer froze or took tokens held in a vault, the shares backed by them would be short. The devnet mirrors copy these extensions on purpose, so the program is tested against them.",
+  },
+  {
+    title: "Not everyone may hold xStocks",
+    body: "xStocks are not offered to US persons and are restricted in some other countries, and PreStocks set their own terms. A basket that holds them inherits those limits, so a mainnet Sheaf would have to check where its users are before letting them in.",
+  },
+  {
+    title: "Devnet is a rehearsal",
+    body: "Prices, multipliers and liquidity are read from mainnet, but every vault today holds devnet mirrors of the real mints, worth nothing. On mainnet the vaults would hold the real tokens, and dollar orders would need fillers buying real xStocks. Today the only filler is Sheaf's own, delivering mirrors.",
+  },
+  {
+    title: "The program is not audited",
+    body: "The program and the EVM contracts have their own test suites, but nobody outside has reviewed them. The upgrade authority is a deploy wallet on devnet. Before it holds real tokens, it moves to a multisig and is then burned, after an audit.",
+  },
+  {
+    title: "A basket of stocks may be a fund",
+    body: "A token backed by a basket of securities can look like a fund or an ETF to a regulator, depending on the country. Sheaf has no license or legal opinion yet. Before mainnet it needs a legal structure or a licensed partner, and may have to limit who can create or hold shares.",
+  },
+  {
+    title: "A launch token is not a share",
+    body: "The launch market's token trades on a curve priced from the basket's value, but it is not redeemable for the stocks, and it can trade far above what the basket holds. Only a basket share is backed.",
+  },
 ];
 
 const GUARANTEES = [
@@ -81,10 +109,10 @@ const GUARANTEES = [
   },
   {
     title: "The same rules on every chain",
-    body: "On Robinhood Chain and Tempo the vault, recipe and cash desk are immutable contracts with verified source, holding Robinhood's own stock tokens where they exist.",
+    body: "On the EVM chains the vault, the recipe and dollar orders are immutable contracts with verified source, holding Robinhood's own stock tokens where they exist.",
   },
   {
-    title: "Check it without us",
+    title: "Verify it yourself",
     body: "Under every backing table are the two RPC calls that reproduce it: the share supply and each vault's balance. If the inequality holds, every share is backed.",
   },
 ];
@@ -114,7 +142,7 @@ function Stage({
       <div className="max-w-[46ch]">
         <p className="flex items-baseline gap-4">
           <span className="display tnum text-5xl text-bind">{n}</span>
-          <span className="text-xs tracking-wide text-ink-3">{on}</span>
+          <span className="text-xs text-ink-3">{on}</span>
         </p>
         <h2 className="display mt-4 text-title text-ink">{title}</h2>
         <div className="mt-5 space-y-4 text-base leading-relaxed text-ink-2">
@@ -176,8 +204,8 @@ function PlanVisual() {
 
 function RecipeVisual({ basket }: { basket: Basket }) {
   return (
-    <div className="border border-line bg-raised">
-      <p className="border-b border-line px-6 py-4 text-sm text-ink-2 rounded-[var(--radius-control)]">
+    <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-raised">
+      <p className="border-b border-line px-6 py-4 text-sm text-ink-2">
         One <span className="text-ink">{basket.symbol}</span> share of{" "}
         {basket.name} is exactly
       </p>
@@ -187,7 +215,7 @@ function RecipeVisual({ basket }: { basket: Basket }) {
           return (
             <li key={component.mint} className="flex items-center gap-4 px-6 py-3.5">
               <span
-                className="size-3 shrink-0"
+                className="size-2 shrink-0 rounded-full"
                 style={{ background: slotColor(i) }}
                 aria-hidden
               />
@@ -205,7 +233,7 @@ function RecipeVisual({ basket }: { basket: Basket }) {
           );
         })}
       </ul>
-      <p className="border-t border-line px-6 py-4 text-xs text-ink-3 rounded-[var(--radius-control)]">
+      <p className="border-t border-line px-6 py-4 text-xs text-ink-3">
         Stored as raw units in a program account. No instruction can change it.
       </p>
     </div>
@@ -219,7 +247,7 @@ function CreateVisual({ basket }: { basket: Basket | null }) {
   const share = basket?.symbol ?? "share";
   const fee = basket ? basket.creatorFeeBps / 100 : 0.5;
 
-  const box = "border border-line bg-raised px-4 py-4";
+  const box = "rounded-[var(--radius-control)] border border-line bg-raised px-4 py-4";
   return (
     <div className="space-y-3">
       <div className="grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
@@ -277,8 +305,8 @@ function HoldVisual({ basket }: { basket: Basket | null }) {
     ["Dividends", "raise the components' multiplier, so the vault grows"],
   ];
   return (
-    <div className="border border-line bg-raised">
-      <p className="border-b border-line px-6 py-4 text-sm text-ink-2 rounded-[var(--radius-control)]">
+    <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-raised">
+      <p className="border-b border-line px-6 py-4 text-sm text-ink-2">
         What a {basket?.symbol ?? "share"} token is
         {basket && (
           <>
@@ -310,13 +338,14 @@ export default async function MethodPage() {
   const basket = await fetchBasketAt(EXAMPLE);
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-12 sm:px-8">
+    <div className="mx-auto max-w-[1400px] px-5 py-12 sm:px-8">
       <header className="max-w-[62ch]">
         <h1 className="display text-hero leading-[0.95] text-ink">How it works</h1>
         <p className="mt-6 text-lg leading-[1.65] text-ink-2">
-          Four stages turn a list of companies into a token you can trade. Every
-          one has already happened on {WRITE_CLUSTER}, and each links to the
-          account or transaction that proves it. The running example is{" "}
+          Six steps take a list of companies to a token you can hold, buy with
+          dollars, buy every month and trade before it exists. Each one has
+          already happened on {WRITE_CLUSTER} and links to the transaction or
+          account that proves it. The running example is{" "}
           <Link
             href={`/basket/${EXAMPLE}`}
             className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
@@ -327,7 +356,7 @@ export default async function MethodPage() {
         </p>
       </header>
 
-      <nav aria-label="Stages" className="mt-10 grid gap-px bg-line sm:grid-cols-4">
+      <nav aria-label="Steps" className="mt-10 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
         {STAGES.map((stage, i) => (
           <a
             key={stage.id}
@@ -371,43 +400,6 @@ export default async function MethodPage() {
 
         <Stage
           n={2}
-          id="market"
-          title="Open a market"
-          on="Meteora Dynamic Bonding Curve"
-          proof={{ label: "The pool on Explorer", href: explorerAddress(DBC.pool) }}
-          visual={<FeaturedLaunch />}
-        >
-          <p>
-            A new basket has no holders yet, and nobody wants to be first to
-            assemble every component. So a bonding curve opens in front of it, and
-            people can buy in before the first share exists.
-          </p>
-          <p>
-            The curve is set from the basket&rsquo;s own NAV rather than round
-            numbers. It opens at half of it and graduates at twenty times it into a
-            Meteora DAMM v2 pool with all liquidity locked. The fee starts at 4% to
-            deter snipers and settles at 1% within the hour.
-          </p>
-          <p>
-            The shape is ours. Four segments, weighted so the curve opens on a
-            shelf: the first fifth of the SOL raised moves the price less than a
-            quarter above the open, and half the raise is in before the price
-            reaches a sixth of graduation. A basket is not a meme, and its
-            early buyers should not be racing each other.
-          </p>
-          <p>
-            The basket&rsquo;s creator opens it from the basket page in one
-            signature and earns half of the curve&rsquo;s trading fees; Sheaf
-            earns the other half. The pool&rsquo;s address is derived from the
-            basket&rsquo;s, so every basket has exactly one launch and anyone can
-            find it. When the curve fills, anyone can graduate it from the same
-            page, and the same card keeps buying and selling, on the DAMM v2
-            pool instead of the curve.
-          </p>
-        </Stage>
-
-        <Stage
-          n={3}
           id="create"
           title="Create shares in kind"
           on="Token-2022 vault · mint_shares, redeem_shares"
@@ -427,7 +419,7 @@ export default async function MethodPage() {
         </Stage>
 
         <Stage
-          n={4}
+          n={3}
           id="hold"
           title="Hold one token"
           on="Any Solana wallet"
@@ -457,10 +449,10 @@ export default async function MethodPage() {
         </Stage>
 
         <Stage
-          n={5}
+          n={4}
           id="dollars"
-          title="Or pay in dollars"
-          on="Filler auction"
+          title="Or buy with dollars"
+          on="Dollar order"
           visual={<AuctionVisual />}
         >
           <p>
@@ -472,15 +464,15 @@ export default async function MethodPage() {
             Anyone can fill it by delivering the stocks the recipe names at the current count. The vault
             receives them exactly as in a creation, the buyer receives the shares, and the filler takes the
             dollars. Fillers compete on timing, so the price is the market&apos;s and no oracle is read. If
-            nobody fills, the dollars go back.
+            nobody fills in time, the order can be cancelled and the dollars go back to the buyer.
           </p>
         </Stage>
 
         <Stage
-          n={6}
+          n={5}
           id="plans"
           title="Then every month"
-          on="Monthly plans"
+          on="Monthly plan"
           visual={<PlanVisual />}
         >
           <p>
@@ -493,15 +485,75 @@ export default async function MethodPage() {
             next month starts from where this month landed, without an oracle.
           </p>
         </Stage>
+        <Stage
+          n={6}
+          id="market"
+          title="Open a launch market"
+          on="Launch market"
+          proof={{ label: "The pool on Explorer", href: explorerAddress(DBC.pool) }}
+          visual={<FeaturedLaunch />}
+        >
+          <p>
+            A new basket has no holders yet, and nobody wants to be first to
+            assemble every component. So a bonding curve can open in front of it,
+            and people can buy in before the first share exists. The launch token
+            is its own market: it is not redeemable for the stocks, and only a
+            basket share is backed.
+          </p>
+          <p>
+            The curve is set from the basket&rsquo;s own value per share (its
+            NAV) rather than round numbers. It opens at half of it and, at twenty
+            times it, moves into a permanent Meteora pool with all liquidity
+            locked. The fee starts at 4% to deter snipers and settles at 1% within
+            the hour.
+          </p>
+          <p>
+            The shape is ours. Four segments, weighted so the curve opens on a
+            shelf: the first fifth of the SOL raised moves the price less than a
+            quarter above the open, and half the raise is in before the price
+            reaches a sixth of graduation. A basket is not a meme, and its
+            early buyers should not be racing each other.
+          </p>
+          <p>
+            The basket&rsquo;s creator opens it from the basket page in one
+            signature and earns half of the curve&rsquo;s trading fees; Sheaf
+            earns the other half. The pool&rsquo;s address is derived from the
+            basket&rsquo;s, so every basket has exactly one launch and anyone can
+            find it. When the curve fills, anyone can move it into the permanent
+            pool from the same page, and the same card keeps buying and selling
+            there instead of on the curve.
+          </p>
+        </Stage>
+
       </div>
 
       <section className="border-t border-line py-16">
         <h2 className="display text-title max-w-[24ch] text-ink">
           Why nobody has to trust the creator, or us
         </h2>
-        <ul className="mt-10 grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-10 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
           {GUARANTEES.map((item) => (
             <li key={item.title} className="bg-page p-7">
+              <h3 className="display text-lg text-ink">{item.title}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-ink-2">{item.body}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section id="risks" className="scroll-mt-24 border-t border-line py-16">
+        <div className="max-w-[56ch]">
+          <h2 className="display text-title text-ink">What could still go wrong</h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
+            The program can promise that a vault never holds less than its shares
+            claim. It cannot promise anything about the tokens it holds, the
+            people allowed to hold them, or the law. These are the limits, in
+            plain words.
+          </p>
+        </div>
+        <ul className="mt-10 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+          {RISKS.map((item) => (
+            <li key={item.title} className="bg-surface p-7">
               <h3 className="display text-lg text-ink">{item.title}</h3>
               <p className="mt-3 text-sm leading-relaxed text-ink-2">{item.body}</p>
             </li>
@@ -539,7 +591,7 @@ export default async function MethodPage() {
           </p>
         </div>
         <div className="self-center">
-          <dl className="divide-y divide-line border border-line text-sm">
+          <dl className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface text-sm">
             {[
               ["Components per basket", `1 to ${MAX_COMPONENTS}`],
               ["Share decimals", String(SHARE_DECIMALS)],
@@ -548,8 +600,9 @@ export default async function MethodPage() {
               ["Redemptions", "round down"],
               ["Oracles used", "none"],
               ["Recipe after creation", "immutable"],
-              ["Launch market", "Meteora DBC"],
-              ["Sheaf's revenue", "half of every launch curve's trading fees"],
+              ["Creator's income", `up to ${MAX_CREATOR_FEE_BPS / 100}% of each creation, in shares`],
+              ["Sheaf's income", "the house filler's spread, then launch-market fees"],
+              ["Launch market", "Meteora bonding curve"],
             ].map(([term, value]) => (
               <div key={term} className="flex items-baseline justify-between gap-4 px-4 py-3">
                 <dt className="text-ink-3">{term}</dt>
@@ -559,7 +612,7 @@ export default async function MethodPage() {
           </dl>
           <Link
             href="/compose"
-            className="mt-6 inline-block border border-bind bg-bind px-5 py-3 text-sm text-page transition-colors hover:bg-bind-deep rounded-[var(--radius-control)]"
+            className="mt-6 inline-block rounded-[var(--radius-control)] bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
           >
             Create a basket
           </Link>

@@ -36,7 +36,7 @@ export function BasketCard({ basket, launched = false }: { basket: Basket; launc
   return (
     <Link
       href={`/basket/${basket.address}`}
-      className="group lift block border border-line bg-surface hover:border-line-strong"
+      className="group lift block overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface hover:border-line-strong"
     >
       <div className="flex items-baseline justify-between gap-3 px-5 pt-5">
         <div className="min-w-0">
@@ -79,7 +79,7 @@ export function BasketCard({ basket, launched = false }: { basket: Basket; launc
         <BasketMosaic tiles={tiles} height={132} />
       </div>
 
-      <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4 text-xs rounded-[var(--radius-control)]">
+      <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4 text-xs">
         <div>
           <dt className="text-ink-3">Past year</dt>
           <dd className="tnum mt-0.5 text-ink-2">

@@ -4,10 +4,10 @@ import { EVM_CHAINS } from "@/lib/chains";
 /** Where Sheaf runs, at a glance. The full page reads every vault live. */
 export function HomeChains() {
   const rows = [
-    { name: "Solana", note: "Home: the program, launch markets, dollar orders and plans", live: true },
+    { name: "Solana", note: "Home: the program, dollar orders, monthly plans and launch markets", live: true },
     ...EVM_CHAINS.map((c) => ({
       name: c.name,
-      note: c.deployment ? c.why : c.why,
+      note: c.why,
       live: !!c.deployment,
     })),
   ];
@@ -17,10 +17,10 @@ export function HomeChains() {
         <h2 className="display text-title max-w-[16ch] text-ink">Everywhere stocks are tokenized.</h2>
         <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-ink-2">
           Tokenized stocks are spreading across chains, and so is Sheaf: the same recipe that can never change, the
-          same vault nobody can drain and the same dollar desk, written natively for each one.
+          same vault nobody can drain and the same dollar orders, written natively for each one.
         </p>
         <Link href="/chains" className="mt-8 inline-flex rounded-[var(--radius-control)] border border-line-strong bg-surface px-5 py-3 text-sm text-ink hover:border-ink-3">
-          Every chain, read live
+          See every chain
         </Link>
       </div>
       <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">

@@ -199,7 +199,7 @@ function Loaded({
           <BasketMosaic tiles={tiles} height={260} />
         </div>
 
-        <dl className="mt-6 grid grid-cols-2 gap-px bg-line sm:grid-cols-4">
+        <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-4">
           {/* The hero already prints the price of one share, so this slot carries
               the size of the whole thing instead. */}
           <Figure
@@ -228,20 +228,21 @@ function Loaded({
                   : "The tokens trade below the shares behind them"
             }
             tone={
-              valuation.premiumBps == null
+              /* The same rule as the home page: a premium in teal, a discount in rust. */
+              valuation.premiumBps == null || Math.abs(valuation.premiumBps) < 0.5
                 ? undefined
                 : valuation.premiumBps > 0
-                  ? "loss"
-                  : "gain"
+                  ? "gain"
+                  : "loss"
             }
           />
           <Figure
             label="Dividends inside"
             value={percent(valuation.accruedSharePct)}
-            note="Share of the value that is dividends already paid on chain"
+            note="Share of the value that is dividends already paid onchain"
             tone={
               valuation.accruedSharePct && valuation.accruedSharePct > 0.005
-                ? "gold"
+                ? "bind"
                 : undefined
             }
           />
@@ -287,7 +288,7 @@ function Loaded({
 
       <BasketLaunch basket={basket} navUsd={valuation.nav} />
 
-      <section className="mt-20 border-t border-line pt-16">
+      <section id="predict" className="mt-20 scroll-mt-24 border-t border-line pt-16">
         <BasketPredict basket={basket.address} name={basket.name} symbol={basket.symbol} creator={basket.creator} />
       </section>
 
@@ -348,7 +349,7 @@ function Composition({
       {/* The market price of one component is the least useful column here — the
           value it produces is right beside it — so a narrow screen drops that and
           the company name rather than scrolling sideways. */}
-      <div className="mt-7 min-w-0 overflow-x-auto border border-line">
+      <div className="mt-7 min-w-0 overflow-x-auto rounded-[var(--radius-panel)] border border-line bg-surface">
         <table className="w-full border-collapse text-sm sm:min-w-[34rem]">
           <thead>
             <tr className="border-b border-line text-left text-xs text-ink-3">
@@ -370,7 +371,7 @@ function Composition({
                   <div className="flex items-center gap-2.5 sm:gap-3">
                     <span
                       aria-hidden
-                      className="size-2.5 shrink-0"
+                      className="size-2.5 shrink-0 rounded-full"
                       style={{ background: slotColor(c.slot) }}
                     />
                     <span>
@@ -485,7 +486,7 @@ function Backing({
               : "A vault is short. Do not create more shares."}
           </div>
 
-          <div className="mt-5 min-w-0 overflow-x-auto border border-line">
+          <div className="mt-5 min-w-0 overflow-x-auto rounded-[var(--radius-panel)] border border-line bg-surface">
             <table className="w-full border-collapse text-sm sm:min-w-[26rem]">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-ink-3">
@@ -580,9 +581,9 @@ function Proof({ basket }: { basket: Basket }) {
   };
 
   return (
-    <details className="mt-7 border border-line">
+    <details className="mt-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
       <summary className="cursor-pointer px-4 py-3 text-sm text-ink-2 marker:text-bind hover:text-ink">
-        Check it without this page
+        Verify it yourself
       </summary>
       <div className="space-y-4 border-t border-line px-4 py-4 text-sm leading-relaxed text-ink-2 rounded-[var(--radius-control)]">
         <p>
@@ -624,7 +625,7 @@ function Command({
 }) {
   return (
     <div className="relative">
-      <pre className="overflow-x-auto border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed text-ink-2 rounded-[var(--radius-panel)]">
+      <pre className="overflow-x-auto rounded-[var(--radius-control)] border border-line bg-page px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
         <code>{text}</code>
       </pre>
       <button
@@ -643,9 +644,9 @@ function Command({
 type Mode = "create" | "redeem" | "cash" | "plan";
 
 const TABS: { mode: Mode; label: string }[] = [
-  { mode: "cash", label: "With dollars" },
-  { mode: "plan", label: "Monthly" },
-  { mode: "create", label: "In kind" },
+  { mode: "cash", label: "Buy with dollars" },
+  { mode: "plan", label: "Monthly plan" },
+  { mode: "create", label: "Create in kind" },
   { mode: "redeem", label: "Redeem" },
 ];
 
@@ -762,7 +763,7 @@ function TradePanel({
                 setSignature(null);
                 setError(null);
               }}
-              className={`rounded-[8px] px-2 py-2 text-[13px] transition-all ${
+              className={`rounded-[calc(var(--radius-control)-2px)] px-1.5 py-2 text-[13px] leading-tight transition-all ${
                 mode === tab.mode ? "bg-surface text-ink shadow-[0_1px_3px_rgb(20_37_28/0.15)]" : "text-ink-3 hover:text-ink"
               }`}
             >

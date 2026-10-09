@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Wordmark } from "./mark";
@@ -7,7 +8,7 @@ import { MarketClock } from "./market-clock";
 import { ConnectButton } from "./connect-button";
 
 const NAV = [
-  { href: "/compose", label: "Create" },
+  { href: "/compose", label: "Create", long: "Create a basket" },
   { href: "/explore", label: "Explore" },
   { href: "/plans", label: "Plans" },
   { href: "/chains", label: "Chains" },
@@ -18,6 +19,30 @@ const NAV = [
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const strip = useRef<HTMLElement>(null);
+  const [atEnd, setAtEnd] = useState(false);
+
+  /* On a phone the destinations scroll sideways. Bring the current one into
+     view, and fade the right edge while there is more to scroll to, so the
+     last two never look like they are missing. */
+  useEffect(() => {
+    const nav = strip.current;
+    if (!nav) return;
+    const current = nav.querySelector<HTMLElement>('[aria-current="page"]');
+    if (current) {
+      nav.scrollLeft = current.offsetLeft - (nav.clientWidth - current.clientWidth) / 2;
+    }
+    const check = () => setAtEnd(nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
+    check();
+    nav.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      nav.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, [pathname]);
+
+  const fade = atEnd ? undefined : "linear-gradient(to right, black 82%, transparent)";
 
   return (
     /* Pinned on a laptop, where the market clock and the wallet are worth keeping
@@ -38,13 +63,20 @@ export function SiteHeader() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`px-3 py-1.5 text-sm transition-colors ${
+                className={`whitespace-nowrap px-3 py-1.5 text-sm transition-colors ${
                   active
                     ? "text-ink"
                     : "text-ink-2 hover:text-ink"
                 }`}
               >
-                {item.label}
+                {item.long ? (
+                  <>
+                    <span className="xl:hidden">{item.label}</span>
+                    <span className="hidden xl:inline">{item.long}</span>
+                  </>
+                ) : (
+                  item.label
+                )}
                 {active && (
                   <span className="mt-1 block h-px bg-bind" aria-hidden />
                 )}
@@ -62,7 +94,11 @@ export function SiteHeader() {
       </div>
 
       {/* The same destinations, laid as tiles across the full width. */}
-      <nav className="flex overflow-x-auto border-t border-line text-sm [scrollbar-width:none] sm:hidden">
+      <nav
+        ref={strip}
+        className="flex overflow-x-auto border-t border-line text-sm [scrollbar-width:none] sm:hidden"
+        style={{ maskImage: fade, WebkitMaskImage: fade }}
+      >
         {NAV.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -75,7 +111,7 @@ export function SiteHeader() {
                 active ? "bg-raised text-ink" : "text-ink-2"
               }`}
             >
-              {item.label}
+              {item.long ?? item.label}
               {active && (
                 <span className="mx-auto mt-1 block h-px w-6 bg-bind" aria-hidden />
               )}
