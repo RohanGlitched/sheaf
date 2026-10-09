@@ -49,7 +49,7 @@ for (const c of cases) {
   const bytes = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).length;
   const ok = bytes <= LIMIT;
   if (!ok) failures++;
-  console.log(`${ok ? "ok  " : "FAIL"} ${bytes} / ${LIMIT} bytes  name "${c.name.slice(0, 32)}"  uri ${launchUri(basket.address).length} chars`);
+  console.log(`${ok ? "ok  " : "FAIL"} ${bytes} / ${LIMIT} bytes  name "${c.name.slice(0, 32)}"  uri ${launchUri(basket.address, 3).length} chars`);
 }
 if (failures) {
   console.error(`${failures} launch transaction(s) over ${LIMIT} bytes.`);

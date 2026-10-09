@@ -1,6 +1,6 @@
 // Deploys the v3 pair next to v1 and v2 and records it under "v3" in
 // deployments/<network>.json: a CreationDeskV2 (the same audited-by-tests auction
-// desk) whose immutable treasury is a separate cold key, and PlanDeskV3 (trailing
+// desk) whose immutable treasury is a separate key the founder holds, and PlanDeskV3 (trailing
 // bounds under the owner's hard floor, and an owner recenter) on top of it.
 // v1 and v2 are untouched and keep working.
 //

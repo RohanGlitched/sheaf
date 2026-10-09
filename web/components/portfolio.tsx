@@ -337,6 +337,9 @@ export function Portfolio() {
             </div>
           </section>
         )}
+
+        {/* Predictions without a wallet: what the section reads, and a one-click browser wallet. */}
+        <PantaPositions />
       </div>
     );
   }

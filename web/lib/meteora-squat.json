@@ -39,5 +39,16 @@
     "deviationPct": 98.97,
     "note": "Opened by the basket's own creator (the house key) on the exact v2 terms with every price doubled. The creator and terms checks pass; the anchor check rejects it, and the basket's real launch stays slot 0.",
     "at": "2026-10-09T14:54:29.572Z"
+  },
+  "squatExact": {
+    "slot": 2,
+    "basket": "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",
+    "squatter": "7gVxJVLpSZpuuPQ8uaJs7S98NRvj5hMs1h1S9Hr1Y4CT",
+    "pool": "Ew3Uh2P1Xhn27d44hdrvCatXDJR1XU6PdzeFiE3zDhCM",
+    "signature": "4dza5yaR29kbSoDtkbWYhtMhjx6fVMxNnAWS6mRrnk62cJYY4sauBCU8jvMxhXKqWrBL53StERSwv3swjgWktS5U",
+    "costSol": 0.01460476,
+    "reason": "It was not opened by the basket's creator.",
+    "note": "Opened by a key that is not the basket's creator (our own lifecycle wallet 1, playing a stranger) on the exact v2 terms at the real launch's prices, with the per-slot metadata URL. The terms pass; the creator check alone refuses it.",
+    "at": "2026-10-09T17:11:44.296Z"
   }
 }

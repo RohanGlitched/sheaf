@@ -7,7 +7,7 @@ import { money, plural, quantity } from "./format";
  * Each line links to the newest transaction behind it.
  */
 
-export type Deed = { text: string; signature: string; time: number };
+export type Deed = { text: string; signature: string; time: number; /** A link other than the Solana Explorer transaction, e.g. an EVM explorer page. */ url?: string };
 
 /** Every wallet's events, grouped once so each card is a lookup. */
 export function byActor(entries: LedgerEntry[]): Map<string, LedgerEntry[]> {

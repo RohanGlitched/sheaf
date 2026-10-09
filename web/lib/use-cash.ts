@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { faucetRequest } from "@/components/faucet-button";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { CASH_MINT, CASH_DECIMALS, CASH_TOKEN_PROGRAM } from "./cash.generated";
@@ -39,11 +40,7 @@ export function useCash() {
     setClaiming(true);
     setError(null);
     try {
-      const res = await fetch("/api/faucet", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ owner: publicKey.toBase58(), symbols: ["USDC"] }),
-      });
+      const res = await fetch("/api/faucet", faucetRequest({ owner: publicKey.toBase58(), symbols: ["USDC"] }, { basket: true }));
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error ?? "The faucet did not answer.");
       await load();

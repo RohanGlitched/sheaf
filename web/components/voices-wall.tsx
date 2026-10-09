@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import bs58 from "bs58";
+import { hexToBytes, verifyMessage, type Address, type Hex } from "viem";
+import { chainCard } from "@/lib/chains";
 import { SheafMark, type Stalk } from "@/components/sheaf-mark";
 import { explorerAddress, explorerTx } from "@/lib/config";
 import { shortAddress, timeAgo } from "@/lib/format";
 import { slotColor } from "@/lib/palette";
 import type { Deed } from "@/lib/voices-activity";
-import { handleText, PLATFORMS, profileUrl, voiceMessage, WALLET_KIND_LABEL, type Voice } from "@/lib/voices-message";
+import { chainOf, handleText, PLATFORMS, profileUrl, voiceMessage, WALLET_KIND_LABEL, type Voice } from "@/lib/voices-message";
 
 /**
  * One signed name: who, what they said, what their wallet did on Sheaf, and the
@@ -19,7 +21,7 @@ import { handleText, PLATFORMS, profileUrl, voiceMessage, WALLET_KIND_LABEL, typ
 function walletStalks(wallet: string): Stalk[] {
   let bytes: Uint8Array;
   try {
-    bytes = bs58.decode(wallet);
+    bytes = wallet.startsWith("0x") ? hexToBytes(wallet as Hex) : bs58.decode(wallet);
   } catch {
     bytes = new Uint8Array(32);
   }
@@ -36,6 +38,15 @@ type Check = { state: "idle" } | { state: "checking" } | { state: "ok" } | { sta
 async function checkInBrowser(v: Voice): Promise<Check> {
   // The message must say exactly what the card shows, or a valid signature would prove something else.
   if (voiceMessage(v) !== v.message) return { state: "bad", why: "The signed message doesn't match what this card shows." };
+  if (chainOf(v.wallet) === "evm") {
+    // EIP-191 personal_sign: recover the signer from the signature and compare it with the address.
+    try {
+      const ok = await verifyMessage({ address: v.wallet as Address, message: v.message, signature: v.signature as Hex });
+      return ok ? { state: "ok" } : { state: "bad", why: "The signature does not match this address and message." };
+    } catch {
+      return { state: "bad", why: "The signature could not be read." };
+    }
+  }
   let key: CryptoKey;
   try {
     key = await crypto.subtle.importKey("raw", bs58.decode(v.wallet) as BufferSource, { name: "Ed25519" }, false, ["verify"]);
@@ -128,7 +139,14 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
   const p = PLATFORMS[voice.platform];
   const signedAt = Date.parse(voice.at) / 1000;
   // The ledger's events, plus the server's stored proof when the ledger doesn't carry it (a launch-pool swap, or an older event).
-  const proofDeed: Deed | null = voice.proof ? { text: voice.proof.text, signature: voice.proof.signature, time: voice.proof.time ?? 0 } : null;
+  const proofDeed: Deed | null = voice.proof
+    ? { text: voice.proof.text, signature: voice.proof.signature, time: voice.proof.time ?? 0, url: voice.proof.url }
+    : null;
+  const evm = chainOf(voice.wallet) === "evm";
+  const chainLabel = evm ? (chainCard(voice.proof?.network ?? "")?.name ?? "EVM") : "Solana";
+  const walletHref = evm ? voice.proof?.walletUrl : explorerAddress(voice.wallet);
+  // The Solana ledger says nothing about an EVM address; its proof is all there is to show.
+  const ledgerState = evm ? "ready" : ledger;
   const ledgerDeeds = deeds ?? [];
   const shownDeeds =
     proofDeed && (voice.proof?.kind === "launch" || ledgerDeeds.length === 0) ? [proofDeed, ...ledgerDeeds.filter((d) => d.signature !== proofDeed.signature)] : ledgerDeeds;
@@ -163,7 +181,11 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
             )}
             {voice.walletKind && (
               <span
-                title={voice.walletKind === "browser" ? "Signed from the keypair Sheaf keeps in the browser, as the signing page reported" : "Signed from an extension or wallet app, as the signing page reported"}
+                title={
+                  voice.walletKind === "browser"
+                    ? "Signed from the key Sheaf keeps in this browser, made with one click and funded by Sheaf's test faucet, as the signing page reported"
+                    : "Signed from an extension or wallet app the person installed, as the signing page reported"
+                }
                 className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-3"
               >
                 {WALLET_KIND_LABEL[voice.walletKind]}
@@ -173,9 +195,15 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
           <p className="tnum mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
             <span>{p.label}</span>
             <span aria-hidden>·</span>
-            <a href={explorerAddress(voice.wallet)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
-              {shortAddress(voice.wallet)}
-            </a>
+            <span>{chainLabel}</span>
+            <span aria-hidden>·</span>
+            {walletHref ? (
+              <a href={walletHref} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+                {shortAddress(voice.wallet, evm ? 6 : 4, 4)}
+              </a>
+            ) : (
+              <span className="text-ink-2">{shortAddress(voice.wallet, evm ? 6 : 4, 4)}</span>
+            )}
             <span aria-hidden>·</span>
             <time dateTime={voice.at} title={voice.at}>
               signed {Number.isFinite(signedAt) ? timeAgo(signedAt) : voice.date}
@@ -196,16 +224,16 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
 
       <div className="mt-5 flex-1">
         <p className="text-xs text-ink-3">On Sheaf, read from the chain</p>
-        {ledger === "loading" && shownDeeds.length === 0 ? (
+        {ledgerState === "loading" && shownDeeds.length === 0 ? (
           <p className="skeleton mt-2 h-4 w-3/4 rounded" aria-label="Reading the ledger" />
-        ) : ledger === "failed" && shownDeeds.length === 0 ? (
+        ) : ledgerState === "failed" && shownDeeds.length === 0 ? (
           <p className="mt-2 text-sm text-ink-3">The ledger didn&rsquo;t answer; the wallet link above shows its transactions.</p>
         ) : shownDeeds.length > 0 ? (
           <ul className="mt-2 space-y-1.5 text-sm text-ink-2">
             {shownDeeds.slice(0, 5).map((d) => (
               <li key={d.text} className="flex items-baseline gap-2">
                 <span aria-hidden className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-gain" />
-                <a href={explorerTx(d.signature)} target="_blank" rel="noreferrer" className="hover:text-ink hover:underline hover:decoration-line-strong hover:underline-offset-4">
+                <a href={d.url ?? explorerTx(d.signature)} target="_blank" rel="noreferrer" className="hover:text-ink hover:underline hover:decoration-line-strong hover:underline-offset-4">
                   {d.text}
                 </a>
               </li>

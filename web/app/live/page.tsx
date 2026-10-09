@@ -56,8 +56,10 @@ export default function LivePage() {
         </p>
       </section>
 
+      {/* The hero above already says what this is, so the tape drops its own heading column
+          (hideIntro) and runs full width with its source line, slot included, shown once. */}
       <section className="border-t border-line pt-12">
-        <LiveTape openDetails />
+        <LiveTape openDetails hideIntro />
       </section>
 
       <section className="mt-20 border-t border-line pt-12">

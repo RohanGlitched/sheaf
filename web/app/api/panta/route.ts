@@ -22,14 +22,19 @@ import { fetchBasketAt } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
 import { HISTORY_SYMBOLS } from "@/lib/history";
 
-/** Holdings with no listed price history (pre-IPO), or null when there is no basket at the address. */
-async function unlistedHoldings(address: string): Promise<string[] | null> {
+/**
+ * The basket as the chain has it: its own name and symbol (never the request's),
+ * and the holdings with no listed price history (pre-IPO). Null when there is
+ * no basket at the address.
+ */
+async function basketOnChain(address: string): Promise<{ name: string; symbol: string; unlisted: string[] } | null> {
   const basket = await fetchBasketAt(address).catch(() => null);
   if (!basket) return null;
-  return basket.components
+  const unlisted = basket.components
     .map((c) => stockForWriteMint(c.mint)?.base ?? null)
     .filter((base) => !base || !HISTORY_SYMBOLS.includes(base))
     .map((base) => base ?? "an unknown token");
+  return { name: basket.name, symbol: basket.symbol, unlisted };
 }
 
 /**
@@ -37,7 +42,7 @@ async function unlistedHoldings(address: string): Promise<string[] | null> {
  *
  * POST /api/panta { kind, ... } runs one step of a Panta flow:
  *
- *   create-quote     { wallet, basket, name, symbol }   POST /markets/create/quote/
+ *   create-quote     { wallet, basket }   POST /markets/create/quote/  (name and symbol are read from the basket)
  *   create-build     { wallet, createId }               POST /markets/create/build/
  *   create-register  { createId, signature }            POST /markets/register/
  *   buy-quote        { wallet, marketId, side, amountUsdc }  POST /primaryorderquote/
@@ -130,19 +135,20 @@ export async function POST(req: Request) {
     switch (kind) {
       case "create-quote": {
         const basket = need(body, "basket", BASE58, "Unknown basket.");
-        const name = String(body.name ?? "").slice(0, 40).trim();
-        const symbol = String(body.symbol ?? "").slice(0, 10).trim();
-        if (!name || !symbol) throw new BadRequest("Name the basket.");
+        // Name and symbol come from the basket account, never from the request:
+        // a market's title, question and rule must describe the basket whose
+        // numbers it resolves from. Any name or symbol in the body is ignored.
+        const onChain = await basketOnChain(basket);
+        if (onChain == null) throw new BadRequest("Unknown basket.");
         // The rule resolves from navPerShare.listed at two closes; a basket with a
         // pre-IPO holding has no listed history, so no market is drafted for it.
-        const unlisted = await unlistedHoldings(basket);
-        if (unlisted == null) throw new BadRequest("Unknown basket.");
+        const { unlisted } = onChain;
         if (unlisted.length) {
           throw new BadRequest(
             `No market is offered on this basket: ${unlisted.join(", ")} ha${unlisted.length === 1 ? "s" : "ve"} no listed price history (pre-IPO), so the value the rule reads at a close does not exist.`,
           );
         }
-        out = await quoteBasketMarket({ wallet: wallet!, basket, name, symbol });
+        out = await quoteBasketMarket({ wallet: wallet!, basket, name: onChain.name, symbol: onChain.symbol });
         break;
       }
       case "create-build":

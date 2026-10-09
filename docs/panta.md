@@ -8,27 +8,43 @@ The market resolves from a number anyone can recompute: one share's value at two
 
 The rule is built in one place (`web/lib/panta-window.ts`) and used by the market draft, the NAV route and the pages, so they cannot disagree.
 
-- **Window.** `startTime` is when trading opens: two hours out (Panta requires at least one). The measured week starts at the **first Friday US regular-session close (16:00 New York) at or after `startTime`**, and ends at the Friday close a week later, which is Panta's `endTime`. Nothing of the measured week is known when the first share is bought. A market opened on a Thursday waits for Friday's close; one opened on a Saturday waits six days. An earlier version ended at the first Friday at least a day out and measured from the Friday before, so a market opened midweek already knew most of its week; that is fixed. `resolutionTime` is two hours after the second close, once that close is final in Sheaf's history.
+- **Window.** `startTime` is when trading opens: two hours out (Panta requires at least one). The measured week runs between two **week-ending NYSE closes**: the first one at or after `startTime`, and the next week's, which is Panta's `endTime`. Nothing of the measured week is known when the first share is bought, and trading stops the moment the week is decided. `resolutionTime` is two hours after the second close, once that close is final in Sheaf's history.
+- **Real sessions, not "Friday 16:00".** A week-ending close is the last regular-session close on or before that Friday, from the exchange calendar. Sheaf uses the schedule Pyth publishes for SPY (`web/lib/universe.ts`, parsed by `web/lib/clock.ts`), with dated holidays and early closes. So:
+  - Christmas (Fri Dec 25, 2026) ends its week at Thursday Dec 24's 13:00 early close.
+  - New Year (Fri Jan 1, 2027) ends its week at Thu Dec 31, 16:00.
+  - Thanksgiving Friday (Nov 27, 2026) ends at 13:00.
+  - Good Friday (Mar 26, 2027) ends its week at Thu Mar 25, 16:00.
+  - A market opened after a holiday week's Thursday close starts a week later.
+  
+  `node scripts/panta-window-test.mjs` checks all of these: 10 cases, all passing. The dated overrides cover Sept 2026 to Sept 2027. Re-run `scripts/gen-universe.mjs` to extend them.
+- **History.** An earlier version ended at the first Friday at least a day out and measured from the Friday before. A market opened midweek then already knew most of its week, and on a holiday Friday trading ran on after Thursday's close had decided it. Both are fixed.
 - **When to read.** Both `?at=` URLs are read at or after `resolutionTime`. The rule says so, because Yahoo re-adjusts past closes after an ex-dividend date. Read at the same time, both closes use the same adjustment. `?at=` answers are cached for an hour, not a day, for the same reason.
 - **Which baskets.** Only baskets whose every holding has a listed close. A basket holding a pre-IPO company (FRNTR holds Anthropic, OpenAI, SpaceX and Anduril) has no `navPerShare.listed`, so no market is offered on it:
   - `/api/nav` answers `resolution: { offered: false, reason }`.
   - The basket page shows "No market on FRNTR" in place of the Panta flow.
   - `/predict` marks the row.
   - `POST /api/panta {kind: "create-quote"}` refuses with a 400.
-- **Holidays.** If a Friday is a market holiday, the last close before it is used. The JSON reports the day actually used as `closeDay`.
+- **The day used.** The JSON reports the trading day each close came from as `closeDay`.
 - **Numbers.** YES if `navPerShare.listed` at the later close divided by `navPerShare.listed` at the earlier close is greater than `spy.adjClose` divided the same way. Both values come from `/api/nav/<basket>?at=<unix>`. NO otherwise, including a tie.
 - **What `navPerShare.listed` means at a close.** The sum over components of `unitsPerShare / 10^decimals` x the listed share's adjusted close x the mint's multiplier today. Adjusted closes reinvest dividends, as the multiplier does, so the ratio between two closes is the share's total return. SPY's `adjClose` is on the same basis.
+- **The recipe is in the rule.** The basket lives on Solana devnet today, so the rule and the market description carry the units per share themselves. A resolver can recompute the answer from public closes and mainnet multipliers even if the devnet account is reset.
+- **Times.** Every time `/predict` shows is New York time, labeled as such. The rule gives each close in New York time and in UTC.
 
-The rule as sent to Panta, for BIG5 opened on Oct 9, 2026:
+The rule as sent to Panta, for BIG5 opened on Oct 9, 2026 (trading from 12:59 New York that Friday, before the first close):
 
-> YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the US regular-session closes on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z); if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. Both URLs are read at or after the resolution time, 2026-10-16T22:00:00Z, so both closes use the same data. NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.
-
-Trading on this market opened at 13:37 UTC that Friday, before the first close.
+> YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the NYSE regular-session closes ending each week, on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z), taken from the exchange calendar (a holiday Friday uses Thursday's close, an early close its 13:00 close); the JSON states the day used as closeDay. navPerShare.listed is the sum over one BIG5 share's fixed recipe (NVDA 0.1127068, AAPL 0.05857223, MSFT 0.03816584, GOOGL 0.05164414, META 0.02217572 shares) of units x that day's adjusted close x the token's Token-2022 multiplier on Solana mainnet; anyone can recompute it from those units without the page. Both URLs are read at or after the resolution time, 2026-10-16T22:00:00Z, so both closes use the same data. NO otherwise, including a tie. Every input is listed in the JSON.
 
 ### `/api/nav/<basket>`
 
-- **Without `at`:** the value right now, three ways: `recipe` (units x live Jupiter price x multiplier), `vault` (what the vault holds over shares outstanding) and `listed` (units x the listed share's last price x multiplier). The answer also carries `trailingWeek` (the last five closes against SPY; it was called `week`) and `resolution`, which gives the field names, the next window and the rule text.
-- **With `at=<unix seconds>`:** `navPerShare.listed` and `spy.adjClose` at the last US close at or before `at`, with `closeDay`, the inputs per component, and the method. Some requests are refused rather than answered with today's number:
+- **Without `at`:** the value right now, three ways: `recipe` (units x live Jupiter price x multiplier), `vault` (what the vault holds over shares outstanding) and `listed` (units x the listed share's last price x multiplier). The answer also carries `trailingWeek` and `resolution`.
+  - `trailingWeek` is the last five closes against SPY; it was called `week`. Only settled closes count: while a session is open, Yahoo's in-progress daily row is dropped (`web/lib/history.ts`), so mid-session it ends at the previous close, not at today's price so far.
+  - `resolution` gives the field names, the next window (with New York times) and the rule text.
+- **With `at=<unix seconds>` or `at=YYYY-MM-DD`:** `navPerShare.listed` and `spy.adjClose` at the last NYSE close at or before `at`, with `closeDay`, `asOf` (the date of the newest close in the data used), the inputs per component, and the method. A date means that day's close, or the last close before it if the exchange was shut that day.
+- **Frozen answers, exact replay.** Every `?at=` answer is stored once in the project's GCS bucket under its close day and data date (`nav/<basket>/<closeDay>@<asOf>.json`, `web/lib/panta-freeze.ts`).
+  - The write is create-only, so the first answer wins and every later read for that pair returns the same bytes. The answer carries `frozen: {key, storedAt, replay}`.
+  - `&asOf=YYYY-MM-DD` replays a stored answer exactly, even after Yahoo has re-adjusted past closes. A resolution read at resolution time can be re-checked byte for byte later.
+  - With no bucket configured, `frozen` is null and nothing is stored.
+- **Refusals.** Some requests are refused rather than answered with today's number:
   - A time in the future, or before the one-year history, gets a 400.
   - A close in the last hour gets a 503 with `Retry-After`. History is cached for an hour, so it is not final yet.
   - A close not yet in the history also gets a 503.
@@ -45,7 +61,7 @@ Trading on this market opened at 13:37 UTC that Friday, before the first close.
 
   `sources` names the history source and its date.
 
-"Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict`, and `/portfolio` once a wallet is connected.
+"Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict`, and `/portfolio`. Without a wallet, `/portfolio`'s Predictions section previews what it reads (`GET /positions/?wallet=`) and offers "Use a wallet in this browser".
 
 `/predict` also works the rule once on the last full week, from the same two `?at=` reads a resolver makes ("Last week, resolved the way a market would be").
 
@@ -101,6 +117,8 @@ The UI tags every fixture value as "sandbox fixture" (Panta marks these answers 
 - **Buy quotes.** The sandbox answers every buy with the same fixed quote, "$1.00 buys 2.00 shares". The panel shows the amount you asked for next to Panta's answer and says the answer is fixed.
 - **The market.** The sandbox has one fixture market, "Sandbox test market". It is labeled as standing in for the basket's market, never shown as if it were the basket's own.
 - **Signing: a stand-in, never broadcast.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash, so there is nothing of Panta's to sign. Sheaf compiles a memo-only stand-in on a fresh devnet blockhash and asks the wallet to sign that, and the panel says so. The signed stand-in is **never broadcast** to any cluster. The signature reported to Panta's sandbox afterwards (register, submit, `/trades/`) demonstrates the flow, not a trade. If a wallet declines, the sandbox flow can continue with a clearly labeled placeholder signature. `/predict` and the basket page say this in plain words.
+
+`create-quote` takes only the wallet and the basket address. The market's name and symbol, which go into its title, question and rule, are read from the basket account on chain. Any `name` or `symbol` in the request is ignored, so nobody can draft a mislabeled market on a real basket's numbers.
 
 `POST /api/panta` has two throttles: 20 requests a minute per IP, and per-kind caps below Panta's own account limits (24 quotes, 16 builds, 30 reports and 90 reads a minute). Identical create quotes are reused for 60 s. In the sandbox, a buy or claim must name a market in Panta's catalog.
 

@@ -31,7 +31,19 @@ export function gcsConfigured(): boolean {
 let lastOidc: string | null = null;
 export function rememberOidc(request: Request) {
   const t = request.headers.get("x-vercel-oidc-token");
-  if (t) lastOidc = t;
+  // Only something shaped like a Vercel-issued token is kept; Vercel sets this
+  // header itself, and a token Google refuses is dropped (see accessToken).
+  if (t && issuer(t)?.startsWith("https://oidc.vercel.com")) lastOidc = t;
+}
+
+/** A JWT's issuer, read without verifying it (Google's STS does the verifying). */
+function issuer(jwt: string): string | null {
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8")) as { iss?: unknown };
+    return typeof payload.iss === "string" ? payload.iss : null;
+  } catch {
+    return null;
+  }
 }
 
 let token: { value: string; exp: number } | null = null;
@@ -53,7 +65,12 @@ async function accessToken(): Promise<string> {
     }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!r.ok) throw new Error(`GCS federation: HTTP ${r.status}`);
+  if (!r.ok) {
+    // A remembered token that Google refuses is forgotten, so one bad header can
+    // never lock the bucket out until the next real request; the environment's token is next.
+    if (subject === lastOidc) lastOidc = null;
+    throw new Error(`GCS federation: HTTP ${r.status}`);
+  }
   const j = (await r.json()) as { access_token: string; expires_in: number };
   token = { value: j.access_token, exp: Math.floor(Date.now() / 1000) + j.expires_in };
   return token.value;

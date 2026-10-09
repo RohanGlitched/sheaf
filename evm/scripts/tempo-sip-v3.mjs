@@ -4,7 +4,7 @@
 //
 // PlanDeskV3 bounds each run's fair share count by a trailing window (±10% around
 // what the last run filled at) inside the owner's hard bounds (70% to 150% of the
-// fair count at signing). The protocol fee of the desk it posts to goes to a cold
+// fair count at signing). The protocol fee of the desk it posts to goes to a separate
 // treasury. The run, recorded under v3.sip in deployments/tempoTestnet.json:
 //   1. The investor (the deployer's root key) opens plan N: 10.10 AlphaUSD a run,
 //      a 2-minute interval (so the recording shows two runs), a ±2% auction for 4
@@ -185,7 +185,7 @@ async function main() {
   const inst1 = parseEventLogs({ abi: planAbi, logs: ran1.logs, eventName: "Instalment" })[0].args;
   ok(`run 1: order ${inst1.orderId}, ${sh(inst1.startShares)} down to ${sh(inst1.endShares)} ${basket.symbol} (tx ${ran1.transactionHash})`);
   const fill1 = await fillAsInvestor(inst1.orderId);
-  ok(`run 1 filled: ${sh(fill1.shares)} ${basket.symbol} to the investor, ${sh(fill1.protocolFee)} to the cold treasury`);
+  ok(`run 1 filled: ${sh(fill1.shares)} ${basket.symbol} to the investor, ${sh(fill1.protocolFee)} to the separate treasury key`);
   await expectRefused("tooSoon", "keeper runs a second instalment at once", /(TooSoon)/, () => sendTransactionSync(client, { account: keeper, calls: [approve, run(ONE)] }), [planId, ONE]);
 
   // 5. After the interval: run 2 at 5% above run 1's fill. The window has trailed to it.

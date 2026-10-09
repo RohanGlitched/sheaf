@@ -18,6 +18,7 @@ import {
   voicesConfigured,
 } from "@/lib/voices-store";
 import { decodeAddress, decodeSignature, verifySigned } from "@/lib/voices-verify";
+import { evmAddress, verifyEvmSigned } from "@/lib/voices-evm";
 import {
   cleanHandle,
   cleanQuote,
@@ -44,6 +45,11 @@ export const maxDuration = 60;
  *   (not listed, handle not shown); `ours` counts the team's entries, never listed.
  * GET /api/voices?wallet=<address> → { status: "listed"|"waiting"|"team"|null, voice }
  *   One wallet's own entry, for the signer's form.
+ *
+ * Solana wallets sign with ed25519 (signMessage, base58 signature); EVM wallets
+ * sign the same text with EIP-191 personal_sign (0x… address, 0x… signature),
+ * checked with viem's verifyMessage. EVM proof of use: a plan, a dollar order
+ * (desk v1, v2 or v3) or an in-kind creation on any deployed testnet (lib/voices-evm.ts).
  *
  * POST /api/voices
  *   { wallet, walletKind: "browser"|"app", platform: "x"|"telegram"|"github", handle, quote?, ref?, date, signature }
@@ -77,9 +83,10 @@ export async function GET(request: Request) {
   oidcFrom(request.headers);
   const one = new URL(request.url).searchParams.get("wallet");
   if (one != null) {
-    if (!decodeAddress(one)) return fail("That isn't a Solana wallet address.", 400);
+    const key = evmAddress(one) ?? (decodeAddress(one) ? one : null);
+    if (!key) return fail("That isn't a Solana or EVM wallet address.", 400);
     try {
-      const voice = await getVoice(one);
+      const voice = await getVoice(key);
       return Response.json({ status: voice ? statusOf(voice) : null, voice }, { headers: NO_STORE });
     } catch {
       return fail("Couldn't read that just now.", 502);
@@ -113,9 +120,15 @@ export async function POST(request: Request) {
   const reading = body.action === "recheck" || body.action === "github";
   if (!(reading ? allowRead : allow)(ipOf(request))) return fail("That's a lot of tries. Wait a few minutes and try again.", 429);
 
-  const publicKey = decodeAddress(body.wallet);
-  if (!publicKey) return fail("That isn't a Solana wallet address.", 400);
-  const wallet = body.wallet as string;
+  // A Solana key (base58) or an EVM address (0x…, stored checksummed).
+  const evm = evmAddress(body.wallet);
+  const publicKey = evm ? null : decodeAddress(body.wallet);
+  if (!evm && !publicKey) return fail("That isn't a Solana or EVM wallet address.", 400);
+  const wallet = evm ?? (body.wallet as string);
+  const signature = evm ? null : decodeSignature(body.signature);
+  /** Checks a signature over `message` by this wallet, whichever chain it is on. */
+  const signedBy = async (message: string) =>
+    evm ? verifyEvmSigned(message, body.signature, evm) : !!signature && verifySigned(message, signature, publicKey!);
 
   if (body.action === "recheck") {
     try {
@@ -144,13 +157,13 @@ export async function POST(request: Request) {
     }
   }
 
-  const signature = decodeSignature(body.signature);
-  if (!signature) return fail("The signature is missing or malformed.", 400);
+  if (!evm && !signature) return fail("The signature is missing or malformed.", 400);
+  if (evm && !(typeof body.signature === "string" && /^0x[0-9a-fA-F]{130}$/.test(body.signature))) return fail("The signature is missing or malformed.", 400);
   if (!isFresh(body.date)) return fail("The signed date must be within two days of today. Sign again.", 400);
   const date = body.date;
 
   if (body.action === "remove") {
-    if (!verifySigned(removalMessage(wallet, date), signature, publicKey)) return fail("The signature doesn't match this wallet.", 401);
+    if (!(await signedBy(removalMessage(wallet, date)))) return fail("The signature doesn't match this wallet.", 401);
     try {
       await removeVoice(wallet, date);
       return Response.json({ ok: true }, { headers: NO_STORE });
@@ -174,7 +187,7 @@ export async function POST(request: Request) {
 
   const fields = { wallet, walletKind, platform, handle, quote: q.quote, ref, date };
   const message = voiceMessage(fields);
-  if (!verifySigned(message, signature, publicKey)) return fail("The signature doesn't match this wallet and message.", 401);
+  if (!(await signedBy(message))) return fail("The signature doesn't match this wallet and message.", 401);
 
   let voice: Voice = { ...fields, message, signature: body.signature as string, at: new Date().toISOString(), proof: null, github: null };
   try {

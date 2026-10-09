@@ -48,6 +48,8 @@ import {
   readPlansOf,
   readPlansOfV3,
   tempoSipV3Terms,
+  evmPlanV3Terms,
+  type PlanCadence,
   v2FillSplit,
   v2Of,
   v3Of,
@@ -168,7 +170,7 @@ export async function dripGas(d: Deployment, to: Address): Promise<{ hash?: Hex;
 export type FillResult = {
   network: string;
   id: number;
-  /** Which desk the order is on: 1, the fixed-price CreationDesk; 2 and 3, the two CreationDeskV2 auctions (3: cold treasury). */
+  /** Which desk the order is on: 1, the fixed-price CreationDesk; 2 and 3, the two CreationDeskV2 auctions (3: a separate treasury key). */
   version: DeskVersion;
   status: "filled" | "skipped" | "failed";
   reason?: string;
@@ -470,6 +472,151 @@ export async function runEvmKeeper(
   });
 }
 
+// ------------------------------------------- PlanDeskV3 plans on chains without access keys
+
+/**
+ * Plans on Robinhood Chain and the Sepolias: the owner opens a PlanDeskV3 plan naming
+ * the house as `keeper` and approves the plan desk for a fixed number of runs. The
+ * keeper loop finds due plans and runs them with today's fair count; the contract
+ * fixes the amount, the interval, the trailing window and the owner's hard bounds,
+ * and the allowance caps the total. Runs land on the v3 desk as auctions, which the
+ * house fills like any other, at fair plus its margin, and anyone else may fill first.
+ */
+export type PlanRunResult = {
+  network: string;
+  planId: number;
+  status: "ran" | "skipped" | "failed";
+  orderId?: number;
+  hash?: Hex;
+  reason?: string;
+};
+
+/** Plans checked per sweep (newest first) and runs placed per sweep, so one sweep stays short. */
+const PLAN_SCAN = 100;
+const PLAN_RUNS_PER_SWEEP = 3;
+/** Plans the loop should leave alone until a time: network:id -> ms. */
+const planNextCheck = new Map<string, number>();
+
+/** The terms a new plan signs at today's price, priced the way the keeper prices each run. Bigints as strings. */
+export async function evmPlanTerms(d: Deployment, basketAddress: string, cashPerRun: bigint, cadence: PlanCadence) {
+  const v3 = v3Of(d);
+  if (!v3) throw new Error(`No v3 plan desk on ${d.label}.`);
+  const basket = basketOf(d, basketAddress);
+  if (!basket) throw new Error("Unknown basket.");
+  const prices = await fetchRobinhoodPrices(basket.components.map((c) => c.symbol));
+  const nav = navFor(d, basket, prices);
+  if (nav == null) throw new SipRefused("No price for the basket right now. Try again in a moment.");
+  const t = evmPlanV3Terms(nav, cashPerRun, d.stable.decimals, cadence);
+  return {
+    basket: basket.address,
+    symbol: basket.symbol,
+    nav,
+    planDesk: v3.planDesk,
+    keeper: houseAccount()!.address,
+    cashPerRun: t.cashPerRun.toString(),
+    interval: t.interval.toString(),
+    auctionSecs: t.auctionSecs.toString(),
+    runs: t.runs.toString(),
+    bandBps: t.bandBps,
+    stepBps: t.stepBps,
+    refShares: t.refShares.toString(),
+    hardMin: t.hardMin.toString(),
+    hardMax: t.hardMax.toString(),
+  };
+}
+
+/**
+ * Run the due plans that name the house as keeper on one chain (not Tempo, whose plans
+ * run through access keys). With `planId`, only that plan, and only if it is due.
+ */
+export async function runPlanSchedule(d: Deployment, opts: { planId?: number } = {}): Promise<PlanRunResult[]> {
+  const v3 = v3Of(d);
+  const house = houseAccount();
+  if (!v3 || !house || isTempo(d)) return [];
+  const client = publicClientFor(d);
+  const planDesk = v3.planDesk as Address;
+  const count = Number(await client.readContract({ address: planDesk, abi: PLAN_DESK_V3_ABI, functionName: "planCount" }));
+  const ids =
+    opts.planId != null
+      ? opts.planId < count
+        ? [opts.planId]
+        : []
+      : Array.from({ length: Math.min(PLAN_SCAN, count) }, (_, i) => count - 1 - i);
+  if (ids.length === 0) return [];
+  const plans = await Promise.all(ids.map((id) => client.readContract({ address: planDesk, abi: PLAN_DESK_V3_ABI, functionName: "getPlan", args: [BigInt(id)] })));
+  const now = Math.floor(Date.now() / 1000);
+  const due = ids
+    .map((id, i) => ({ id, p: plans[i] }))
+    .filter(({ id, p }) => {
+      if (!p.active || p.keeper.toLowerCase() !== house.address.toLowerCase()) return false;
+      if (p.runs > 0 && Number(p.lastRunAt) + Number(p.interval) > now) return false;
+      return opts.planId != null || (planNextCheck.get(`${d.network}:${id}`) ?? 0) <= Date.now();
+    })
+    .slice(0, PLAN_RUNS_PER_SWEEP);
+  if (due.length === 0) return [];
+
+  const prices = await fetchRobinhoodPrices(d.tokens.map((t) => t.symbol));
+  return withChainLock(d.network, async () => {
+    const out: PlanRunResult[] = [];
+    for (const { id, p } of due) {
+      const base = { network: d.network, planId: id };
+      const later = (ms: number) => planNextCheck.set(`${d.network}:${id}`, Date.now() + ms);
+      try {
+        const basket = basketOf(d, p.basket);
+        if (!basket) {
+          later(86_400_000);
+          out.push({ ...base, status: "skipped", reason: "basket not in this deployment's list" });
+          continue;
+        }
+        // The owner's allowance caps the plan; an exhausted one is simply finished.
+        const [allowance, balance] = await Promise.all([
+          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [p.owner, planDesk] }),
+          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [p.owner] }),
+        ]);
+        if (allowance < p.cashPerRun || balance < p.cashPerRun) {
+          later(6 * 3_600_000);
+          out.push({ ...base, status: "skipped", reason: allowance < p.cashPerRun ? "the owner's allowance for this plan is used up: it has run its course" : `the owner holds too little ${d.stable.symbol} for a run` });
+          continue;
+        }
+        const nav = navFor(d, basket, prices);
+        if (nav == null) {
+          later(600_000);
+          out.push({ ...base, status: "skipped", reason: "no price for the basket right now" });
+          continue;
+        }
+        const fair = fairSharesFor(p.cashPerRun, d.stable.decimals, nav);
+        const [, low, high] = await client.readContract({ address: planDesk, abi: PLAN_DESK_V3_ABI, functionName: "windowOf", args: [BigInt(id)] });
+        if (fair < low || fair > high) {
+          later(6 * 3_600_000);
+          out.push({
+            ...base,
+            status: "skipped",
+            reason: `paused: today's price makes a run ${fromRaw(fair).toFixed(4)} ${basket.symbol}, outside the plan's window (${fromRaw(low).toFixed(4)} to ${fromRaw(high).toFixed(4)}); the owner can re-center it`,
+          });
+          continue;
+        }
+        const wallet = walletFor(d);
+        const hash = await wallet.sendTransaction({ to: planDesk, data: encodeFunctionData({ abi: PLAN_DESK_V3_ABI, functionName: "instalment", args: [BigInt(id), fair] }) });
+        const receipt = await client.waitForTransactionReceipt({ hash, timeout: 60_000 });
+        if (receipt.status !== "success") {
+          later(600_000);
+          out.push({ ...base, status: "failed", reason: "the instalment reverted", hash });
+          continue;
+        }
+        const ran = parseEventLogs({ abi: PLAN_DESK_V3_ABI, logs: receipt.logs, eventName: "Instalment" })[0];
+        const orderId = ran ? Number(ran.args.orderId) : undefined;
+        // Plan runs are bounded by the plan itself, so the per-buyer fill quota never strands one.
+        if (orderId != null) sipOrders.add(`${d.network}:v3:${orderId}`);
+        out.push({ ...base, status: "ran", orderId, hash });
+      } catch (err) {
+        later(600_000);
+        out.push({ ...base, status: "failed", reason: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200) });
+      }
+    }
+    return out;
+  });
+}
+
 // ------------------------------------------------------------ Tempo SIP keeper
 
 /**
@@ -504,7 +651,7 @@ export type SipResult = {
  * The plan terms a visitor signs on Tempo, priced the way the keeper prices each run:
  * the first basket, at live Robinhood quotes for the underlying stocks (deploy-time
  * prices for any quote that is missing). New plans go to PlanDeskV3 (trailing bounds
- * under hard bounds); the same terms re-centre an existing v3 plan. Bigints as strings.
+ * under hard bounds); the same terms re-center an existing v3 plan. Bigints as strings.
  */
 export async function tempoSipTerms() {
   const d = deploymentFor("tempoTestnet");
@@ -732,7 +879,7 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
           : `outside this plan's bounds (${shareText(p.low)} to ${shareText(p.high)})`;
       throw new SipRefused(
         `Paused: today's price makes a run ${shareText(fair)} ${basket.symbol}, ${where}. The keeper will not post it. ${
-          p.version === 3 ? "Re-centre the plan (one signature from your own key) to go on." : "Open a new plan at today's price to go on."
+          p.version === 3 ? "Re-center the plan (one signature from your own key) to go on." : "Open a new plan at today's price to go on."
         }`,
         Date.now() + 6 * 3_600_000,
         "outOfWindow",

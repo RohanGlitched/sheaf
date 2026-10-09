@@ -15,7 +15,7 @@ a new deployment rather than an upgrade, and every older address keeps working.
 | | v1 `CreationDesk` | v2 `CreationDeskV2` + `PlanDesk` | v3 `CreationDeskV2` + `PlanDeskV3` |
 | --- | --- | --- | --- |
 | Price | A fixed-price limit order: N shares for X dollars | A Dutch auction on share count, as on Solana: the shares the buyer must receive fall from `startShares` to `endShares` over the auction | The same auction (same contract code) |
-| Protocol fee | None | 0.10% of the gross shares each fill creates. The immutable treasury is **the deployer**, `0x59d3…0285`, which is also the house filler and the Tempo keeper key | 0.10%, to a **separate cold treasury**, `0xEcb68aa1ec3749173B49F84eCA45659DF4E67355`: a fresh key that has never deployed, filled, kept or signed anything, held offline and in no server environment |
+| Protocol fee | None | 0.10% of the gross shares each fill creates. The immutable treasury is **the deployer**, `0x59d3…0285`, which is also the house filler and the Tempo keeper key | 0.10%, to a **separate treasury key**, `0xEcb68aa1ec3749173B49F84eCA45659DF4E67355`, held by the founder. It is a fresh key that has never deployed, filled, kept or signed anything, and it is in no server environment (not in Vercel, not in any `.env`). It is not a multisig or hardware wallet: on mainnet it would be one |
 | Creator fee | Charged by the basket | Charged by the basket | Charged by the basket |
 | Recurring buys | None on chain | `PlanDesk`: amount, interval and fixed bounds on each run's fair count. A normal monthly move takes the fair count outside the bounds and the plan stops | `PlanDeskV3`: a trailing window of ±10% around what the last run filled at, inside the owner's hard bounds; the owner can re-centre at any time |
 | Tempo SIP access key scope | `CreationDesk.placeOrder`, so the key picks the price | `PlanDesk.instalment`, so the key runs the owner's plan and cannot rewrite it | `PlanDeskV3.instalment` only: it cannot re-centre, rewrite or close the plan |
@@ -27,7 +27,7 @@ exist** (immutable, no owner to change it), so the app moved new orders to v3.
 
 ## v3 deployments (Oct 9)
 
-| Chain | CreationDeskV2 (cold treasury) | PlanDeskV3 | Verified | Live smoke test |
+| Chain | CreationDeskV2 (separate treasury key) | PlanDeskV3 | Verified | Live smoke test |
 | --- | --- | --- | --- | --- |
 | Robinhood Chain testnet (46630) | [`0x00F3A2f7e7Fc3038767feC055F8c37f814FA7c69`](https://explorer.testnet.chain.robinhood.com/address/0x00F3A2f7e7Fc3038767feC055F8c37f814FA7c69#code) | [`0x8C681091820d187cE77F670a8b9A4f66020a5045`](https://explorer.testnet.chain.robinhood.com/address/0x8C681091820d187cE77F670a8b9A4f66020a5045#code) | Blockscout | Passed |
 | Tempo testnet (42431) | [`0xD54dA8527aDA17FB27C14A42fAa6837393EA940c`](https://explore.testnet.tempo.xyz/address/0xD54dA8527aDA17FB27C14A42fAa6837393EA940c) | [`0x1AFe2b2af89D238797523387722cea2c8A8123b4`](https://explore.testnet.tempo.xyz/address/0x1AFe2b2af89D238797523387722cea2c8A8123b4) | Sourcify (exact match) | Passed, plus the v3 access-key SIP run |
@@ -37,7 +37,7 @@ exist** (immutable, no owner to change it), so the app moved new orders to v3.
 
 The v3 smoke test (`scripts/smoke-v3.js`) does the following on each chain:
 
-- **An auction order.** It places one, fills it, and checks that the fee went to the cold treasury, not the deployer.
+- **An auction order.** It places one, fills it, and checks that the fee went to the separate treasury key, not the deployer.
 - **A trailing plan.** It opens a plan with a 60-second interval and runs it once.
 - **Two refusals.** A second run inside the interval is refused (`TooSoon`), and so is a fair count under the window
   (`FairOutOfBounds`).
@@ -288,8 +288,9 @@ so a ±3–5% band stops the plan most months. `PlanDeskV3` keeps two kinds of b
 - The owner sets them at opening, and only the owner can change them.
 - `hardMin` is the price cap. No run's fair count may be below it, and no run's auction ever ends
   below it, so no run ever buys fewer than `hardMin` shares for `cashPerRun`.
-- The Tempo panel signs hard bounds of 70% and 150% of the fair count at signing. That puts the
-  worst price per share at about 1.43 times today's.
+- The plan panels (Tempo, and the Robinhood Chain and Sepolia panel) sign hard bounds of 85% and
+  120% of the fair count at signing, with a ±10% step. That puts the worst price per share at about
+  1.18 times the signing-day price. The recorded Tempo run below used wider bounds (70%–150%).
 
 **A trailing window** of ±`stepBps` (10% on the Tempo panel) around a reference count:
 - The reference starts at the owner's `refShares`.
@@ -308,10 +309,40 @@ so a ±3–5% band stops the plan most months. `PlanDeskV3` keeps two kinds of b
   `recenter`, `openPlan` or `closePlan`. The recorded run shows the chain refusing a re-centre by
   the key with `CallNotAllowed`.
 
-**The honest limit.** A filler with no competition can walk the reference down by up to the
-auction's band (2%) each run, by always filling at the auction's end. The hard floor bounds that
-walk. A test runs 24 such runs and checks that every run bought at least `hardMin`, and that the
-reference stopped at the floor. Competition is what keeps fills near fair, as on Solana.
+**Who sets "fair".** The keeper names each run's fair count; nothing on chain reads a price. The
+contract bounds it twice. It must sit within one step of what the plan's previous run *actually
+filled at*, a number the keeper doesn't control once a fill lands, and inside the owner's hard
+bounds. So the keeper is never the sole source of the price, only of where inside that window a run
+starts.
+
+**The worst case with one filler.** Today the house is both keeper and the only filler. It could
+post each run's fair count at the window's low edge and fill at the auction's end. That walks the
+reference down by up to the step plus the 2% band a run, and reaches the hard floor in about two
+runs. From then on, every run still buys at least `hardMin` for `cashPerRun`. With the panels'
+defaults, that is 85% of the signing-day count, a price at most about 1.18 times the signing-day
+price. Both panels say this in one line. A test runs 24 such runs and checks that every run bought at
+least `hardMin` and that the reference stopped at the floor. Competition is what keeps fills near
+fair, as on Solana.
+
+### Plans on Robinhood Chain and the Sepolias
+
+PlanDeskV3 doesn't need Tempo's access keys.
+
+- **Opening.** On every chain except Tempo, the basket page's plan panel
+  (`web/components/evm-plan-panel.tsx`) sends two wallet transactions:
+  - one approves the plan desk for a fixed number of runs;
+  - the other calls `openPlan(..., keeper = house)`.
+- **Cadence.** Every 10 minutes for 3 runs (a demo with a 15-minute auction, so the 5-minute cron
+  never misses the house's price), or every 30 days for 12 runs.
+- **The keeper loop.** `runPlanSchedule` in `web/lib/evm-server.ts` is called from every
+  `/api/evm-keeper` sweep. It finds the plans that are active, name the house as keeper and are
+  due, then:
+  - checks that the owner's allowance and balance cover a run;
+  - prices the run from live quotes;
+  - skips a fair count outside the window ("paused"; the owner can re-centre);
+  - calls `instalment(id, fair)` as the keeper.
+- **Bounds.** The owner can re-centre or close a plan from the same panel. The allowance caps the
+  total, and the contract caps every run.
 
 **The recorded Tempo run** (`scripts/tempo-sip-v3.mjs`, Oct 9, hashes under `v3.sip` in
 `deployments/tempoTestnet.json`):
@@ -328,7 +359,7 @@ reference stopped at the floor. Competition is what keeps fills near fair, as on
 4. Run 1 fills at 1.0192 MAG8. A second run at once is refused (`TooSoon`).
 5. After the interval, run 2 asks 1.0701 MAG8, 5% above run 1's fill. The plan re-centres on
    1.0192 (`Recentered`), the window is 0.9173–1.1211, and run 2 fills at 1.0910 MAG8.
-6. The protocol fee of both runs went to the cold treasury.
+6. The protocol fee of both runs went to the separate treasury key.
 
 ## Run it
 

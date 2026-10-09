@@ -69,10 +69,21 @@ type PlanFills = { orders: Set<string>; last: number };
  * restarts the terms epoch, and the program then skips counting a fill of an
  * order placed before it. The ledger sees every fill in its window.
  */
-async function readPlanFills(): Promise<Map<string, PlanFills>> {
+/** The ledger's plan totals: every plan opened since launch, closed ones too, the same figures /business and /ledger show. */
+type PlanTotals = { opened: number; runs: number; filled: number; dollars: number };
+
+async function readPlanFills(): Promise<{ byPlan: Map<string, PlanFills>; totals: PlanTotals | null }> {
   const res = await fetch("/api/ledger", { cache: "no-store" });
   if (!res.ok) throw new Error(`ledger ${res.status}`);
-  const json = (await res.json()) as { entries?: { kind: string; plan?: string; order?: string; signature: string; time: number }[] };
+  const json = (await res.json()) as {
+    entries?: { kind: string; plan?: string; order?: string; signature: string; time: number }[];
+    stats?: { plans?: number; byCause?: { plan?: { orders?: number; fills?: number; dollarsFilled?: number } } };
+  };
+  const plan = json.stats?.byCause?.plan;
+  const totals =
+    json.stats && typeof json.stats.plans === "number" && plan
+      ? { opened: json.stats.plans, runs: plan.orders ?? 0, filled: plan.fills ?? 0, dollars: plan.dollarsFilled ?? 0 }
+      : null;
   const out = new Map<string, PlanFills>();
   for (const e of json.entries ?? []) {
     if (e.kind !== "filled" || !e.plan) continue;
@@ -81,7 +92,7 @@ async function readPlanFills(): Promise<Map<string, PlanFills>> {
     f.last = Math.max(f.last, e.time);
     out.set(e.plan, f);
   }
-  return out;
+  return { byPlan: out, totals };
 }
 
 /**
@@ -183,9 +194,16 @@ function PlanCard({
                 : ` · next run ${until(plan.nextRunTs, now)}`}
           {plan.fills > 0 && plan.lastFillTs > 0 && ` · last filled ${timeAgo(plan.lastFillTs)}`}
         </p>
-        {!plan.legacy && plan.trailStepBps > 0 && plan.runsLeft > 0 && (
+        {!plan.legacy && plan.trailStepBps > 0 && plan.hardMinRef == null && (
+          <p className="mt-1 border-l-2 border-line-strong pl-2 text-xs text-ink-2">
+            Opened before hard limits: it follows the market ±{(plan.trailStepBps / 100).toFixed(0)}% a run with no floor, and Re-center
+            can&apos;t add one. Close it and open a new plan to get one.
+          </p>
+        )}
+        {!plan.legacy && plan.trailStepBps > 0 && plan.hardMinRef != null && plan.runsLeft > 0 && (
           <p className="tnum mt-1 text-xs text-ink-3">
-            Follows the market: each fill moves its bounds up to ±{(plan.trailStepBps / 100).toFixed(0)}% around the price it filled at
+            Each run&apos;s auction opens ±{(plan.bandBps / 100).toFixed(0)}% around the last fill and follows the market, its bounds moving up
+            to ±{(plan.trailStepBps / 100).toFixed(0)}% a fill
             {plan.hardMinRef != null && plan.hardMaxRef != null && plan.hardMinRef > 0n && plan.hardMaxRef > 0n
               ? `, never past its owner's limits of ${money(1e9 / Number(plan.hardMaxRef))} to ${money(1e9 / Number(plan.hardMinRef))} a share`
               : ""}
@@ -223,6 +241,17 @@ function PlanCard({
             price of {money(paid)} with fees. Re-center it so the next run starts from today&apos;s price.
           </p>
         )}
+        {offCenter && fairPrice != null && (() => {
+          // What Re-center will sign: a new reference at today's price and new limits around it. Said before the click.
+          const next = planTerms(fairPrice, feeBps, 0, plan.bandBps, plan.hardMinRef != null ? hardBpsForPeriod(plan.periodSecs) : undefined);
+          const price = (rate: bigint) => money(1e9 / Number(rate));
+          return (
+            <p className="tnum mt-2 text-xs text-ink-3">
+              Re-center moves this plan&apos;s reference to {price(next.ref)} a share and its {plan.hardMinRef != null ? "hard limits" : "bounds"} to{" "}
+              {price(next.maxRef)}–{price(next.minRef)}. You sign it.
+            </p>
+          );
+        })()}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
           {expired && (
             <button type="button" onClick={() => onRefund(plan, expired)} disabled={busy} className="rounded-[var(--radius-control)] border border-line-strong px-3.5 py-2 text-ink hover:border-ink-3 disabled:opacity-60">
@@ -350,11 +379,15 @@ export function PlansBoard() {
   useKeeperKick("/api/keeper");
 
   const [filledBy, setFilledBy] = useState<Map<string, PlanFills>>(new Map());
+  const [ledgerTotals, setLedgerTotals] = useState<PlanTotals | null>(null);
 
   const load = useCallback(async () => {
     // The ledger can take a while on a cold server, so it corrects the counts when it lands and never holds up the board.
     void readPlanFills()
-      .then(setFilledBy)
+      .then(({ byPlan, totals }) => {
+        setFilledBy(byPlan);
+        if (totals) setLedgerTotals(totals);
+      })
       .catch(() => {});
     const [p, o] = await Promise.all([fetchPlans(connection).catch(() => null), fetchOrders(connection).catch(() => null)]);
     // A failed read keeps what is already on screen rather than emptying the board.
@@ -486,12 +519,21 @@ export function PlansBoard() {
     );
   };
 
-  const stats: { label: string; value: string; note: string | null }[] = [
-    { label: "Plans running", value: count(totals.running), note: null },
-    { label: "Runs filled", value: count(totals.fills), note: null },
-    { label: "Dollars put in by plans", value: money(totals.invested), note: null },
-    { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
-  ];
+  // Totals come from the ledger, so /plans, /business and /ledger agree; the cards below list the plans still open.
+  const listed = live.filter((p) => !folded(p)).length;
+  const stats: { label: string; value: string; note: string | null }[] = ledgerTotals
+    ? [
+        { label: "Plans opened", value: count(ledgerTotals.opened), note: `${count(totals.running)} running now · ${count(listed)} listed below` },
+        { label: "Plan runs filled", value: count(ledgerTotals.filled), note: `of ${count(ledgerTotals.runs)} runs placed` },
+        { label: "Dollars put in by plans", value: money(ledgerTotals.dollars), note: "every filled run, closed plans too" },
+        { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
+      ]
+    : [
+        { label: "Plans running", value: count(totals.running), note: "reading the ledger for the full totals" },
+        { label: "Runs filled", value: count(totals.fills), note: "listed plans only, so far" },
+        { label: "Dollars put in by plans", value: money(totals.invested), note: "listed plans only, so far" },
+        { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
+      ];
 
   return (
     <div>

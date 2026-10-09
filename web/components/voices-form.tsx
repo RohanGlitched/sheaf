@@ -5,6 +5,7 @@ import Link from "next/link";
 import bs58 from "bs58";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { ConnectButton } from "@/components/connect-button";
+import { useEvmSigner } from "@/lib/voices-evm-client";
 import { BrowserWalletName } from "@/lib/browser-wallet";
 import { explorerTx } from "@/lib/config";
 import { isTeamWallet } from "@/lib/team-wallets";
@@ -143,8 +144,28 @@ export function VoicesForm({
   onChange: (change: { voice: Voice; status: VoiceStatus } | { removed: string }) => void;
 }) {
   const { publicKey, signMessage, connected, wallet: adapter } = useWallet();
-  const wallet = publicKey?.toBase58() ?? null;
-  const walletKind: WalletKind = adapter?.adapter.name === BrowserWalletName ? "browser" : "app";
+  const evm = useEvmSigner();
+  // Solana or an EVM chain: the same message, signed with ed25519 or EIP-191 personal_sign.
+  const [chain, setChain] = useState<"solana" | "evm">("solana");
+  const wallet = chain === "solana" ? (connected ? (publicKey?.toBase58() ?? null) : null) : evm.address;
+  const walletKind: WalletKind = chain === "solana" ? (adapter?.adapter.name === BrowserWalletName ? "browser" : "app") : evm.isBrowser ? "browser" : "app";
+  const canSign = chain === "solana" ? !!signMessage : !!evm.provider;
+  /** Signs the text with whichever wallet is in use; base58 for Solana, 0x hex for EVM. */
+  const signText = async (text: string): Promise<string> => {
+    try {
+      if (chain === "evm") return await evm.sign(text);
+      if (!signMessage) throw new Error("This wallet can't sign messages.");
+      return bs58.encode(await signMessage(new TextEncoder().encode(text)));
+    } catch (err) {
+      throw new Error(signError(err));
+    }
+  };
+  const [connectError, setConnectError] = useState<string | null>(null);
+  // Someone who arrives with only an EVM wallet connected starts on the EVM tab.
+  const evmOnly = !connected && !!evm.address;
+  useEffect(() => {
+    if (evmOnly) void Promise.resolve().then(() => setChain("evm"));
+  }, [evmOnly]);
   const [ref, setRef] = useInviteRef();
   const [platform, setPlatform] = useState<Platform>("x");
   const [handleRaw, setHandleRaw] = useState("");
@@ -200,15 +221,13 @@ export function VoicesForm({
 
   async function sign(e: React.FormEvent) {
     e.preventDefault();
-    if (!fields || !signMessage) return;
+    if (!fields || !canSign) return;
     setError(null);
     try {
       setBusy("signing");
-      const sig = await signMessage(new TextEncoder().encode(voiceMessage(fields))).catch((err) => {
-        throw new Error(signError(err));
-      });
+      const signature = await signText(voiceMessage(fields));
       setBusy("sending");
-      const j = await post({ ...fields, signature: bs58.encode(sig) });
+      const j = await post({ ...fields, signature });
       settle({ status: j.status!, voice: j.voice! });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -232,16 +251,14 @@ export function VoicesForm({
   }
 
   async function remove() {
-    if (!wallet || !signMessage) return;
+    if (!wallet || !canSign) return;
     setError(null);
     try {
       setBusy("signing");
       const date = todayUtc();
-      const sig = await signMessage(new TextEncoder().encode(removalMessage(wallet, date))).catch((err) => {
-        throw new Error(signError(err));
-      });
+      const signature = await signText(removalMessage(wallet, date));
       setBusy("sending");
-      await post({ action: "remove", wallet, date, signature: bs58.encode(sig) });
+      await post({ action: "remove", wallet, date, signature });
       setOwn({ wallet, own: null });
       setRemoved(true);
       onChange({ removed: wallet });
@@ -265,13 +282,44 @@ export function VoicesForm({
         <p className="mt-1 text-sm leading-relaxed text-ink-2">The entry was replaced with a note that it was taken down. You can sign again from tomorrow.</p>
       </div>
     );
-  } else if (!connected || !wallet) {
+  } else if (!wallet) {
     body = (
       <div className="mt-6 space-y-4">
         <p className="text-sm leading-relaxed text-ink-2">
           Connect the wallet you used on Sheaf. Your name is listed once that wallet has done something here, so use the one that did.
         </p>
-        <ConnectButton block label="Connect the wallet you used" />
+        {chain === "solana" ? (
+          <ConnectButton block label="Connect the wallet you used" />
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => {
+                setConnectError(null);
+                try {
+                  evm.connectBrowser();
+                } catch (err) {
+                  setConnectError((err as Error).message);
+                }
+              }}
+              className="rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
+            >
+              The wallet in this browser
+            </button>
+            <button
+              type="button"
+              disabled={!evm.hasInjected}
+              onClick={() => {
+                setConnectError(null);
+                evm.connectInjected().catch((err) => setConnectError(signError(err)));
+              }}
+              className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-3 text-sm font-medium text-ink transition-colors hover:border-ink-3 disabled:opacity-50"
+            >
+              {evm.hasInjected ? "Installed wallet (MetaMask, Rabby…)" : "No EVM wallet installed"}
+            </button>
+          </div>
+        )}
+        {connectError && <p className="text-xs text-loss">{connectError}</p>}
       </div>
     );
   } else if (mine && !editing) {
@@ -281,8 +329,8 @@ export function VoicesForm({
       <div className="mt-6 space-y-4">
         {mine.status === "team" ? (
           <div className="rounded-[var(--radius-control)] border border-dashed border-line-strong p-5">
-            <p className="text-ink">Signed, and counted as ours.</p>
-            <p className="mt-1 text-sm leading-relaxed text-ink-2">This wallet is one of the team&rsquo;s, so it is counted apart and never listed.</p>
+            <p className="text-ink">Signed, but not listed.</p>
+            <p className="mt-1 text-sm leading-relaxed text-ink-2">This is one of Sheaf&rsquo;s own house or test wallets, so it isn&rsquo;t listed.</p>
           </div>
         ) : mine.status === "listed" ? (
           <div className="rounded-[var(--radius-control)] bg-bind-wash p-5">
@@ -331,7 +379,7 @@ export function VoicesForm({
         {mine.status !== "team" && (
           <div className="rounded-[var(--radius-control)] border border-line p-4">
             <p className="text-sm text-ink">Bring someone else</p>
-            <p className="mt-1 text-xs leading-relaxed text-ink-3">Your own invite link. People who sign after opening it are counted under where people came from.</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-3">Your own invite link to share. Anyone who signs after opening it is counted as coming through you.</p>
             <div className="mt-3 flex gap-2">
               <code className="min-w-0 flex-1 truncate rounded-[var(--radius-control)] bg-raised px-3 py-2 text-xs text-ink-2">{link}</code>
               <CopyButton text={link} />
@@ -355,7 +403,7 @@ export function VoicesForm({
       <form onSubmit={sign} className="mt-6 space-y-6" noValidate>
         {team && (
           <p className="rounded-[var(--radius-control)] border border-dashed border-line-strong px-4 py-3 text-xs leading-relaxed text-ink-3">
-            This is one of the team&rsquo;s wallets. You can sign, but it is counted as ours and never listed.
+            This is one of Sheaf&rsquo;s own house or test wallets. You can sign, but it won&rsquo;t be listed.
           </p>
         )}
 
@@ -425,12 +473,12 @@ export function VoicesForm({
         <div>
           <button
             type="submit"
-            disabled={!open || !fields || !signMessage || busy != null}
+            disabled={!open || !fields || !canSign || busy != null}
             className="w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:bg-sunk disabled:text-ink-3"
           >
             {busy === "signing" ? "Waiting for your wallet…" : busy === "sending" ? "Checking the signature and the chain…" : "Sign with your wallet"}
           </button>
-          {!signMessage && <p className="mt-2 text-xs text-loss">This wallet can&rsquo;t sign messages. Phantom, Solflare and Backpack can.</p>}
+          {!canSign && <p className="mt-2 text-xs text-loss">This wallet can&rsquo;t sign messages. Phantom, Solflare, Backpack, MetaMask and Rabby can.</p>}
           <p className="mt-3 text-xs leading-relaxed text-ink-3">
             {walletKind === "browser"
               ? "You're on the in-browser wallet, so the message says so and your card will too."
@@ -462,6 +510,32 @@ export function VoicesForm({
         <h3 className="display text-3xl text-ink">Sign your name</h3>
         <p className="text-xs text-ink-3">No transaction, no fee</p>
       </div>
+
+      {!removed && (
+        <div role="radiogroup" aria-label="Which wallet you used" className="mt-5 inline-flex rounded-[var(--radius-control)] border border-line bg-raised p-1 text-sm">
+          {(
+            [
+              ["solana", "Solana"],
+              ["evm", "EVM chains"],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={chain === k}
+              onClick={() => {
+                setChain(k);
+                setEditing(false);
+                setError(null);
+              }}
+              className={`rounded-[8px] px-3.5 py-1.5 transition-colors ${chain === k ? "bg-surface text-ink shadow-[0_1px_2px_rgb(20_37_28/0.12)]" : "text-ink-2 hover:text-ink"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!open && (
         <p className="mt-6 rounded-[var(--radius-control)] border border-dashed border-line-strong px-4 py-3 text-sm leading-relaxed text-ink-2">

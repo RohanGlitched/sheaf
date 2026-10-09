@@ -23,19 +23,16 @@ export function HomeChains() {
           same vault that pays out only against a burned share, and the same dollar orders, written natively for each one.
         </p>
         <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-ink-3">
-          No single chain holds the market. Of the record $15.6 billion in tokenized stocks traded onchain in
-          September 2026, Robinhood&rsquo;s tokens took about 42% and Binance&rsquo;s bStocks $5.4 billion (
-          <a href="https://forkast.news/?p=131481" target="_blank" rel="noreferrer" className={src}>
-            Forkast
-          </a>
-          ); Solana&rsquo;s exchanges did about $4.4 billion (
+          No single venue holds the market. Of the record $15.6 billion in tokenized stocks traded onchain in
+          September 2026, Robinhood took 42% ($6.57 billion), Binance&rsquo;s bStocks $5.42 billion and xStocks $2.11
+          billion (
           <a
-            href="https://www.idnfinancials.com/digital-asset/69848/solana-tokenized-stock-volume-reached-us4-4-billion"
+            href="https://www.coindesk.com/research/stablecoins-and-tokenized-assets-report-october-2026"
             target="_blank"
             rel="noreferrer"
             className={src}
           >
-            Blockworks, via IDN
+            CoinDesk
           </a>
           ). Solana is home, because the program, plans and auctions work best there; the vaults on the other
           chains are the hedge for wherever the stocks end up trading.

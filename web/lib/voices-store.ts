@@ -2,7 +2,9 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { isTeamWallet } from "./team-wallets";
 import { listNames, readJson, voicesConfigured, writeJson, Conflict, type Tombstone } from "./voices-gcs";
+import { getAddress } from "viem";
 import { findProof } from "./voices-proof";
+import { findEvmProof } from "./voices-evm";
 import type { Voice, VoicesAnswer, VoiceStatus } from "./voices-message";
 
 /**
@@ -35,7 +37,8 @@ export class NotListed extends Error {}
 type Stored = Voice | Tombstone;
 const isTomb = (s: Stored): s is Tombstone => (s as Tombstone).removed === true;
 
-const nameFor = (wallet: string) => `${VOICES}${wallet}.json`;
+/** EVM addresses are stored lower-case so one address has one entry whatever its checksum casing. */
+const nameFor = (wallet: string) => `${VOICES}${wallet.startsWith("0x") ? wallet.toLowerCase() : wallet}.json`;
 
 let all: { voices: Voice[]; at: number } | null = null;
 let opens: { byRef: Map<string, number>; at: number } | null = null;
@@ -116,7 +119,7 @@ export async function recheck(wallet: string, opts: { force?: boolean } = {}): P
   const since = v.checkedAt ? Date.now() - Date.parse(v.checkedAt) : Infinity;
   if (!opts.force && since < RECHECK_MS) return v;
   if (since < 30_000) return v;
-  const proof = await findProof(wallet).catch(() => undefined);
+  const proof = await (wallet.startsWith("0x") ? findEvmProof(getAddress(wallet)) : findProof(wallet)).catch(() => undefined);
   if (proof === undefined) return v; // the chain didn't answer; try again later
   return updateVoice(wallet, (cur) => ({ ...cur, proof: cur.proof ?? proof, checkedAt: new Date().toISOString() }));
 }

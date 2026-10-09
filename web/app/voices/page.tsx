@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "People who tried Sheaf",
   description:
-    "Every name here signed with the wallet that used Sheaf, so you can check it. Our own wallets are counted apart, never listed.",
+    "Every name here signed with the wallet that used Sheaf, on Solana or an EVM testnet, so you can check it.",
 };
 
 /** The list is rendered on the server, so the names are there without JavaScript; the page refreshes it after that. */
@@ -25,6 +25,8 @@ async function initial(): Promise<VoicesAnswer> {
   }
 }
 
-export default async function Page() {
-  return <VoicesPage initial={await initial()} />;
+export default async function Page({ searchParams }: PageProps<"/voices">) {
+  // The invite-link builder is for whoever recruits testers, so it sits behind ?invite=1.
+  const showInvite = (await searchParams).invite === "1";
+  return <VoicesPage initial={await initial()} showInvite={showInvite} />;
 }

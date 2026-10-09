@@ -39,7 +39,7 @@ for (const v of voices) {
 
 type Change = { voice: Voice; status: VoiceStatus } | { removed: string };
 
-export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
+export function VoicesPage({ initial, showInvite = false }: { initial: VoicesAnswer; /** The invite-link builder, for whoever recruits testers: /voices?invite=1. */ showInvite?: boolean }) {
   const [answer, setAnswer] = useState<VoicesAnswer>(initial);
   const { ledger, decoding, error: ledgerError } = useLedger();
   const { baskets } = useBaskets();
@@ -219,15 +219,14 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
             Every name here signed with the wallet that used Sheaf, so you can check it. We don&rsquo;t add names.
           </p>
           <p className="rise mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm" style={{ ["--i" as string]: 3 }}>
-            <a href="#sign" className={link}>
-              Add your name
-            </a>
             <a href="#check" className={link}>
               Check a name yourself
             </a>
-            <a href="#channels" className={link}>
-              Make an invite link
-            </a>
+            {showInvite && (
+              <a href="#channels" className={link}>
+                Make an invite link
+              </a>
+            )}
           </p>
         </div>
 
@@ -253,6 +252,10 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
                   Plus {count(waiting)} signed and waiting for a first action, not counted.
                 </p>
               )}
+              {/* The page's one call to action. */}
+              <a href="#sign" className="mt-6 inline-flex rounded-[var(--radius-control)] bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep">
+                Add your name
+              </a>
             </>
           ) : (
             <>
@@ -290,9 +293,9 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
           Check any name yourself
         </h2>
         <p className="mt-4 max-w-[62ch] text-sm leading-relaxed text-ink-2">
-          Nothing here asks you to trust us. A Solana address is an ed25519 public key, so a signature over the message proves the
-          wallet&rsquo;s owner wrote it. The wallet&rsquo;s activity is on the chain for anyone to read. What a signature can&rsquo;t
-          prove is who owns an X or Telegram handle; those stay self-reported.
+          A Solana address is an ed25519 public key, and an EVM address is recovered from an EIP-191 signature, so a signature over
+          the message proves the wallet&rsquo;s owner wrote it. The wallet&rsquo;s activity is on the chain for anyone to read. What a
+          signature can&rsquo;t prove is who owns an X or Telegram handle; those stay self-reported.
         </p>
         <div className="mt-10 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-3">
           <div className="bg-surface p-6">
@@ -318,7 +321,7 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
             <p className="display tnum text-sm text-ink-3">3</p>
             <p className="mt-2 text-base font-medium text-ink">Match the wallet to the chain</p>
             <p className="mt-2 text-sm leading-relaxed text-ink-2">
-              Each card links its wallet and its first action to Solana Explorer. The{" "}
+              Each card links its wallet and its first action to that chain&rsquo;s explorer: Solana Explorer, or the EVM testnet&rsquo;s own. The{" "}
               <Link href="/ledger" className={quiet}>
                 ledger
               </Link>{" "}
@@ -365,7 +368,8 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
         </div>
       </section>
 
-      {/* ------------------------------------------------------------ channels */}
+      {/* ------------------------------------------------------------ channels: a recruiting tool, shown at /voices?invite=1 */}
+      {showInvite && (
       <section id="channels" aria-labelledby="channels-title" className="mt-24 scroll-mt-24 border-t border-line pt-16">
         <h2 id="channels-title" className="display text-title max-w-[20ch] text-ink">
           Where people came from
@@ -378,6 +382,7 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
           <VoicesChannels refs={shown.refs} open={shown.open} />
         </div>
       </section>
+      )}
     </div>
   );
 }

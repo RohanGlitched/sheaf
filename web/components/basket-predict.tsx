@@ -72,7 +72,7 @@ const mono = (s: ReactNode) => <span className="font-mono text-[11px]">{s}</span
  * through Panta's whole write lifecycle.
  *
  * Sheaf writes the question and a resolution rule anyone can check (the recipe's
- * listed value at two Friday US closes, served as JSON at
+ * listed value at two week-ending US closes, served as JSON at
  * /api/nav/<basket>?at=<close>, against SPY's adjusted close), then runs
  * each step of opening the market and buying a side against Panta's API and
  * shows what Panta answered. The wallet is asked to sign and nothing is ever
@@ -471,6 +471,20 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
 
   const isCreator = me != null && me === creator;
 
+  // A basket holding companies not listed yet has no close to resolve from, so
+  // it gets no market: one line saying so, not a whole section about one.
+  if (offer?.offered === false) {
+    return (
+      <p className="max-w-[80ch] text-sm leading-relaxed text-ink-3" title={offer.reason}>
+        No prediction market on {symbol}: it holds companies with no listed close yet, so there is no number
+        for a market to resolve from.{" "}
+        <Link href="/predict" className="text-ink underline decoration-line-strong underline-offset-4">
+          Markets on listed baskets
+        </Link>
+      </p>
+    );
+  }
+
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-14">
       <div>
@@ -478,7 +492,7 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
         <h2 className="display mt-2 text-title max-w-[18ch] text-ink">{question}</h2>
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
           A basket&apos;s recipe is a public account, so a bet on it settles from a published number at two
-          Friday US closes, with every input listed so anyone can recompute it. Sheaf writes the question
+          week-ending US closes, with every input listed so anyone can recompute it. Sheaf writes the question
           and the rule.
           Panta runs the market on Solana, priced on a bonding curve and paid in USDC.
         </p>
@@ -513,33 +527,19 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
         </div>
       </div>
 
-      {offer?.offered === false ? (
-        <div className="self-start rounded-[var(--radius-panel)] border border-line bg-surface p-6">
-          <p className="text-xs text-ink-3">No market on {symbol}</p>
-          <p className="mt-2 max-w-[56ch] text-sm leading-relaxed text-ink-2">
-            The question resolves from <code className="text-xs">navPerShare.listed</code> at two Friday US
-            closes, and {symbol} holds companies that are not listed yet, so that number does not exist for
-            it. Sheaf offers a Panta market only on baskets whose every holding has a listed close.
-          </p>
-          {offer.reason && <p className="mt-3 max-w-[56ch] text-xs leading-relaxed text-ink-3">{offer.reason}</p>}
-          <Link href="/predict" className="mt-4 inline-block text-sm text-ink underline decoration-line-strong underline-offset-4">
-            Baskets with a market →
-          </Link>
-        </div>
-      ) : (
       <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
         <div className="border-b border-line p-6">
           <p className="text-xs text-ink-3">The question</p>
           <p className="mt-1.5 text-lg text-ink">{question}</p>
           <p className="mt-3 text-sm leading-relaxed text-ink-2">
             Resolves YES if one {symbol} share&apos;s <code className="text-xs">navPerShare.listed</code>{" "}
-            rose more than SPY&apos;s adjusted close between two Friday US closes (16:00 New York). Both are
+            rose more than SPY&apos;s adjusted close between two week-ending NYSE closes (normally Friday 16:00 New York). Both are
             read from <code className="text-xs">/api/nav/{short(basket, 4, 4)}?at=&lt;close&gt;</code>, the
             market&apos;s first source of truth.
           </p>
           {c.quote?.draft && (
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
-              Trading opens {day(c.quote.draft.startTime)} · measures the Friday closes{" "}
+              Trading opens {day(c.quote.draft.startTime)} · measures the week-ending closes{" "}
               {nyDay(c.quote.draft.endTime - 7 * 86_400)} to {nyDay(c.quote.draft.endTime)}, so none of the week is
               known when it opens · category{" "}
               {c.quote.draft.category}
@@ -674,7 +674,6 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
           </a>
         </div>
       </div>
-      )}
     </div>
   );
 }

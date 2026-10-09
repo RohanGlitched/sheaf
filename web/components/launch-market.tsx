@@ -38,7 +38,7 @@ import { explainError } from "@/lib/tx";
 import { ConnectButton } from "./connect-button";
 import { confirmSignature } from "@/lib/confirm";
 
-const AMOUNTS = [0.01, 0.05, 0.1];
+const AMOUNTS = [0.005, 0.01, 0.05, 0.1];
 const SELL_SHARES = [25, 50, 100];
 
 /** SOL a new launch raises before it graduates, per SOL of NAV, from the SDK's own curve builder. */
@@ -50,7 +50,7 @@ const FIRST_FEE_SECONDS = LAUNCH_FEE.totalDurationSeconds / LAUNCH_FEE.numberOfP
 function explain(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : String(error ?? "");
   if (/insufficient lamports|insufficient funds|no record of a prior credit/i.test(raw)) {
-    return "Not enough SOL on devnet. Switch the wallet to devnet, or get some at faucet.solana.com.";
+    return "Not enough devnet SOL. With the wallet in this browser, open the wallet menu and choose Get test SOL; with another wallet, switch it to devnet and use faucet.solana.com.";
   }
   if (/slippage|ExceededSlippage/i.test(raw)) return "The price moved while you were signing. Try again.";
   if (/already in use/i.test(raw)) {
@@ -121,6 +121,7 @@ function useLaunch(basket: LaunchBasketProps) {
   const [readError, setReadError] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const [rejected, setRejected] = useState<ReadonlyMap<string, string>>(new Map());
+  const [anchorUnknown, setAnchorUnknown] = useState(false);
   const { address, name, symbol, creator } = basket;
 
   const load = useCallback(async () => {
@@ -142,6 +143,8 @@ function useLaunch(basket: LaunchBasketProps) {
       setInfo(next);
       setUnofficial(found.unofficial);
       setRejected(refused);
+      // Without the server's price check the card cannot tell a refused pool from the launch, so it stays read-only.
+      setAnchorUnknown(scan.candidates.length > 0 && provenance == null);
       setAnchor(found.launch && provenance?.pool === found.launch.info.pool ? provenance.anchor : null);
       setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
@@ -155,7 +158,7 @@ function useLaunch(basket: LaunchBasketProps) {
     void Promise.resolve().then(load);
   }, [load]);
 
-  return { info, state, unofficial, readError, anchor, rejected, reload: load };
+  return { info, state, unofficial, readError, anchor, rejected, anchorUnknown, reload: load };
 }
 
 /** "20 × NAV", read off a pool's own open and graduation caps, so old and new curves both say the truth. */
@@ -215,7 +218,15 @@ function OwnFeaturedLaunch() {
 }
 
 function FeaturedCard({ launch }: { launch: ReturnType<typeof useLaunch> }) {
-  if (!launch.info) return <LaunchSkeleton />;
+  if (!launch.info) {
+    return launch.readError ? (
+      <p className="flex h-[420px] items-center justify-center border border-line bg-raised px-6 text-center text-sm text-ink-3">
+        {launch.readError}
+      </p>
+    ) : (
+      <LaunchSkeleton />
+    );
+  }
   return (
     <LaunchCard
       basketAddress={FEATURED_LAUNCH.basket.address}
@@ -224,9 +235,13 @@ function FeaturedCard({ launch }: { launch: ReturnType<typeof useLaunch> }) {
       readError={launch.readError}
       anchor={launch.anchor}
       onTraded={launch.reload}
+      readOnly={launch.anchorUnknown ? CHECKING : null}
+      refused={launch.unofficial}
     />
   );
 }
+
+const CHECKING = "Checking this launch's opening price against the basket's NAV. Trading opens once the check answers; reload in a minute.";
 
 function LaunchSkeleton() {
   return <div className="h-[420px] animate-pulse border border-line bg-raised" />;
@@ -270,8 +285,8 @@ export function BasketLaunch({
             {launch.state.migrated
               ? `raised ${solText(launch.state.threshold)} SOL, then graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
               : `graduates at ${graduationMultiple(launch.state)} times it, once ${solText(launch.state.threshold)} SOL has gone in, into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
-            It is not a {basket.symbol} share: the vault does not back it, and it cannot be redeemed
-            for the stocks.
+            It is not a share of {basket.symbol}: the vault does not back it, and it cannot be
+            redeemed for the stocks.
           </p>
           {preIpo.length > 0 && <PreIpoWarning basketName={basket.name} companies={preIpo} />}
         </div>
@@ -284,6 +299,8 @@ export function BasketLaunch({
           onTraded={launch.reload}
           onBasketPage
           preIpo={preIpo.length > 0}
+          readOnly={launch.anchorUnknown ? CHECKING : null}
+          refused={launch.unofficial}
         />
       </section>
     );
@@ -522,6 +539,38 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
   );
 }
 
+/**
+ * Every pool Sheaf found at this basket's launch addresses and refused, with
+ * the reason: a squat (wrong creator), rogue terms, or a curve that did not open
+ * at half the basket's NAV. None of them is listed, traded or counted.
+ */
+function RefusedPools({ pools }: { pools: FoundLaunch[] }) {
+  if (pools.length === 0) return null;
+  return (
+    <details className="mt-5 border-t border-line pt-4 text-xs text-ink-3">
+      <summary className="cursor-pointer text-ink-2 hover:text-ink">
+        Pools Sheaf refused at this basket&rsquo;s addresses ({pools.length})
+      </summary>
+      <ul className="mt-2 divide-y divide-line">
+        {pools.map((p) => (
+          <li key={p.info.pool} className="py-2 leading-relaxed">
+            <span className="tnum text-ink-2">Slot {p.info.slot ?? 0}</span>{" "}
+            <a
+              href={explorerAddress(p.info.pool)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+            >
+              {shortAddress(p.info.pool)}
+            </a>
+            : {p.check.reason}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 /** A plain warning above a launch whose basket holds pre-IPO SPV tokens. */
 function PreIpoWarning({ basketName, companies }: { basketName: string; companies: string[] }) {
   return (
@@ -563,6 +612,8 @@ export function LaunchCard({
   onTraded,
   onBasketPage = false,
   preIpo = false,
+  readOnly = null,
+  refused = [],
 }: {
   basketAddress: string;
   info: DbcPoolInfo;
@@ -571,6 +622,10 @@ export function LaunchCard({
   anchor?: Anchor | null;
   /** A pre-IPO basket's launch: shown plainly, never promoted ("be the first buyer"). */
   preIpo?: boolean;
+  /** Why trading is held back right now (the price check could not be read), or null. */
+  readOnly?: string | null;
+  /** Pools refused at this basket's addresses, listed under the card. */
+  refused?: FoundLaunch[];
   onTraded: () => Promise<void>;
   onBasketPage?: boolean;
 }) {
@@ -578,7 +633,7 @@ export function LaunchCard({
   const { publicKey, sendTransaction, connected } = useWallet();
   const [held, setHeld] = useState<{ ui: number; raw: bigint } | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [amount, setAmount] = useState(AMOUNTS[1]);
+  const [amount, setAmount] = useState(AMOUNTS[2]);
   const [sellShare, setSellShare] = useState(SELL_SHARES[0]);
   const [busy, setBusy] = useState<"trade" | "claim" | "graduate" | "poolClaim" | null>(null);
   const [position, setPosition] = useState<{ feeSol: number; feeToken: number } | null>(null);
@@ -751,7 +806,7 @@ export function LaunchCard({
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line px-6 py-4">
         <p className="text-sm text-ink">
           <span className="display text-lg">{info.baseSymbol}</span>{" "}
-          <span className="text-ink-2">{info.baseName}</span>
+          <span className="text-ink-2">launch token · {info.baseName.replace(/, early access$/, "")}</span>
         </p>
         <p className="flex items-center gap-2 text-xs text-ink-3">
           <span className={`size-1.5 rounded-full bg-gain ${state?.migrated ? "" : "live-dot"}`} aria-hidden />
@@ -789,7 +844,7 @@ export function LaunchCard({
                 ? "live on Meteora DAMM v2"
                 : untouched
                   ? "the opening price, untouched"
-                  : `${percent((state.raised / state.threshold) * 100, 2)} to graduation`
+                  : `${percent((state.raised / state.threshold) * 100, 0)} of the way to graduation`
           }
         />
         <Fact
@@ -885,7 +940,9 @@ export function LaunchCard({
                 !state ||
                 (side === "sell" && !(held && held.raw > 0n)) ||
                 // A full curve takes neither buys nor sells until it graduates.
-                curveFull
+                curveFull ||
+                // Until the price check answers, this pool may not be the basket's launch.
+                readOnly != null
               }
               className="bg-bind px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
             >
@@ -941,7 +998,7 @@ export function LaunchCard({
               <button
                 type="button"
                 onClick={graduate}
-                disabled={busy != null}
+                disabled={busy != null || readOnly != null}
                 className="mt-3 bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
               >
                 {busy === "graduate" ? "Graduating…" : "Graduate to Meteora DAMM v2"}
@@ -989,6 +1046,14 @@ export function LaunchCard({
           </p>
         )}
 
+        {readOnly && <p className="mt-4 border-l-2 border-line-strong pl-3 text-xs leading-relaxed text-ink-2">{readOnly}</p>}
+        {state && !state.migrated && !untouched && !curveFull && !preIpo && state.threshold - state.raised <= 1 && (
+          <p className="mt-4 text-xs leading-relaxed text-ink-3">
+            {solText(state.threshold - state.raised)} SOL to graduation: about{" "}
+            {Math.max(1, Math.ceil((state.threshold - state.raised) / 0.05))} test-wallet buys of 0.05 SOL. Graduate
+            it and the pool&rsquo;s liquidity locks for good.
+          </p>
+        )}
         {state && <LaunchTrades pool={info.pool} refresh={done?.signature ?? null} />}
         {anchor?.status === "unverifiable" && anchor.reason && (
           <p className="mt-4 text-xs leading-relaxed text-ink-3">
@@ -996,6 +1061,8 @@ export function LaunchCard({
           </p>
         )}
         {RETIRED_METADATA_MINTS.has(info.baseMint) && <RetiredMetadataNote basketAddress={basketAddress} />}
+
+        <RefusedPools pools={refused} />
 
         <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
           {state && <PresetLink state={state} />}

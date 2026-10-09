@@ -353,7 +353,7 @@ function toOrderV2(id: number, o: {
 /**
  * Which desk an order is on. 1: the v1 fixed-price CreationDesk. 2: the first
  * CreationDeskV2 (auction, protocol fee to the deployer). 3: the CreationDeskV2
- * deployed with PlanDeskV3, whose protocol fee goes to a separate cold treasury.
+ * deployed with PlanDeskV3, whose protocol fee goes to a separate treasury key.
  * Desks 2 and 3 run the same contract code.
  */
 export type DeskVersion = 1 | 2 | 3;
@@ -438,8 +438,8 @@ export async function readPlansOf(d: Deployment, owner: Address): Promise<PlanV2
 
 /**
  * v3: PlanDeskV3, plans with trailing bounds under the owner's hard floor and
- * ceiling, on a fresh CreationDeskV2 whose immutable treasury is a separate cold
- * key (not the deployer, not the keeper). Recorded under `v3`: read with v3Of(d).
+ * ceiling, on a fresh CreationDeskV2 whose immutable treasury is a separate key
+ * the founder holds (not the deployer, not the keeper, in no server environment). Recorded under `v3`: read with v3Of(d).
  */
 export const PLAN_DESK_V3_ABI = parseAbi([
   "function desk() view returns (address)",
@@ -573,16 +573,66 @@ export async function readPlansOfV3(d: Deployment, owner: Address): Promise<Plan
  * The v3 Tempo SIP. Same shape as v2 (the root key opens the plan, then scopes the
  * keeper's access key to approve(PlanDeskV3) and PlanDeskV3.instalment), with
  * trailing bounds: each run's fair count must sit within 10% of what the last run
- * filled at, and never outside the owner's hard bounds of 70% to 150% of the fair
- * count at signing. So a monthly plan follows normal moves, and the owner's worst
- * price is fixed at signing: no run buys fewer than 70% of today's count.
+ * filled at, and never outside the owner's hard bounds of 85% to 120% of the fair
+ * count at signing.
+ *
+ * Who sets "fair": the keeper supplies each run's fair count, but the contract only
+ * accepts one within 10% of the last run's actual fill and inside the hard bounds.
+ * Worst case with one filler (the house supplying fair at the window's low edge and
+ * filling at the auction's end): the plan reaches the hard floor in about two runs,
+ * and every run still buys at least 85% of the signing-day count, a price at most
+ * about 1.18 times the signing-day price. Another filler can only improve on it.
  */
 export const TEMPO_SIP_V3 = {
   ...TEMPO_SIP_V2,
   stepBps: 1_000,
-  hardMinBps: 7_000,
-  hardMaxBps: 15_000,
+  hardMinBps: 8_500,
+  hardMaxBps: 12_000,
 } as const;
+
+/** The worst-case line every plan panel shows: what one filler alone can do to a plan with these hard bounds. */
+export function worstCaseLine(hardMinBps: number, symbol: string): string {
+  const pct = hardMinBps / 100;
+  const price = (10_000 / hardMinBps).toFixed(2);
+  return `Worst case with one filler: it can walk your price toward the floor, but every run still buys at least ${pct}% of today's ${symbol} for the same dollars, a price at most ${price} times today's. Any other filler can only do better.`;
+}
+
+/**
+ * A plan on a chain without access keys (Robinhood Chain, the Sepolias): the owner
+ * opens it on PlanDeskV3 naming the house as `keeper`, and approves the plan desk
+ * for a fixed number of runs. The keeper loop runs it when due; the contract still
+ * fixes the amount, the interval, the window and the hard bounds, and the allowance
+ * caps the total. Two cadences: a 10-minute demo for three runs, and monthly for a year.
+ */
+export const EVM_PLAN_V3 = {
+  bandBps: 200,
+  stepBps: 1_000,
+  hardMinBps: 8_500,
+  hardMaxBps: 12_000,
+  cadences: {
+    // The auction outlasts the keeper cron's 5-minute sweep, so the house's fill at fair plus 0.15% (about 60% in) is never missed.
+    demo: { label: "Every 10 minutes, 3 runs (demo)", interval: 600n, auctionSecs: 900n, runs: 3n },
+    monthly: { label: "Every 30 days, 12 runs", interval: 30n * 86_400n, auctionSecs: 1_800n, runs: 12n },
+  },
+} as const;
+export type PlanCadence = keyof typeof EVM_PLAN_V3.cadences;
+
+/** The terms a plan on a non-Tempo chain signs, for `cashPerRun` raw dollars a run at `navUsd` a share. */
+export function evmPlanV3Terms(navUsd: number, cashPerRun: bigint, cashDecimals: number, cadence: PlanCadence) {
+  const fair = fairSharesFor(cashPerRun, cashDecimals, navUsd);
+  const c = EVM_PLAN_V3.cadences[cadence];
+  return {
+    cashPerRun,
+    interval: c.interval,
+    auctionSecs: c.auctionSecs,
+    runs: c.runs,
+    bandBps: EVM_PLAN_V3.bandBps,
+    stepBps: EVM_PLAN_V3.stepBps,
+    refShares: fair,
+    hardMin: (fair * BigInt(EVM_PLAN_V3.hardMinBps)) / BPS,
+    hardMax: (fair * BigInt(EVM_PLAN_V3.hardMaxBps)) / BPS,
+  };
+}
 
 /** The plan terms a visitor signs for `navUsd` a share now (see TEMPO_SIP_V3). */
 export function tempoSipV3Terms(navUsd: number, cashDecimals = 6) {

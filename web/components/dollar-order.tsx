@@ -12,7 +12,7 @@ import { confirmSignature } from "@/lib/confirm";
 import { chainClockOffset, chainNow, explainError, signFresh } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
-import { money, timeAgo } from "@/lib/format";
+import { money, moneyWhole, timeAgo } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 
 const AUCTION_SECS = 90;
@@ -31,8 +31,22 @@ const BAND_BPS = 200;
  */
 export const MIN_ORDER_DOLLARS = 5;
 
-/** What a filler pays on mainnet routes to buy this basket's stocks, one way, in basis points, by order size in dollars. */
-export type RouteCost = { basket: string; bps: Record<string, number>; at: number };
+/**
+ * What a filler pays on mainnet routes to buy this basket's stocks, in basis
+ * points over spot, by order size in dollars: one way, and the round trip
+ * (GET /api/route-cost, the same Jupiter quotes as /api/fill-cost). A size that
+ * cannot be routed reads null.
+ */
+export type RouteCost = {
+  basket: string;
+  bps: Record<string, number | null>;
+  roundTripBps?: Record<string, number | null>;
+  /** ISO time of the quote (older answers sent unix seconds or milliseconds). */
+  at: string | number;
+};
+
+/** The house filler's margin, which it waits for inside the band before it fills. */
+const HOUSE_MARGIN_BPS = 15;
 
 /**
  * The measured one-way route cost for a basket (GET /api/route-cost), or null
@@ -55,20 +69,59 @@ export function useRouteCost(basket: string): RouteCost | null {
   return cost;
 }
 
-/** The route cost for an order of `dollars`: the measured size nearest to it, or null if none was measured. */
-export function routeBpsFor(cost: RouteCost | null, dollars: number): number | null {
+/** The quote for an order of `dollars`: the measured size nearest to it, with that size, or null if none was measured. */
+export function routeQuoteFor(cost: RouteCost | null, dollars: number): { size: number; bps: number; roundTrip: number | null } | null {
   if (!cost) return null;
   const sizes = Object.keys(cost.bps)
     .map(Number)
     .filter((s) => Number.isFinite(s) && Number.isFinite(cost.bps[String(s)]));
   if (sizes.length === 0) return null;
   const target = Number.isFinite(dollars) && dollars > 0 ? dollars : 100;
-  const nearest = sizes.reduce((a, b) => (Math.abs(Math.log(b / target)) < Math.abs(Math.log(a / target)) ? b : a));
-  return cost.bps[String(nearest)];
+  const size = sizes.reduce((a, b) => (Math.abs(Math.log(b / target)) < Math.abs(Math.log(a / target)) ? b : a));
+  const roundTrip = cost.roundTripBps?.[String(size)];
+  return { size, bps: cost.bps[String(size)] as number, roundTrip: Number.isFinite(roundTrip) ? (roundTrip as number) : null };
 }
+
+/** The one-way route cost for an order of `dollars`, or null if none was measured. */
+export const routeBpsFor = (cost: RouteCost | null, dollars: number): number | null => routeQuoteFor(cost, dollars)?.bps ?? null;
+
+/** Unix seconds of a quote's time, whatever form the route sent. */
+const quotedAt = (at: string | number) => (typeof at === "string" ? Date.parse(at) / 1000 : at > 1e12 ? at / 1000 : at);
 
 /** "about 0.42%", or "next to nothing" when routes are at or better than fair, so a negative cost never reads as "-0.03%". */
 export const routeCostText = (bps: number) => (bps <= 0.5 ? "next to nothing" : `about ${(bps / 100).toFixed(2)}%`);
+
+/**
+ * The route cost as one line, with the order size it was measured at, both
+ * ways, and its age. Above the house filler's margin, it says the house will
+ * wait deeper into the auction or not fill, though other fillers may.
+ */
+export function RouteCostNote({
+  cost,
+  dollars,
+  verb = "buying",
+  bandBps = 200,
+}: {
+  cost: RouteCost | null;
+  dollars: number;
+  verb?: "buying" | "selling";
+  /** The auction's band: above it the form says plainly that nobody can fill, so this line stays quiet. */
+  bandBps?: number;
+}) {
+  const q = routeQuoteFor(cost, dollars);
+  if (!q || !cost) return null;
+  const at = quotedAt(cost.at);
+  return (
+    <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
+      On mainnet routes, for a {moneyWhole(q.size)} order, {verb} these stocks costs a filler {routeCostText(q.bps)} one way
+      {q.roundTrip != null ? ` (${routeCostText(q.roundTrip).replace("about ", "")} round trip)` : ""}
+      {Number.isFinite(at) ? `, measured ${timeAgo(at)}` : ""}.
+      {q.bps > HOUSE_MARGIN_BPS && q.bps <= bandBps
+        ? ` That is above Sheaf's filler's ${(HOUSE_MARGIN_BPS / 100).toFixed(2)}% margin, so it waits deeper into the auction or doesn't fill; other fillers may.`
+        : ""}
+    </p>
+  );
+}
 
 /** True when no filler could buy the stocks inside the auction's band today, so a dollar order or plan run could not fill. */
 export const routeOutsideBand = (bps: number | null, bandBps = 200) => bps != null && bps > bandBps;
@@ -369,12 +422,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
                 .
                 The first filler to deliver takes your dollars; if nobody does, the order can be refunded in full.
               </p>
-              {routeBps != null && (
-                <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
-                  On mainnet routes, buying these stocks costs a filler {routeCostText(routeBps)} one way
-                  {routeCost?.at ? `, measured ${timeAgo(routeCost.at > 1e12 ? routeCost.at / 1000 : routeCost.at)}` : ""}.
-                </p>
-              )}
+              <RouteCostNote cost={routeCost} dollars={amount} bandBps={BAND_BPS} />
             </div>
           )}
 

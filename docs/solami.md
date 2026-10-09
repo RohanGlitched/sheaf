@@ -1,6 +1,14 @@
 ## Solami
 
-Sheaf reads Solana mainnet through [Solami](https://solami.dev). Solami supplies two things: a live tape of tokenized-stock trades, and every xStock's Token-2022 dividend multiplier, which sets basket NAV.
+Sheaf reads Solana mainnet through [Solami](https://solami.dev).
+
+**Every basket's value and every Panta resolution read their dividend multipliers through Solami.** Each xStock's dividends live in its Token-2022 `ScaledUiAmount` multiplier, on the mint itself. Sheaf reads all 28 mints in one `getMultipleAccounts` through Solami (`/api/market` `chain: {slot, via}`, and `/api/nav/<basket>` `sources.multipliers`, which names the slot and the RPC). That number:
+- sets the value of every basket on every page
+- prices `navPerShare.listed` at the two closes a Panta market resolves from
+
+If the read fails, `/api/nav?at=` answers 503 rather than use Jupiter's copy. `/api/market` then reports the reason as `chainError`.
+
+The second thing Solami supplies is the live tape of tokenized-stock trades, on its own page at **[/live](https://sheaf-index.vercel.app/live)**. That page shows the tape full width, with the Solami figures open, and is the page to watch (or record) it on.
 
 ### What Sheaf uses, exactly
 
@@ -17,8 +25,8 @@ Sheaf uses one Solami product: the **RPC** (`https://rpc.solami.dev/solana?api-k
 Code:
 - `web/lib/solami.ts`: the client, with pacing, 429 handling, the fallback and the comparison.
 - `web/lib/tape-server.ts` and `web/app/api/tape/route.ts`: the tape.
-- `web/lib/mainnet.ts`: the mint multipliers.
-- `web/components/live-tape.tsx`: the page.
+- `web/lib/mainnet.ts`: the mint multipliers. A failed read is logged, puts Solami on its cool-down, and is kept as `lastMintReadFailure()`, which `/api/market` reports as `chainError`. It is never swallowed.
+- `web/components/live-tape.tsx`: the tape, on the home page and on `/live` (`web/app/live/page.tsx`).
 - `web/lib/tape-store.ts` and `web/app/api/tape/seed/route.ts`: the rolling earlier-trades seed in GCS.
 - `scripts/tape-seed.mjs` and `web/public/tape.seed.json`: the committed fallback seed.
 
@@ -62,7 +70,7 @@ The tape is a sample: the newest trades on two of ten mints per poll, not every 
 A new serverless instance starts with nothing in memory. Four things keep the tape from sitting empty or hanging:
 
 - **Backfill.** An instance's first poll reads the last 20 signatures on every watched mint (ten paced calls) and decodes the newest four. The rest wait in a queue (at most 80), and while the tape has fewer than 30 rows each later poll decodes one or two of them alongside the new trades. `backlog` in the response says how many are still queued. Backfilled rows are real chain reads with real block times, but they carry `live: false`.
-- **No hanging first request.** The backfill is about fifteen paced calls, roughly eight seconds. The first caller waits at most four. After that it gets an empty tape marked `warming: true` (not cached by the CDN), and the backfill finishes in `after()` for the next request.
+- **First rows in about three seconds.** The backfill reads the two busiest mints (SPY, NVDA) first and decodes their newest two trades straight away. Those rows go into the tape at once, with times placed by slot distance until the block time is read. The whole backfill is about fifteen paced calls, roughly ten seconds at 667 ms. The first caller waits at most four. If it is not done by then, the caller gets a tape marked `warming: true` (not cached by the CDN) that already holds those first rows. The page shows them, its header says "Reading mainnet through Solami" rather than "Connecting", and it asks again in 2.5 s while the rest finishes in `after()`. The keeper's scheduled GET of `/api/tape` every minute keeps an instance warm, and with it the rolling seed.
 - **Rolling seed in storage.** A warm instance whose tape has at least 20 live rows writes its newest 40 rows to the project's private GCS bucket (`tape/seed.json`, keyless through Vercel OIDC and workload identity federation, `web/lib/tape-store.ts`), at most every 10 minutes, from `after()`. The page asks `GET /api/tape/seed` first, so on a cold load the earlier trades are as recent as the last busy stretch, not the last deploy. With GCS unset or nothing written yet, that route answers 204 and the page falls back to the committed file below.
 - **Committed seed (last fallback).** `web/public/tape.seed.json` holds 40 real trades captured earlier by `scripts/tape-seed.mjs`. The script polls a running Sheaf server's `/api/tape?depth=60` (the same decoder and filters) and stores each row's Jupiter price and dividend multiplier from its own moment. The page shows these rows at once, under an "Earlier trades, not live" divider with the capture time, until eight rows have come from the server. Seed rows show their real block times, are never highlighted, and never feed the figures.
 

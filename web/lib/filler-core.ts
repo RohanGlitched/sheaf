@@ -586,12 +586,20 @@ async function priceAndFillSell(
   const fillerCash = ata(order.cashMint, filler.publicKey, order.cashProgram);
   const fillerShares = ata(basket.shareMint, filler.publicKey, TOKEN_2022);
   const fillerComponents = basket.components.map((c) => ata(c.mint, filler.publicKey, basket.tokenProgram));
-  const [fillerCashInfo, fillerShareInfo, ...rest] = await connection.getMultipleAccountsInfo([
+  const sellerCash = ata(order.cashMint, order.seller, order.cashProgram);
+  const [sellerCashInfo, fillerCashInfo, fillerShareInfo, ...rest] = await connection.getMultipleAccountsInfo([
+    sellerCash,
     fillerCash,
     fillerShares,
     ...basket.components.map((c) => c.mint),
     ...fillerComponents,
   ]);
+  // The seller must hold the dollar account already: the program would open a
+  // missing one at the filler's expense, rent the seller could close and keep.
+  if (!sellerCashInfo) {
+    log(`${id} skipped: the seller has no dollar account to be paid into`);
+    return null;
+  }
   const mintInfos = rest.slice(0, basket.components.length);
   const holdingInfos = rest.slice(basket.components.length);
   const mints: MintInfo[] = [];

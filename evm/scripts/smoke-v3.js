@@ -1,6 +1,6 @@
-// Live smoke test of the v3 pair (CreationDeskV2 with a cold treasury, and
+// Live smoke test of the v3 pair (CreationDeskV2 with a separate treasury key, and
 // PlanDeskV3) on a deployed chain. The deployer plays buyer, filler and plan
-// owner; the treasury is the separate cold key, so its fee is checked apart.
+// owner; the treasury is a separate key, so its fee is checked apart.
 //
 //   npx hardhat run scripts/smoke-v3.js --network robinhoodTestnet
 //

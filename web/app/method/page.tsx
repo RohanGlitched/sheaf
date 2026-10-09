@@ -381,7 +381,7 @@ function PlanVisual() {
 function PredictVisual() {
   const rows: [string, string][] = [
     ["Question", "Will the Big Five (BIG5) beat SPY this week?"],
-    ["Yes if", "one share's recipe value rose more than SPY between two Friday closes"],
+    ["Yes if", "one share's recipe value rose more than SPY between two week-ending closes"],
     ["Settles from", "/api/nav/FFGg…EfJ, every input listed"],
     ["Market", "Panta, a USDC bonding curve on Solana (sandbox today)"],
   ];
@@ -768,8 +768,9 @@ export default async function MethodPage() {
           visual={<PredictVisual />}
         >
           <p>
-            Every basket carries one question: will it beat SPY this week? It
-            settles from a published number at two Friday US closes: the
+            Every listed basket carries one question: will it beat SPY this week?
+            (A pre-IPO basket has no listed close, so it has no market.) It
+            settles from a published number at two week-ending NYSE closes: the
             recipe&rsquo;s units times each holding&rsquo;s adjusted close from
             Yahoo times its mint&rsquo;s dividend multiplier, against SPY&rsquo;s
             adjusted close. Every input is listed, so anyone can recompute it from
@@ -946,7 +947,8 @@ export default async function MethodPage() {
             {[
               ["Components per basket", `1 to ${MAX_COMPONENTS}`],
               ["Share decimals", String(SHARE_DECIMALS)],
-              ["Protocol fee", "0.10% of each creation, in shares (baskets created from Oct 9)"],
+              ["Protocol fee", "0.10% of each creation, in shares (Solana baskets created from Oct 9)"],
+              ["On the EVM chains", "the v3 desks pay the 0.10% to a separate treasury key the server does not hold (v2's went to the house key)"],
               ["Creator fee ceiling", `${MAX_CREATOR_FEE_BPS / 100}%`],
               ["Deposits", "round up"],
               ["Redemptions", "round down"],

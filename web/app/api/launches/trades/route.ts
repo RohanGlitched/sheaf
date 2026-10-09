@@ -1,10 +1,10 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { WRITE_RPC } from "@/lib/config";
-import { openLaunches } from "@/lib/dbc";
 import { clientIp, rateLimiter } from "@/lib/evm-server";
 import { fetchBaskets } from "@/lib/sheaf";
 import { isSiteOrigin } from "@/lib/server-origin";
 import { TRADE_WINDOW, readTrades } from "../read-trades";
+import { resolveLaunch } from "../../launch/anchor";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,14 @@ const perIp = rateLimiter(60_000, 20);
 
 /** The official launch pools, refreshed once a minute: the only pools this route will read. */
 let official: { at: number; pools: Map<string, string> } | null = null;
-async function officialPools(connection: Connection): Promise<Map<string, string>> {
+async function officialPools(connection: Connection, origin: string): Promise<Map<string, string>> {
   if (official && Date.now() - official.at < 60_000) return official.pools;
-  const found = await openLaunches(connection, await fetchBaskets(connection));
-  const pools = new Map([...found.values()].map((info) => [info.pool, info.baseMint]));
+  // The same choice as the card and the feed: creator, terms, mint authority and the price check.
+  const pools = new Map<string, string>();
+  for (const basket of await fetchBaskets(connection)) {
+    const { launch } = await resolveLaunch(connection, origin, basket);
+    if (launch) pools.set(launch.info.pool, launch.info.baseMint);
+  }
   official = { at: Date.now(), pools };
   return pools;
 }
@@ -51,7 +55,7 @@ export async function GET(req: Request) {
     return Response.json({ error: "Pass ?pool=<an official launch's pool address>." }, { status: 400 });
   }
   const connection = new Connection(WRITE_RPC, "confirmed");
-  const baseMint = (await officialPools(connection)).get(pool);
+  const baseMint = (await officialPools(connection, new URL(req.url).origin)).get(pool);
   if (!baseMint) return Response.json({ error: "Not an official Sheaf launch pool." }, { status: 404 });
   const account = await connection.getAccountInfo(new PublicKey(pool));
   const migrated = account?.data[305] === 1;

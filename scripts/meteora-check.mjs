@@ -54,6 +54,8 @@ const LAUNCHES = [
   ["IDXA", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 0, "v2"],
   // Passes the terms on purpose: only its anchor is wrong (see the anchor checks below).
   ["rogue anchor", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 1, "v2"],
+  // Also passes the terms on purpose: only its creator differs (see the creator check below).
+  ["exact squat", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 2, "v2"],
   ["squat", PROXY, 0, "rejected"],
   ["rogue terms", PROXY, 2, "rejected"],
 ];
@@ -152,6 +154,13 @@ for (const [name, basket, pool] of ANCHORS) {
   const refused = body?.provenance?.rejected?.find((r) => r.pool === rogue);
   check("rogue anchor (IDX slot 1) refused as a mismatch", refused?.anchor?.status, "mismatch");
   console.log(`  info: ${refused?.reason} (deviation ${refused?.anchor?.deviationPct}%)`);
+  // Metadata is per launch: the official URL names the official mint, and other slots say they are not official.
+  check("IDX metadata names the official mint", body?.attributes?.find((a) => a.trait_type === "official_mint")?.value, launchInfo(IDX, 0).mint.toBase58());
+  const slot1 = await fetch(`${SITE}/api/launch/${IDX}/1`).then((r) => r.json()).catch(() => null);
+  check("rogue-anchor slot's metadata says not official", slot1?.name, "Not an official Sheaf launch");
+  // The exact squat: on the published terms at the right price, refused for its creator alone.
+  const slot2 = await fetch(`${SITE}/api/launch/${IDX}/2`).then((r) => r.json()).catch(() => null);
+  check("exact squat (IDX slot 2) refused on the creator check", slot2?.provenance?.reason, "It was not opened by the basket's creator.");
 }
 
 if (failures) {

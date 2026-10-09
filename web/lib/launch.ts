@@ -71,9 +71,14 @@ export const LAUNCH_METADATA_SITE = "https://sheaf-index.vercel.app";
  * (`scripts/meteora-launch-size.mjs` checks it). Provenance (NAV at open, SOL
  * price, open time, preset) is not written here; the metadata route derives it
  * from the pool's own accounts and checks it against independent prices.
+ *
+ * The URI names the slot as well as the basket, so it describes one mint: the
+ * route answers with the official metadata only when that slot holds the
+ * basket's launch, and with "not an official Sheaf launch" for anything else
+ * (a squat, a refused pool, or a mint that borrows the URL).
  */
-export function launchUri(basket: string): string {
-  return `${LAUNCH_METADATA_SITE}/api/launch/${basket}`;
+export function launchUri(basket: string, slot: number): string {
+  return `${LAUNCH_METADATA_SITE}/api/launch/${basket}/${slot}`;
 }
 
 /**
@@ -206,7 +211,7 @@ export async function buildLaunch(params: {
     preCreatePoolParam: {
       name: launchName(basket.name),
       symbol: launchSymbol(basket.symbol),
-      uri: launchUri(basket.address),
+      uri: launchUri(basket.address, slot),
       poolCreator: creator,
       baseMint: mint.publicKey,
     },

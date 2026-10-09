@@ -8,8 +8,9 @@ import { gcsConfigured, getJson, putJson } from "./gcs-store";
  *
  * Held in memory and, when the project's bucket is configured, in
  * prices/last-good.json, written at most every five minutes. fetchMarket fills
- * a quote Jupiter did not return from Pyth's 24/7 tokenized feed first, and
- * only then from here, marking each such quote with where it came from.
+ * a quote Jupiter did not return from GeckoTerminal first, and only then from
+ * here, marking each such quote with where it came from. Pages may show a
+ * snapshot price; the fillers never fill on one.
  */
 
 const OBJECT = "prices/last-good.json";

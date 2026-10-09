@@ -117,6 +117,9 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "Gxa3YFM6Cpd5JvaGUx65J7jt3tP3DBZDgYVn4CF11fCW", role: "test", label: "Test wallet, QA round 6 / video recording" },
   { address: "X1WAuW2e44anzyqDhpyqvwWM5jiAxVuo7qML2LmkzxK", role: "test", label: "Test wallet, QA round 6 / video recording" },
   { address: "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355", role: "treasury", label: "EVM v3 treasury (cold key)" },
+  { address: "0xE8f1f1a08Ef18616E460dA685885A8A736C24B1f", role: "test", label: "Test wallet, round 6" },
+  { address: "0x90Df37A0B6656b7EDb6f1B32Ed311c72E53B7057", role: "test", label: "Test wallet, Robinhood plan walkthrough" },
+  { address: "0x024D7719dcdE51Aff20CeAcdFf60eD259B6e225e", role: "test", label: "Tempo test plan account, QA round 4" },
   { address: "cQKhoauPParjVawD5zTGFqtGLhi3FHp8g8Qn8H1PtcA", role: "test", label: "Test wallet, QA round 2 (funded by the house faucet, bought BIG5A)" },
   // UI tests of plans and dollar orders, 9 October.
   { address: "G6qHDvZq6KsMQkzTXnB5LhUJZDDhY3PS7RZDNwLHx19", role: "test", label: "Test wallet, UI test" },

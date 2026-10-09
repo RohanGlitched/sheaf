@@ -105,6 +105,12 @@ const FALLBACK_EXTRA_BPS = 50;
 const FAILED_ATTEMPTS = 6;
 /** Plan runs attempted per run, proven plans first. */
 const MAX_PLAN_ATTEMPTS = 8;
+/**
+ * The most SOL one run's fills and sales may cost the house net, fees and any
+ * rent it will not get back. Past it, the run stops filling, so no loop of
+ * orders can drain the key faster than this per run.
+ */
+const MAX_RUN_SPEND_LAMPORTS = 20_000_000;
 
 type Fill = { order: string; shares: string; cash: string; marginBps: number; navUsd: number; costUsd: number; fallback: boolean };
 /** A sell order the house bought: shares taken, dollars paid, and the discount to fair it got. */
@@ -142,7 +148,9 @@ function priceShareUsd(basket: Basket, market: Market): Nav | null {
   for (const c of basket.components) {
     const stock = stockForWriteMint(c.mint);
     const q = stock ? bySymbol.get(stock.symbol) : undefined;
-    if (!q) return null;
+    // The house fills only on live quotes: a price from the last-good snapshot can
+    // be hours old, so a component priced from it means no fill at all, either way.
+    if (!q || q.source === "snapshot") return null;
     const v = (Number(c.unitsPerShare) / 10 ** c.decimals) * q.price * (q.multiplier ?? 1);
     const f = feeBpsOf(c.mint) / 10_000;
     nav.fair += v;
@@ -214,12 +222,18 @@ function tokenState(data: Uint8Array | null | undefined): TokenState | null {
   };
 }
 
-/** Many accounts, a hundred to a call. A failed batch reads as missing, so nothing is attempted blind. */
+/**
+ * Many accounts, a hundred to a call. A missing account reads null; a batch the
+ * RPC failed to answer reads undefined, which callers skip for this run without
+ * holding it against anyone (no strike, no backoff): it says nothing about the
+ * account.
+ */
 async function readMany(connection: Connection, keys: PublicKey[]) {
-  const out: (Uint8Array | null)[] = [];
+  const out: (Uint8Array | null | undefined)[] = [];
   for (let i = 0; i < keys.length; i += 100) {
-    const infos = await connection.getMultipleAccountsInfo(keys.slice(i, i + 100)).catch(() => keys.slice(i, i + 100).map(() => null));
-    out.push(...infos.map((x) => (x ? new Uint8Array(x.data) : null)));
+    const chunk = keys.slice(i, i + 100);
+    const infos = await connection.getMultipleAccountsInfo(chunk).catch(() => null);
+    out.push(...(infos ? infos.map((x) => (x ? new Uint8Array(x.data) : null)) : chunk.map(() => undefined)));
   }
   return out;
 }
@@ -290,7 +304,7 @@ function planAuction(plan: Plan): { start: bigint; end: bigint } {
   return { start: start > e ? start : e, end: e };
 }
 
-/** Plan orders that expired unfilled in a row, per plan, until the plan fills or is re-centred. */
+/** Plan orders that expired unfilled in a row, per plan, until the plan fills or is re-centered. */
 const strikes = new Map<string, { count: number; fills: number; ref: bigint }>();
 function strikesFor(plan: Plan): number {
   const s = strikes.get(plan.address);
@@ -399,7 +413,15 @@ async function fill(connection: Connection, order: Order, basket: Basket, gross:
   });
   if (!cashInfo) setup.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, cashAta, keeper.publicKey, cashMint, cashProgram));
   if (basket.creatorFeeBps > 0 && !creatorInfo) {
+    // Rent the house cannot get back: it opens a creator's fee account at most once
+    // per basket (the creator could close it and keep the rent), unless the basket is the house's own.
+    const key = `creatorata:${basket.address}`;
+    if (basket.creator !== keeper.publicKey.toBase58() && failures.has(key)) {
+      throw new Error("CreatorAccountClosed: the creator closed the fee account the house opened once; the creator must reopen it");
+    }
     setup.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, creatorShares, new PublicKey(basket.creator), shareMint, TOKEN_2022_PROGRAM_ID));
+    failures.set(key, { fails: 0, until: Date.now() + 30 * 86_400_000, why: "creator fee account opened by the house" });
+    failuresDirty = true;
   }
   // New accounts first (rare: once per mint), then stock and fill together.
   for (let i = 0; i < setup.length; i += 6) await send(connection, setup.slice(i, i + 6), table);
@@ -550,12 +572,20 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     priced.map((j) => tokenAccount(new PublicKey(j.basket.shareMint), new PublicKey(j.order.buyer), TOKEN_2022_PROGRAM_ID)),
   );
   const fillable = priced.filter((_, i) => {
+    if (buyerShareInfos[i] === undefined) return false;
     const st = tokenState(buyerShareInfos[i]);
     return st != null && !st.frozen;
   });
   if (priced.length > fillable.length) report.skipped.push(`${priced.length - fillable.length} fair orders whose buyer has no usable share account`);
+  const overSpent = async () => {
+    const spent = balance - (await connection.getBalance(keeper.publicKey).catch(() => balance));
+    if (spent <= MAX_RUN_SPEND_LAMPORTS) return false;
+    report.skipped.push(`fills stopped: this run already cost ${(spent / 1e9).toFixed(4)} SOL`);
+    return true;
+  };
+  let stopped = false;
   for (const job of queue(fillable)) {
-    if (budget <= 0 || failedAttempts >= FAILED_ATTEMPTS) break;
+    if (budget <= 0 || failedAttempts >= FAILED_ATTEMPTS || stopped) break;
     const wait = (job.at - clock()) * 1000;
     if (wait > 0 && Date.now() + wait > fillDeadline) {
       report.skipped.push(`${job.order.address.slice(0, 6)}: house price in ${Math.round(wait / 1000)}s`);
@@ -592,6 +622,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       openOrders.delete(job.order.address);
       noteSuccess(job.key);
       budget--;
+      stopped = await overSpent();
     } catch (err) {
       // Another filler got there first: that is the auction working, not an error.
       if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
@@ -636,13 +667,14 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     sellPriced.map((j) => tokenAccount(new PublicKey(j.order.cashMint), new PublicKey(j.order.seller), new PublicKey(j.order.cashTokenProgram))),
   );
   const buyable = sellPriced.filter((_, i) => {
-    // Missing is fine: the fill opens it, at the filler's expense.
+    // The seller must hold the dollar account already: the program would open a
+    // missing one at the filler's expense, rent the seller could close and keep.
     const st = tokenState(sellerCashInfos[i]);
-    return sellerCashInfos[i] == null || (st != null && !st.frozen);
+    return st != null && !st.frozen;
   });
-  if (sellPriced.length > buyable.length) report.skipped.push(`${sellPriced.length - buyable.length} sell orders whose seller's dollar account cannot be paid into`);
+  if (sellPriced.length > buyable.length) report.skipped.push(`${sellPriced.length - buyable.length} sell orders whose seller has no usable dollar account to be paid into`);
   for (const job of queue(buyable)) {
-    if (budget <= 0 || failedAttempts >= FAILED_ATTEMPTS) break;
+    if (budget <= 0 || failedAttempts >= FAILED_ATTEMPTS || stopped) break;
     const wait = (job.at - clock()) * 1000;
     if (wait > 0 && Date.now() + wait > fillDeadline) {
       report.skipped.push(`sell ${job.order.address.slice(0, 6)}: house price in ${Math.round(wait / 1000)}s`);
@@ -676,6 +708,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       report.marginUsd += job.value - paid;
       noteSuccess(job.key);
       budget--;
+      stopped = await overSpent();
     } catch (err) {
       if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
         report.skipped.push(`sell ${job.order.address.slice(0, 6)}: bought by another filler first`);
@@ -715,6 +748,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     expiredAll.map((o) => tokenAccount(new PublicKey(o.cashMint), new PublicKey(o.buyer), new PublicKey(o.cashTokenProgram))),
   );
   const refundable = expiredAll.filter((o, i) => {
+    if (refundCash[i] === undefined) return false;
     const st = tokenState(refundCash[i]);
     if (st && !st.frozen) return true;
     strike(o);
@@ -759,6 +793,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   );
   const expiredSells = expiredSellsAll
     .filter((_, i) => {
+      if (sellerShares[i] === undefined) return false;
       const st = tokenState(sellerShares[i]);
       return st != null && !st.frozen;
     })
@@ -785,7 +820,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   // than two hours, at least $5 a run, and an auction that reaches the house's
   // price at today's quotes. One open order per plan (its last order must be filled
   // or refunded first), one plan per owner per call, none after two runs in a row
-  // expired unfilled or failed (until the owner re-centres it), none while backing
+  // expired unfilled or failed (until the owner re-centers it), none while backing
   // off after a failed run, and a cap on house-paid plan orders open at once, with
   // some of it kept for plans that have filled before.
   //
@@ -810,7 +845,8 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     const nav = await navOf(basket);
     // An order that can never reach fair holds no slot: no new run of its plan will start.
     if (nav != null && houseFillAt(o, basket, nav) == null) continue;
-    if (!openShares[i]) continue;
+    // Unknown (a failed read) still counts: only a confirmed missing account frees the slot.
+    if (openShares[i] === null) continue;
     housePlanOrders++;
     if ((planByAddress.get(o.plan!)?.fills ?? 0) === 0) unproven++;
   }
@@ -823,7 +859,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       continue;
     }
     if (strikesFor(plan) >= MAX_PLAN_STRIKES) {
-      report.skipped.push(`plan ${plan.address.slice(0, 6)}: last ${MAX_PLAN_STRIKES} runs expired unfilled; waiting for a re-centre`);
+      report.skipped.push(`plan ${plan.address.slice(0, 6)}: last ${MAX_PLAN_STRIKES} runs expired unfilled; waiting for a re-center`);
       continue;
     }
     if (backingOff(`plan:${plan.address}`)) continue;
@@ -847,6 +883,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   );
   const runnable = due
     .filter(({ plan, basket }, i) => {
+      if (planInfos[2 * i] === undefined || planInfos[2 * i + 1] === undefined) return false;
       const share = tokenState(planInfos[2 * i]);
       const cash = tokenState(planInfos[2 * i + 1]);
       const why =

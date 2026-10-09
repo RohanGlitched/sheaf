@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { faucetRequest } from "./faucet-button";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WRITE_CLUSTER } from "@/lib/config";
@@ -47,11 +48,7 @@ export function DevnetNotice() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/faucet/sol", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ owner: publicKey!.toBase58() }),
-      });
+      const response = await fetch("/api/faucet/sol", faucetRequest({ owner: publicKey!.toBase58() }));
       const body = (await response.json()) as { signature?: string; error?: string };
       if (!response.ok || !body.signature) {
         setError(body.error ?? "The faucet did not answer.");

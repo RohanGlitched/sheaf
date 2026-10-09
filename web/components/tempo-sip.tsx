@@ -19,6 +19,7 @@ import {
   readPlansOf,
   readPlansOfV3,
   tempoSipV3Scopes,
+  worstCaseLine,
   v2Of,
   v3Of,
 } from "@/lib/evm";
@@ -39,7 +40,7 @@ import { quantity, shortAddress } from "@/lib/format";
  * hard floor, and any filler can fill it.
  *
  * Two halves: the run recorded by evm/scripts/tempo-sip-v3.mjs (two runs, the second
- * re-centred on the first's fill, and five refusals) with a live read of that key's
+ * re-centered on the first's fill, and five refusals) with a live read of that key's
  * budget; and the same thing run in this browser, with the visitor as the investor
  * (a passkey, or a key made in the browser) and the house key as keeper. Accounts
  * that signed a v2 plan before v3 keep seeing and running it.
@@ -106,14 +107,17 @@ export function TempoSip({ d }: { d: Deployment }) {
         <p className="mt-3 max-w-[66ch] text-sm leading-relaxed text-ink-3">
           The plan follows the price. Each run&apos;s fair share count must sit within {STEP_PCT}% of what the last run filled at, so a normal
           monthly move doesn&apos;t stop it. It must also stay inside the hard bounds you sign, {FLOOR_PCT}% to {CEIL_PCT}% of today&apos;s count,
-          and no run&apos;s auction ever ends below that floor. A bigger move pauses the plan until you re-centre it with your own key.
+          and no run&apos;s auction ever ends below that floor. A bigger move pauses the plan until you re-center it with your own key.
         </p>
         <p className="mt-3 max-w-[66ch] text-sm leading-relaxed text-ink-3">
-          The keeper is the house key, and the house also fills. It can only run your installment, for exactly {CASH} AlphaUSD and at most once a
-          period, at a fair count inside your window. It can&apos;t run early, ask for fewer shares, re-centre, rewrite or close the plan, or call
-          the desk directly: the plan contract or the chain refuses. With no other filler, it can still walk your count down by up to the
-          auction&apos;s 2% band each run, never below your floor. Any other filler can fill sooner, at a better count for you. The 0.10%
-          protocol fee goes to a separate cold treasury, not to this key.
+          The keeper is the house key, and the house also fills. The keeper names each run&apos;s fair count, but the contract only accepts one
+          within {STEP_PCT}% of what your last run actually filled at and inside your hard bounds, so it is never the sole judge of the price.
+          It can only run your installment, for exactly {CASH} AlphaUSD and at most once a period. It can&apos;t run early, re-center, rewrite or
+          close the plan, or call the desk directly: the plan contract or the chain refuses. The 0.10% protocol fee goes to a separate treasury
+          key the founder holds, not to this key.
+        </p>
+        <p className="mt-3 max-w-[66ch] rounded-[var(--radius-control)] border border-line bg-raised px-4 py-3 text-sm leading-relaxed text-ink-2">
+          {worstCaseLine(TEMPO_SIP_V3.hardMinBps, d.baskets[0].symbol)}
         </p>
       </div>
       <div className="mt-10 grid gap-8 [&>*]:min-w-0 lg:grid-cols-2">
@@ -134,7 +138,7 @@ function Recorded({ d }: { d: Deployment }) {
   const rows: { label: string; detail: string; hash?: string; refused?: string }[] = [
     {
       label: "The investor (here, the house) writes the plan",
-      detail: `Plan #${sip.planId} on PlanDeskV3: ${sip.cashPerRun} a run, each run within ${sip.stepPct}% of the last fill, never outside ${sip.hardMinShares} to ${sip.hardMaxShares} MAG8. A ${sip.intervalSeconds / 60}-minute interval, so the recording shows two runs.`,
+      detail: `Plan #${sip.planId} on PlanDeskV3: ${sip.cashPerRun} a run, each run within ${sip.stepPct}% of the last fill, never outside ${sip.hardMinShares} to ${sip.hardMaxShares} MAG8 (wider than today's default of ${FLOOR_PCT}% to ${CEIL_PCT}%). A ${sip.intervalSeconds / 60}-minute interval, so the recording shows two runs.`,
       hash: sip.openPlanTx,
     },
     {
@@ -149,15 +153,15 @@ function Recorded({ d }: { d: Deployment }) {
     },
     { label: "Keeper calls CreationDeskV2.placeOrder at its own price", detail: "Outside the scope: the chain rejects it before inclusion.", refused: sip.refused.directOrder },
     { label: "Keeper opens a plan with its own terms", detail: "Outside the scope: the key can run the plan, never write one.", refused: sip.refused.rewriteTerms },
-    { label: "Keeper re-centres the plan to a floor of 1 raw unit", detail: "Outside the scope: only the investor's own key can re-centre.", refused: sip.refused.recenterByKey },
+    { label: "Keeper re-centers the plan to a floor of 1 raw unit", detail: "Outside the scope: only the investor's own key can re-center.", refused: sip.refused.recenterByKey },
     {
       label: "Run 1, filled in kind",
-      detail: `Order #${sip.orderIds[0]}, an auction from 1.02 down to 0.98 MAG8. The investor received ${sip.sharesToInvestor[0]} MAG8 after the creator fee and the 0.10% protocol fee, which went to the cold treasury.`,
+      detail: `Order #${sip.orderIds[0]}, an auction from 1.02 down to 0.98 MAG8. The investor received ${sip.sharesToInvestor[0]} MAG8 after the creator fee and the 0.10% protocol fee, which went to the separate treasury key.`,
       hash: sip.fillTxs[0],
     },
     { label: "Keeper runs it again at once", detail: "The plan's interval refuses it.", refused: sip.refused.tooSoon },
     {
-      label: "Run 2, re-centred on run 1's fill",
+      label: "Run 2, re-centered on run 1's fill",
       detail: `After the interval the price had moved: run 2 asked ${sip.run2Fair} MAG8 for the same cash, 5% more than run 1's ${sip.recenteredOn}. The window had trailed to run 1's fill, so it ran (Recentered), and the investor received ${sip.sharesToInvestor[1]} MAG8.`,
       hash: sip.instalmentTxs[1],
     },
@@ -209,7 +213,7 @@ function Recorded({ d }: { d: Deployment }) {
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
         Read from Tempo&apos;s AccountKeychain precompile (<span className="tnum">getRemainingLimitWithPeriod</span>) for investor{" "}
         {shortAddress(d.deployer ?? "", 6, 4)}, the house, which invested in this recording, and keeper key {shortAddress(sip.keeperKey, 6, 4)}.
-        Protocol fee to the cold treasury{" "}
+        Protocol fee to the separate treasury key{" "}
         <a href={`${d.explorer}/address/${v3!.treasury}`} target="_blank" rel="noreferrer" className={link}>
           {shortAddress(v3!.treasury, 6, 4)}
         </a>
@@ -299,7 +303,7 @@ const STEPS = [
   { n: 5, label: "The keeper runs this month's installment", note: "An auction that never ends below your floor, filled in kind" },
   { n: 6, label: "The keeper runs it again at once", note: "The plan refuses: TooSoon" },
   { n: 7, label: "The keeper calls the desk directly", note: "Outside the scope. The chain refuses: CallNotAllowed" },
-  { n: 8, label: "Re-centre at today's price (optional)", note: "Your own key; the keeper's scope can't" },
+  { n: 8, label: "Re-center at today's price (optional)", note: "Your own key; the keeper's scope can't" },
   { n: 9, label: "Revoke the key and close the plan (optional)", note: "Skip it and the keeper keeps investing once a period" },
 ];
 
@@ -505,7 +509,7 @@ function LiveSip({ d }: { d: Deployment }) {
       try {
         json = (await keeperPost({ network: d.network, sip: { account: account!.address, action } })) as typeof json;
       } catch (err) {
-        // A price move past the plan's window pauses it: say so and offer the re-centre.
+        // A price move past the plan's window pauses it: say so and offer the re-center.
         const msg = (err as Error).message;
         if (/^Paused:/.test(msg)) {
           setPaused(msg);
@@ -517,7 +521,7 @@ function LiveSip({ d }: { d: Deployment }) {
       const label =
         action === "instalment"
           ? json.ok
-            ? `Keeper ran this month's ${CASH} AlphaUSD installment: order #${json.orderId}, ${sh(json.startShares)} down to ${sh(json.endShares)} ${basket.symbol}${json.recentredOn ? `, the window first re-centred on the last fill (${sh(json.recentredOn)})` : ""}`
+            ? `Keeper ran this month's ${CASH} AlphaUSD installment: order #${json.orderId}, ${sh(json.startShares)} down to ${sh(json.endShares)} ${basket.symbol}${json.recentredOn ? `, the window first re-centered on the last fill (${sh(json.recentredOn)})` : ""}`
             : "Keeper tried this month's installment"
           : action === "overspend"
             ? `Keeper tried to pay ${CASH} AlphaUSD for 1 raw share unit`
@@ -541,7 +545,7 @@ function LiveSip({ d }: { d: Deployment }) {
       );
       setPaused(null);
       push({
-        label: `Plan #${plan.id} re-centred by you at today's price: ${sh(t.refShares)} ${t.symbol} a run, new hard bounds ${sh(t.hardMin)} to ${sh(t.hardMax)}`,
+        label: `Plan #${plan.id} re-centered by you at today's price: ${sh(t.refShares)} ${t.symbol} a run, new hard bounds ${sh(t.hardMin)} to ${sh(t.hardMax)}`,
         ok: true,
         hash: receipt.transactionHash,
       });
@@ -671,12 +675,12 @@ function LiveSip({ d }: { d: Deployment }) {
             <SipButton n={5} label="Keeper: this month's installment" busy={busy === "instalment"} disabled={!!busy || !planOpen || waiting != null} onClick={() => keeper("instalment")} />
             <SipButton n={6} label="Keeper: run it again at once" busy={busy === "tooSoon"} disabled={!!busy || !planOpen || (plan?.runs ?? 0) === 0} onClick={() => keeper("tooSoon")} />
             <SipButton n={7} label="Keeper: call the desk directly" busy={busy === "outOfScope"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("outOfScope")} />
-            <SipButton n={8} label="Re-centre at today's price (optional)" busy={busy === "recenter"} disabled={!!busy || !planOpen || plan?.version !== 3} onClick={recenter} quiet />
+            <SipButton n={8} label="Re-center at today's price (optional)" busy={busy === "recenter"} disabled={!!busy || !planOpen || plan?.version !== 3} onClick={recenter} quiet />
             <SipButton n={9} label="Revoke and close (optional)" done={revoked && !planOpen} busy={busy === "revoke"} disabled={!!busy || !(authorized || planOpen)} onClick={revoke} quiet />
           </div>
           {paused && (
             <p className="mt-3 text-xs leading-relaxed text-loss">
-              {paused} Step 8 re-centres it with your own key; the keeper can&apos;t.
+              {paused} Step 8 re-centers it with your own key; the keeper can&apos;t.
             </p>
           )}
           {v1Key && (

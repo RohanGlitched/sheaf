@@ -90,30 +90,48 @@ export function BrowserWalletConfirm() {
           >
             <p className="text-xs text-ink-3">Browser wallet</p>
             <h2 id="bw-confirm-title" className="mt-1.5 text-lg font-medium leading-snug text-ink">
-              {r.kind === "transaction" ? "Sign a transaction Sheaf did not build?" : "Sign a message Sheaf did not write?"}
+              {r.kind === "transaction"
+                ? r.unknown.length
+                  ? "Sign a transaction Sheaf did not build?"
+                  : "Sign a transaction that moves funds?"
+                : r.kind === "message"
+                  ? "Sign a message Sheaf did not write?"
+                  : r.title}
             </h2>
 
-            {r.kind === "transaction" ? (
+            {r.kind === "transaction" && (
               <>
-                <p className="mt-3 text-sm leading-relaxed text-ink-2">
-                  {r.count === 1 ? "It calls" : `These ${r.count} transactions call`}{" "}
-                  {r.unknown.length === 1 ? "a program" : "programs"} outside the list this wallet signs for without asking:
-                </p>
-                <ul className="mt-3 space-y-1.5">
-                  {r.unknown.map((id) => (
-                    <li key={id} className="break-all rounded-[var(--radius-control)] bg-sunk px-3 py-2 font-mono text-[11px] leading-relaxed text-ink">
-                      {id}
-                    </li>
-                  ))}
-                </ul>
-                {r.known.length > 0 && <p className="mt-3 text-xs leading-relaxed text-ink-3">Also calls: {r.known.join(", ")}.</p>}
+                {r.unknown.length > 0 && (
+                  <>
+                    <p className="mt-3 text-sm leading-relaxed text-ink-2">
+                      {r.count === 1 ? "It calls" : `These ${r.count} transactions call`}{" "}
+                      {r.unknown.length === 1 ? "a program" : "programs"} outside the list this wallet signs for without asking:
+                    </p>
+                    <Items items={r.unknown} mono />
+                  </>
+                )}
+                {r.reasons.length > 0 && (
+                  <>
+                    <p className="mt-3 text-sm leading-relaxed text-ink-2">
+                      {r.unknown.length ? "It would also:" : "Sheaf's own steps never do this. It would:"}
+                    </p>
+                    <Items items={r.reasons} />
+                  </>
+                )}
+                {r.known.length > 0 && <p className="mt-3 text-xs leading-relaxed text-ink-3">Programs called: {r.known.join(", ")}.</p>}
               </>
-            ) : (
+            )}
+            {r.kind === "message" && (
               <>
                 <p className="mt-3 text-sm leading-relaxed text-ink-2">It is not one of the /voices messages. This is the exact text:</p>
-                <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] bg-vault p-3 font-mono text-[11px] leading-relaxed text-vault-ink">
-                  {r.text ?? `${r.bytes} bytes of binary data, not text.`}
-                </pre>
+                <Exact text={r.text ?? `${r.bytes} bytes of binary data, not text.`} />
+              </>
+            )}
+            {r.kind === "evm" && (
+              <>
+                <p className="mt-3 text-sm leading-relaxed text-ink-2">{r.intro}</p>
+                {r.items.length > 0 && <Items items={r.items} />}
+                {r.text && <Exact text={r.text} />}
               </>
             )}
 
@@ -139,5 +157,28 @@ export function BrowserWalletConfirm() {
         </div>
       )}
     </>
+  );
+}
+
+function Items({ items, mono = false }: { items: string[]; mono?: boolean }) {
+  return (
+    <ul className="mt-3 max-h-56 space-y-1.5 overflow-auto">
+      {items.map((it) => (
+        <li
+          key={it}
+          className={`break-all rounded-[var(--radius-control)] bg-sunk px-3 py-2 leading-relaxed text-ink ${mono ? "font-mono text-[11px]" : "text-xs"}`}
+        >
+          {it}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Exact({ text }: { text: string }) {
+  return (
+    <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] bg-vault p-3 font-mono text-[11px] leading-relaxed text-vault-ink">
+      {text}
+    </pre>
   );
 }

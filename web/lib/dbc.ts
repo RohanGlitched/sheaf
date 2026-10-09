@@ -66,23 +66,27 @@ export type DbcPoolInfo = {
   slot?: number;
 };
 
-/** The basket the method page uses as its running example: Frontier Labs. */
+/**
+ * The basket the method page uses as its running example: The Big Five, whose
+ * launch (BIG5A, first curve) went the whole way to DAMM v2. Frontier Labs is
+ * pre-IPO and is never featured.
+ */
 export const FEATURED_BASKET = {
-  address: "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
-  name: "Frontier Labs",
-  symbol: "FRNTR",
+  address: "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  name: "The Big Five",
+  symbol: "BIG5",
   creator: HOUSE,
 };
 
-/** Frontier Labs' early-access market, on the first (v1) curve. */
+/** The Big Five's launch market, on the first (v1) curve, graduated into DAMM v2. */
 export const FEATURED_DBC: [string, DbcPoolInfo] = [
   FEATURED_BASKET.address,
   {
-    pool: "67HdpukuYWudWNuv64vZK3TgGSqDBwS483YaDrSWoK73",
-    config: "5hovqK44hwqE4rtgQ4XDVJAWiH2vKdJLuj1jjYtey1u4",
-    baseMint: "8GcjtcMYoMAAncQs7JWcmfmSbLmNyeZ8CMixsBPfpBSY",
-    baseSymbol: "FRNTRA",
-    baseName: "Frontier Labs, early access",
+    pool: "6rUHFtrZeZAS9HXeSfbWWFLcmwDohrUrp81qD1LArS7s",
+    config: "4ZiirKVn3V3CcCssyfSfvxxDWhmzJSHDqZA6b1CD9EMD",
+    baseMint: "7X46CBfPfFg2cBMaCFKJ8XpEqY7iCn9rMUsnAZnftKxB",
+    baseSymbol: "BIG5A",
+    baseName: "The Big Five",
     quoteSymbol: "SOL",
     baseDecimals: LAUNCH_DECIMALS,
     supply: LAUNCH_SUPPLY,
@@ -107,7 +111,7 @@ export const FEATURED_LAUNCH: { basket: LaunchBasket; info: DbcPoolInfo } = {
     config: "He6bRAV4Fs3TKxmykt3bJHnL242MPL8cXrfiM3Zinfie",
     baseMint: "5wMGUdLisfNW1kMiQoeYN4hQcv1rpUXma6Apf8mpjtw9",
     baseSymbol: "PROXYA",
-    baseName: "Bitcoin, by proxy, early access",
+    baseName: "Bitcoin, by proxy",
     quoteSymbol: "SOL",
     baseDecimals: LAUNCH_DECIMALS,
     supply: LAUNCH_SUPPLY,
@@ -147,9 +151,13 @@ export function launchSymbol(symbol: string): string {
   return `${symbol}A`.slice(0, 10);
 }
 
+/**
+ * The launch token's name: the basket's own name, cut to the 32 bytes token
+ * metadata allows. The card and the metadata say "launch token" beside it. The
+ * first launches were minted as "<name>, early access", and keep that on chain.
+ */
 export function launchName(name: string): string {
-  const suffix = ", early access";
-  return name.length + suffix.length <= 32 ? name + suffix : name.slice(0, 32);
+  return name.slice(0, 32);
 }
 
 async function seeded(basket: string, role: "config" | "mint", slot: number): Promise<Keypair> {
@@ -590,22 +598,29 @@ export async function findLaunch(
   return pickLaunch(await scanLaunch(connection, basket), rejected);
 }
 
-/** Which of these baskets have an official open launch, in batched reads. Squatted pools are ignored. */
+/**
+ * Which of these baskets have an official open launch, in batched reads: the
+ * same creator, terms and mint-authority checks as `scanLaunch`. Pass
+ * `rejected` (pool -> reason, from the server's anchor check: `resolveLaunch`
+ * on the server, `fetchRejected` in the browser) so a pool that did not open at
+ * half of NAV is skipped and a later valid one is used, as on the card.
+ */
 export async function openLaunches(
   connection: Connection,
   baskets: LaunchBasket[],
+  rejected: ReadonlyMap<string, string> = new Map(),
 ): Promise<Map<string, DbcPoolInfo>> {
   const slots = (await Promise.all(baskets.map(launchSlots))).flat();
-  const keys = slots.flatMap((s) => [new PublicKey(s.pool), new PublicKey(s.config)]);
+  const keys = slots.flatMap((s) => [new PublicKey(s.pool), new PublicKey(s.config), new PublicKey(s.baseMint)]);
   const accounts: (AccountInfo<Uint8Array> | null)[] = [];
-  for (let i = 0; i < keys.length; i += 100) {
-    accounts.push(...(await connection.getMultipleAccountsInfo(keys.slice(i, i + 100))));
+  for (let i = 0; i < keys.length; i += 99) {
+    accounts.push(...(await connection.getMultipleAccountsInfo(keys.slice(i, i + 99))));
   }
   const found = new Map<string, DbcPoolInfo>();
   slots.forEach((info, i) => {
     const basket = baskets[Math.floor(i / LAUNCH_SLOTS)];
-    if (found.has(basket.address)) return;
-    if (checkLaunch(info, accounts[i * 2], accounts[i * 2 + 1], basket.creator).official) {
+    if (found.has(basket.address) || rejected.has(info.pool)) return;
+    if (checkLaunch(info, accounts[i * 3], accounts[i * 3 + 1], basket.creator, accounts[i * 3 + 2]).official) {
       found.set(basket.address, info);
     }
   });

@@ -15,14 +15,15 @@ export const maxDuration = 60;
 /**
  * GET or POST /api/filler2: one pass of the second filler.
  *
- * A filler the site runs on its own key (FILLER2_KEY), apart from the house: the
- * reference filler's code (lib/filler-core.ts, the same file scripts/filler.mjs
- * runs), at an 8 bps margin, so it bids against the house filler's 15. It holds
- * only what any outsider can get: test stocks from the public faucet, asked for
- * here over HTTP like anyone else, never minted. Whatever it was short of on this
- * pass it claims for the next one. It also buys on the dollar exit: a sell order
- * whose cash has decayed to the redeemed stocks' value less 8 bps, redeemed in
- * kind in the same transaction, which tops up its stock inventory too.
+ * A second filler the site runs on its own key (FILLER2_KEY), apart from the
+ * house's, but ours all the same: same operator, same host, same price feed. It
+ * runs the reference filler's code (lib/filler-core.ts, the same file
+ * scripts/filler.mjs runs) at an 8 bps margin, against the house filler's 15, so
+ * it usually fills first. It does not mint: its stocks come from the public
+ * faucet, asked for over HTTP as any visitor would (the faucet itself mints with
+ * the house key), and from the sell orders it buys and redeems in kind. Whatever
+ * it was short of on this pass it claims for the next one. It fills on live
+ * quotes only: a component priced from the last-good snapshot means no fill.
  *
  * Open to anyone, like the keeper; a short gap stops a loop.
  */
@@ -66,7 +67,9 @@ export async function GET(request: Request) {
       waitUpToSecs: WAIT_SECS,
       quote: (mint) => {
         const stock = stockForWriteMint(mint.toBase58());
-        return stock ? quotes.get(stock.symbol) : undefined;
+        const q = stock ? quotes.get(stock.symbol) : undefined;
+        // Live quotes only: a component priced from the last-good snapshot means no fill.
+        return q && q.source !== "snapshot" ? q : undefined;
       },
       lookupTable: async (basket: CoreBasket) => {
         const res = await fetch(`${origin}/api/alt?basket=${basket.address.toBase58()}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);

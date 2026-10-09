@@ -15,6 +15,7 @@ import {
   navFrom,
   publicClientFor,
   v2Of,
+  v3Of,
   deskAddress,
   auctionDeskVersion,
 } from "@/lib/evm";
@@ -433,23 +434,42 @@ export function EvmBasket({
               {basket.symbol} basket
             </a>
           </li>
+          {v3Of(d) && (
+            <>
+              <li>
+                <a href={`${d.explorer}/address/${v3Of(d)!.desk}`} target="_blank" rel="noreferrer" className={link}>
+                  Dollar desk v3 (0.10% protocol fee to a separate treasury key)
+                </a>
+              </li>
+              <li>
+                <a href={`${d.explorer}/address/${v3Of(d)!.planDesk}`} target="_blank" rel="noreferrer" className={link}>
+                  Plan desk v3 (bounds trail each fill)
+                </a>
+              </li>
+              <li>
+                <a href={`${d.explorer}/address/${v3Of(d)!.treasury}`} target="_blank" rel="noreferrer" className={link}>
+                  Fee treasury
+                </a>
+              </li>
+            </>
+          )}
           {v2Of(d) && (
             <>
               <li>
                 <a href={`${d.explorer}/address/${v2Of(d)!.desk}`} target="_blank" rel="noreferrer" className={link}>
-                  Creation desk v2 (auction, 0.10% protocol fee)
+                  Dollar desk v2 (earlier; its fee went to the house key)
                 </a>
               </li>
               <li>
                 <a href={`${d.explorer}/address/${v2Of(d)!.planDesk}`} target="_blank" rel="noreferrer" className={link}>
-                  Plan desk
+                  Plan desk v2 (earlier)
                 </a>
               </li>
             </>
           )}
           <li>
             <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={link}>
-              Creation desk v1
+              Dollar desk v1
             </a>
           </li>
           <li>

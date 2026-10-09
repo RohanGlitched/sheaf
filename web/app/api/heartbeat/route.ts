@@ -4,6 +4,7 @@ import { faucetKeypair } from "@/lib/faucet-server";
 import { rememberOidc } from "@/lib/gcs-store";
 import { faucetHasOwnKey, faucetPayerKeypair, filler2Keypair } from "@/lib/server-keys";
 import { lastBeats } from "@/lib/server-heartbeat";
+import { burnRate } from "@/lib/server-faucet-budget";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,16 @@ export const dynamic = "force-dynamic";
  *  - houseSol: the house key (mint authority, keeper, house filler).
  *  - faucetSol / filler2Sol: the faucet's and the second filler's own keys, when set.
  *  - deploySol: the program's upgrade authority, read from its program-data account.
- *  - low: true when the house is under 4 SOL, the faucet key under 1 SOL or the
- *    upgrade authority under 1 SOL. The keeper workflow fails on it, as an alert.
+ *  - faucetBurn: what the faucets spent today and in the last hour (grants and
+ *    the rent of accounts they opened), from their durable daily budget.
+ *  - low: true when the house is under 2 SOL, the faucet key under 1 SOL, the
+ *    upgrade authority under 1 SOL, or the faucets burn more than 0.5 SOL an
+ *    hour. The keeper workflow fails on it, as an alert.
  */
 
-const HOUSE_LOW_SOL = 4;
+/** Low enough to alert with a day of the keeper's spending left. */
+const HOUSE_LOW_SOL = 2;
+const FAUCET_BURN_HIGH_SOL_PER_HOUR = 0.5;
 const DEPLOY_LOW_SOL = 1;
 const FAUCET_LOW_SOL = 1;
 const CACHE_MS = 15_000;
@@ -51,7 +57,8 @@ export async function GET(request: Request) {
   const filler2 = filler2Keypair()?.publicKey ?? null;
   const sol = (key: PublicKey | null) => (key ? connection.getBalance(key).then((l) => l / 1e9).catch(() => null) : Promise.resolve(null));
 
-  const [beats, houseSol, faucetSol, filler2Sol, lastHouseTx, deploy] = await Promise.all([
+  const [burn, beats, houseSol, faucetSol, filler2Sol, lastHouseTx, deploy] = await Promise.all([
+    burnRate().catch(() => null),
     lastBeats().catch(() => ({}) as Awaited<ReturnType<typeof lastBeats>>),
     sol(house),
     sol(faucet),
@@ -66,6 +73,8 @@ export async function GET(request: Request) {
   const houseLow = houseSol != null && houseSol < HOUSE_LOW_SOL;
   const deployLow = deploy != null && deploy.sol < DEPLOY_LOW_SOL;
   const faucetLow = faucetSol != null && faucetSol < FAUCET_LOW_SOL;
+  const burnPerHour = burn ? Math.max(burn.lamportsLastHour, burn.lamportsThisHour) / 1e9 : null;
+  const faucetBurnHigh = burnPerHour != null && burnPerHour > FAUCET_BURN_HIGH_SOL_PER_HOUR;
 
   const body = {
     keeperLastRunAt: iso(keeperAt),
@@ -78,12 +87,15 @@ export async function GET(request: Request) {
     faucetSol,
     faucetKey: faucet?.toBase58() ?? null,
     faucetLow,
+    faucetBurnPerHour: burnPerHour,
+    faucetBurnHigh,
+    faucetToday: burn ? { solGrants: burn.solGrants, accountsOpened: burn.accountsOpened, sol: burn.lamportsToday / 1e9 } : null,
     filler2Sol,
     filler2Key: filler2?.toBase58() ?? null,
     deploySol: deploy?.sol ?? null,
     deployKey: deploy?.key ?? null,
     deployLow,
-    low: houseLow || deployLow || faucetLow,
+    low: houseLow || deployLow || faucetLow || faucetBurnHigh,
     asOf: new Date().toISOString(),
   };
   cached = { at: Date.now(), body };

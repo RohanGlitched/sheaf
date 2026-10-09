@@ -99,8 +99,10 @@ export type Tape = {
   via: Via;
   /** Set when a Solami key is configured but the public RPC had to answer, with the reason. */
   fallback: string | null;
-  /** True when this is the last good tape, returned because a fresh poll failed. */
+  /** True when this is the last good tape, returned because a fresh poll failed or is still running. */
   stale: boolean;
+  /** How old a stale tape is, in milliseconds, when it was returned rather than waited for. */
+  ageMs?: number;
   /** True on a cold instance's first answer, while its backfill is still running: no rows yet, nothing is wrong. */
   warming?: boolean;
   prints: Print[];
@@ -565,8 +567,11 @@ function refresh(): Promise<Tape> {
 
 /**
  * Fresh for 3 s. Up to 30 s old, the cached tape answers at once while a new
- * poll runs behind it (a poll is several paced calls, a few seconds end to end);
- * older than that, the caller waits for the poll.
+ * poll runs behind it (a poll is several paced calls, a few seconds end to end).
+ * Older than that, the caller waits for the poll for at most 1.5 s; past that it
+ * gets the cached tape marked `stale` with its `ageMs`, and the poll finishes
+ * in the background. A visitor never waits on a slow poll; the page re-polls
+ * every few seconds and picks up the fresh tape then.
  *
  * `background` runs the behind-the-response poll. The route passes Next's
  * `after()`, which keeps a serverless function alive until the poll finishes
@@ -578,6 +583,9 @@ function refresh(): Promise<Tape> {
  * mints' newest trades first, in about three seconds), and the backfill
  * finishes in the background for the next request.
  */
+/** The longest a visitor waits for a poll when an older tape is cached. */
+const STALE_WAIT_MS = 1_500;
+
 export async function readTape(background?: (task: () => Promise<unknown>) => void): Promise<Tape> {
   const age = cache ? Date.now() - cache.polledAt : Infinity;
   if (cache && age < 3_000) return cache;
@@ -586,7 +594,14 @@ export async function readTape(background?: (task: () => Promise<unknown>) => vo
     later(() => refresh().catch(() => {}));
     return cache;
   }
-  if (cache) return refresh();
+  if (cache) {
+    const stale = cache;
+    const pending = refresh();
+    const fresh = await Promise.race([pending, new Promise<null>((r) => setTimeout(() => r(null), STALE_WAIT_MS))]);
+    if (fresh) return fresh;
+    later(() => pending.catch(() => {}));
+    return { ...stale, stale: true, ageMs: Date.now() - stale.polledAt };
+  }
   const poll = refresh();
   const first = await Promise.race([poll, new Promise<null>((r) => setTimeout(() => r(null), 4_000))]);
   if (first) return first;

@@ -26,3 +26,10 @@ jobs:
           beat=$(curl -fsS https://sheaf-index.vercel.app/api/heartbeat)
           echo "$beat" | head -c 2000
           echo "$beat" | jq -e '.low == false' > /dev/null || { echo "::error::A house key is low on SOL: house $(echo "$beat" | jq .houseSol), faucet $(echo "$beat" | jq .faucetSol), deploy $(echo "$beat" | jq .deploySol)"; exit 1; }
+      # Fails the run when any of the site's own reads (baskets, ledger, tape,
+      # launches, NAV) stops answering 200 with a sane shape.
+      - name: Check the site's reads
+        run: |
+          health=$(curl -sS https://sheaf-index.vercel.app/api/health)
+          echo "$health" | head -c 2000
+          echo "$health" | jq -e '.ok == true' > /dev/null || { echo "::error::A health check failed: $(echo "$health" | jq -c '[.checks[] | select(.ok == false) | {name, status, error}]')"; exit 1; }

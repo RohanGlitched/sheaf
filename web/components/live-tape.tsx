@@ -81,8 +81,15 @@ const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? (s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null;
 };
+/** A moment in the viewer's own time, with its zone named ("Oct 9, 3:16 PM GMT+5:30"). */
 const stamp = (unix: number) =>
-  new Date(unix * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  new Date(unix * 1000).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
 
 /**
  * Proofs from every server instance that has answered, merged. Each instance
@@ -130,7 +137,19 @@ function merge(proofs: Map<string, Proof>) {
  * depends on first (slot freshness, just-landed transactions, reads answered,
  * block to screen), and the raw round trip stated plainly in the note.
  */
-export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}) {
+export function LiveTape({
+  openDetails = false,
+  hideIntro = false,
+}: {
+  /** Open the Solami figures by default (the /live page). */
+  openDetails?: boolean;
+  /**
+   * Leave out the heading column, for a page whose own hero says it (/live).
+   * The tape then runs full width, and its source line inside the card (live
+   * dot, Solana mainnet, read through Solami, slot) shows at every width, once.
+   */
+  hideIntro?: boolean;
+} = {}) {
   const { bySymbol, snapshot } = useMarket();
   // The read that matters most to the product: every basket's value, and every
   // Panta resolution, use the dividend multipliers read through this RPC.
@@ -275,8 +294,8 @@ export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}
   const race = stats?.race ?? null;
   const lead = race?.slotLead;
 
-  const cell = (label: string, value: string, note?: string) => (
-    <div className="bg-page px-4 py-3">
+  const cell = (label: string, value: string, note?: string, wide = false) => (
+    <div className={`bg-page px-4 py-3 ${wide ? "sm:col-span-2" : ""}`}>
       <dt className="text-xs text-ink-3">{label}</dt>
       <dd className="tnum mt-1 text-ink">{value}</dd>
       {note && <dd className="mt-0.5 text-[11px] leading-snug text-ink-3">{note}</dd>}
@@ -320,7 +339,8 @@ export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}
               <span
                 className={`block text-xs ${Math.abs(vsJup) < 0.05 ? "text-ink-3" : vsJup > 0 ? "text-gain" : "text-loss"}`}
               >
-                {vsJup >= 0 ? "+" : "−"}
+                {/* Under half a hundredth rounds to zero: no sign on it. */}
+                {Math.abs(vsJup) < 0.005 ? "" : vsJup > 0 ? "+" : "−"}
                 {Math.abs(vsJup).toFixed(2)}%
               </span>
             ) : (
@@ -361,8 +381,8 @@ export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}
   const fx = stats?.fresh;
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-14">
-      <div>
+    <div className={hideIntro ? "grid" : "grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-14"}>
+      <div className={hideIntro ? "hidden" : undefined}>
         <h2 className="display text-title max-w-[16ch] text-ink">Stocks trading on Solana, right now.</h2>
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
           Real trades in tokenized stocks on Solana mainnet, read from the chain seconds after they land:
@@ -407,7 +427,9 @@ export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}
       <div className="order-first min-w-0 self-start lg:order-none">
         <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
           {/* On phones the table comes before the section's heading, so it carries its own source line. */}
-          <p className="flex flex-wrap items-center gap-x-2 border-b border-line px-4 py-2.5 text-xs text-ink-3 sm:px-5 lg:hidden">
+          <p
+            className={`flex flex-wrap items-center gap-x-2 border-b border-line px-4 py-2.5 text-xs text-ink-3 sm:px-5 ${hideIntro ? "" : "lg:hidden"}`}
+          >
             <span
               className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-loss" : "bg-gain"}`}
               aria-hidden
@@ -494,10 +516,12 @@ export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}
               )}
               {cell(
                 "Block to this screen",
-                screenLag ? seconds(screenLag.ms) : "at the next live trade",
+                screenLag ? seconds(screenLag.ms) : "Waiting for a live trade",
                 screenLag
                   ? `median of ${screenLag.n} live trade${screenLag.n === 1 ? "" : "s"}, including the mint rotation`
-                  : "from the trade's block time to this page",
+                  : "measured from a trade's block time to this page, once one lands while you watch",
+                // Fifth of five cells: span the row, so the grid has no empty sixth cell.
+                true,
               )}
             </dl>
             <p className="mt-3 text-xs leading-relaxed text-ink-3">

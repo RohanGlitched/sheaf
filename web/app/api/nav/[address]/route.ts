@@ -13,14 +13,24 @@ import {
   closeDayAtOrBefore,
   closeOn,
   dayIso,
+  dayOf,
   fmtClose,
   marketWindow,
+  nyToUnix,
   resolutionRule,
+  sessionOn,
 } from "@/lib/panta-window";
 import type { History, Series } from "@/lib/history";
+import { rememberOidc } from "@/lib/gcs-store";
+import { freeze, readFrozen } from "@/lib/panta-freeze";
 
 /**
- * GET /api/nav/<basket address>[?at=<unix seconds>]
+ * GET /api/nav/<basket address>[?at=<unix seconds | YYYY-MM-DD>[&asOf=YYYY-MM-DD]]
+ *
+ * Every `?at=` answer is stored once in GCS under its close day and the date
+ * of the data it came from (lib/panta-freeze.ts) and served from there after;
+ * `&asOf=` replays a stored answer exactly, so a resolution can be re-checked
+ * byte for byte later.
  *
  * The number a Panta market on this basket resolves from, as JSON a machine can
  * read: what one share is worth, with every input that went into it.
@@ -107,13 +117,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
   const { address } = await params;
   if (!BASE58.test(address)) return bad("Not a basket address.");
 
-  // ?at=<unix seconds>: the value at the last US close at or before that time.
-  const atParam = new URL(req.url).searchParams.get("at");
+  rememberOidc(req);
+  // ?at=<unix seconds> or ?at=YYYY-MM-DD: the value at the last US close at or
+  // before that time (for a date: that day's close, or the last one before it).
+  const search = new URL(req.url).searchParams;
+  const atParam = search.get("at");
+  const asOfParam = search.get("asOf");
   let at: number | null = null;
   if (atParam != null) {
-    at = Number(atParam);
     const nowS = Math.floor(Date.now() / 1000);
-    if (!/^\d{9,11}$/.test(atParam) || !Number.isSafeInteger(at)) return bad("at must be a unix time in seconds.");
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(atParam);
+    if (date) {
+      const [y, m, d] = [Number(date[1]), Number(date[2]), Number(date[3])];
+      if (m < 1 || m > 12 || d < 1 || d > 31) return bad("at must be a unix time in seconds or a date, YYYY-MM-DD.");
+      at = sessionOn(y, m, d) ? closeOn(dayOf({ y, m, d })) : nyToUnix(y, m, d, 23, 59);
+    } else {
+      at = Number(atParam);
+      if (!/^\d{9,11}$/.test(atParam) || !Number.isSafeInteger(at)) {
+        return bad("at must be a unix time in seconds or a date, YYYY-MM-DD.");
+      }
+    }
     if (at > nowS) return bad("at is in the future: that close has not happened yet.");
     const closeTime = closeOn(closeDayAtOrBefore(at));
     if (nowS < closeTime + CLOSE_SETTLE_S) {
@@ -123,6 +146,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
         { "retry-after": String(closeTime + CLOSE_SETTLE_S - nowS) },
       );
     }
+    // &asOf=YYYY-MM-DD replays the answer stored for this close when the data
+    // was as of that date, byte for byte (lib/panta-freeze.ts).
+    if (asOfParam != null) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfParam)) return bad("asOf must be a date, YYYY-MM-DD.");
+      const stored = await readFrozen<Record<string, unknown>>(address, dayIso(closeDayAtOrBefore(at)), asOfParam);
+      if (!stored) return bad(`No answer is stored for this close with data as of ${asOfParam}.`, 404);
+      return NextResponse.json(
+        { ...stored.answer, frozen: { key: stored.key, storedAt: stored.storedAt, replayed: true } },
+        { headers: { "cache-control": "public, s-maxage=86400, immutable", "access-control-allow-origin": "*" } },
+      );
+    }
+  } else if (asOfParam != null) {
+    return bad("asOf replays a stored ?at= answer; give at as well.");
   }
 
   const basket = await fetchBasketAt(address);
@@ -195,6 +231,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
 
   if (at != null) {
     if (!history) return bad("Daily closes could not be read right now; try again shortly.", 503, { "retry-after": "60" });
+    // An answer already stored for this close and this data date is served as stored.
+    const frozenDay = dayIso(closeDayAtOrBefore(at));
+    const already = await readFrozen<Record<string, unknown>>(address, frozenDay, history.asOf);
+    if (already) {
+      return NextResponse.json(
+        {
+          ...already.answer,
+          frozen: { key: already.key, storedAt: already.storedAt, replay: `${navUrl}?at=${at}&asOf=${history.asOf}` },
+        },
+        { headers: { "cache-control": "public, s-maxage=3600, stale-while-revalidate=600", "access-control-allow-origin": "*" } },
+      );
+    }
     // The rule's value uses each mint's multiplier as the chain states it. If the
     // mainnet read failed, refuse rather than answer from Jupiter's copy.
     if (!snapshot.chain) {
@@ -229,14 +277,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
     });
     const missing = parts.filter((p) => p.valuePerShare == null).map((p) => p.base ?? "unknown");
     const listedAt = missing.length ? null : parts.reduce((a, p) => a + p.valuePerShare!, 0);
-    return NextResponse.json(
-      {
+    const answer = {
         basket: { address: basket.address, name: basket.name, symbol: basket.symbol, shareMint: basket.shareMint, cluster: WRITE_CLUSTER },
         question: basketQuestion(basket.name, basket.symbol),
         at,
         closeDay: dayIso(spyAt.day),
         closeTime: new Date(closeOn(spyAt.day) * 1000).toISOString(),
-        rule: "The last US regular-session close (16:00 New York) at or before at.",
+        asOf: history.asOf,
+        rule: "The last NYSE regular-session close at or before at, on the exchange calendar (16:00 New York; 13:00 on early-close days; holidays skipped).",
         navPerShare: { listed: round(listedAt) },
         ...(missing.length
           ? { unavailable: `No listed history for ${missing.join(", ")} (pre-IPO), so there is no listed value for this basket.` }
@@ -251,10 +299,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           recipe: `The basket account ${basket.address} on Solana ${WRITE_CLUSTER}`,
         },
         recompute,
+    };
+    // Store it once under its close and data date; if another instance stored
+    // one first, that one is served, so every reader gets the same bytes.
+    const stored = await freeze(address, frozenDay, history.asOf, answer);
+    const body = stored?.answer ?? answer;
+    return NextResponse.json(
+      {
+        ...body,
+        frozen: stored
+          ? { key: stored.key, storedAt: stored.storedAt, replay: `${navUrl}?at=${at}&asOf=${history.asOf}` }
+          : null,
       },
       // An hour, not a day: Yahoo re-adjusts past closes after an ex-dividend
       // date, and the rule reads both closes at resolution time, so a long-cached
-      // earlier close must not meet a freshly adjusted later one.
+      // earlier close must not meet a freshly adjusted later one. The stored
+      // answer for each data date is what a resolution replays (&asOf=).
       { headers: { "cache-control": "public, s-maxage=3600, stale-while-revalidate=600", "access-control-allow-origin": "*" } },
     );
   }

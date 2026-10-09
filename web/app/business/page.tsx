@@ -4,6 +4,7 @@ import {
   AUCTION_BAND_BPS,
   Beachhead,
   CHECKED,
+  FounderLine,
   CreatorSide,
   FeeHeadline,
   FeeTable,
@@ -79,7 +80,8 @@ export default function BusinessPage() {
         <div className="max-w-[62ch]">
           <h1 className="display text-hero leading-[0.95] text-ink">How Sheaf makes money</h1>
           <p className="mt-6 text-lg leading-[1.65] text-ink-2">
-            Sheaf is paid when a share is made, and never while it is held, redeemed or sold. Every fee is written into a
+            Sheaf&rsquo;s protocol fee is paid when a share is made, never while it is held, redeemed or sold. Sheaf&rsquo;s own
+            filler earns its {pct(HOUSE_FILLER_MARGIN_BPS)} on the dollar orders and sales it fills. Every fee is written into a
             basket when the basket is created, so the rate a buyer sees is the rate that basket will charge for as long as it
             exists.
           </p>
@@ -90,7 +92,7 @@ export default function BusinessPage() {
           </p>
           <p className="mt-6 text-sm leading-relaxed text-ink-3">
             Everything runs on devnet and testnets with test money today. The protocol fee is live on devnet for Solana baskets
-            created since {PROTOCOL_FEE_SINCE} and on the EVM v2 desk&rsquo;s dollar fills, and the treasury has made its first
+            created since {PROTOCOL_FEE_SINCE} and on dollar fills through the EVM v2 and v3 desks, and the treasury has made its first
             claim. The rates are real; the revenue is not yet.
           </p>
         </div>
@@ -312,6 +314,7 @@ export default function BusinessPage() {
             Every fee above is either in the program or in the house filler&rsquo;s published policy, and every outside
             figure links to where we read it on {CHECKED}. If a number here is wrong, tell us and we will fix it.
           </p>
+          <FounderLine />
         </div>
         <div className="flex flex-wrap gap-3">
           <Link href="/method" className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-5 py-3 text-sm text-ink transition-colors hover:border-ink-3">

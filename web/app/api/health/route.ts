@@ -8,7 +8,13 @@ export const maxDuration = 60;
  * for a 200 and a sane shape: baskets, the ledger, a basket's NAV, the tape and
  * the launches. For an uptime scheduler; answers 503 when any check fails, so a
  * plain HTTP probe sees it.
+ *
+ * One answer serves 30 seconds (per instance and at the edge), so however many
+ * probes call it, the five reads behind it run at most twice a minute.
  */
+const CACHE_MS = 30_000;
+let cached: { at: number; body: { ok: boolean; checks: Check[]; at: string } } | null = null;
+let running: Promise<{ ok: boolean; checks: Check[]; at: string }> | null = null;
 
 /** The flagship basket, for the NAV check, when the baskets list cannot name it. */
 const BIG5_FALLBACK = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
@@ -43,7 +49,17 @@ async function check(base: string, name: string, path: string): Promise<Check & 
 }
 
 export async function GET(request: Request) {
-  const base = new URL(request.url).origin;
+  if (!cached || Date.now() - cached.at > CACHE_MS) {
+    running ??= runChecks(new URL(request.url).origin)
+      .then((body) => ((cached = { at: Date.now(), body }), body))
+      .finally(() => (running = null));
+    await running;
+  }
+  const body = cached!.body;
+  return Response.json(body, { status: body.ok ? 200 : 503, headers: { "cache-control": "public, s-maxage=30" } });
+}
+
+async function runChecks(base: string) {
   const [baskets, ...rest] = await Promise.all([
     check(base, "baskets", "/api/baskets"),
     check(base, "ledger", "/api/ledger?limit=1"),
@@ -54,6 +70,5 @@ export async function GET(request: Request) {
   const big5 = list.find((b) => b.symbol === "BIG5")?.address ?? BIG5_FALLBACK;
   const nav = await check(base, "nav", `/api/nav/${big5}`);
   const checks: Check[] = [baskets, ...rest, nav].map(({ body: _b, ...c }) => c);
-  const ok = checks.every((c) => c.ok);
-  return Response.json({ ok, checks, at: new Date().toISOString() }, { status: ok ? 200 : 503, headers: { "cache-control": "no-store" } });
+  return { ok: checks.every((c) => c.ok), checks, at: new Date().toISOString() };
 }

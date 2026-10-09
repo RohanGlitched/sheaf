@@ -15,6 +15,10 @@ import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
 import { WRITE_RPC, WRITE_CLUSTER } from "@/lib/config";
 import { COMPOSABLE, FAUCET_TOKENS_PER_CLAIM, writeMint } from "@/lib/mirror";
 import { CASH_MINT, CASH_DECIMALS } from "@/lib/cash.generated";
+import { rememberOidc } from "@/lib/gcs-store";
+import { budgetMessage, reserve as reserveBudget } from "@/lib/server-faucet-budget";
+import { cleanRef } from "@/lib/invite-ref";
+import { fetchBasketAt } from "@/lib/sheaf";
 
 /** Test dollars per claim: enough for a few cash orders and a plan. */
 const CASH_PER_CLAIM = 1_000;
@@ -41,9 +45,15 @@ const DECIMALS_BY_SYMBOL = new Map(COMPOSABLE.map((s) => [s.symbol, s.decimals])
 /** Last claim per address. Per-instance and deliberately simple. */
 const lastClaim = new Map<string, number>();
 
-/** Fresh addresses cost the faucet account rent, so cap claims per IP as well. */
+/**
+ * Fresh addresses cost the faucet account rent, so this instance caps claims per
+ * network too, loosely enough for a room of testers on one Wi-Fi; the durable
+ * daily budgets (lib/server-faucet-budget.ts) are the real limit.
+ */
 const IP_WINDOW_MS = 10 * 60_000;
-const IP_MAX_CLAIMS = 6;
+const IP_MAX_CLAIMS = 30;
+/** Without a basket in view, the most new stock accounts one claim opens (test dollars aside). */
+const NEW_ACCOUNTS_WITHOUT_BASKET = 3;
 const claimsByIp = new Map<string, number[]>();
 
 /**
@@ -78,12 +88,16 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { owner?: string; symbols?: string[] };
+  rememberOidc(request);
+  // `basket`: the basket the visitor is looking at; new accounts open only for its stocks.
+  // `ref` (or the x-sheaf-ref header): an invite code, counted instead of the network.
+  let body: { owner?: string; symbols?: string[]; basket?: string; ref?: string };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Expected a JSON body." }, { status: 400 });
   }
+  const invite = cleanRef(body.ref) ?? cleanRef(request.headers.get("x-sheaf-ref"));
 
   let owner: PublicKey;
   try {
@@ -106,7 +120,7 @@ export async function POST(request: Request) {
 
   const ip = clientIp(request);
   const fromIp = recentClaims(ip);
-  if (fromIp.length >= IP_MAX_CLAIMS) {
+  if (!invite && fromIp.length >= IP_MAX_CLAIMS) {
     const wait = Math.ceil((IP_WINDOW_MS - (Date.now() - fromIp[0])) / 60_000);
     return Response.json(
       { error: `Too many claims from this network. Try again in ${wait} min.` },
@@ -174,9 +188,21 @@ export async function POST(request: Request) {
     );
   }
   const canOpenAccounts = houseLamports >= (faucetHasOwnKey() ? ATA_FLOOR_OWN_KEY : ATA_FLOOR_HOUSE);
+  // New accounts (rent the visitor could close and keep) open only for test dollars
+  // and the stocks of the basket in view; without one, for at most a few stocks.
+  // Accounts that already exist are always topped up.
+  const inView = body.basket ? await fetchBasketAt(body.basket) : null;
+  const inViewMints = inView ? new Set(inView.components.map((c) => c.mint)) : null;
+  let newStocks = 0;
+  const mayOpen = (entry: { symbol: string; mint: string }) => {
+    if (!canOpenAccounts) return false;
+    if (entry.symbol === "USDC") return true;
+    if (inViewMints) return inViewMints.has(entry.mint);
+    return newStocks++ < NEW_ACCOUNTS_WITHOUT_BASKET;
+  };
   const claimable = entries
     .map((entry, n) => ({ entry, ata: atas[n], exists: existing[n] }))
-    .filter((x) => x.exists || canOpenAccounts);
+    .filter((x) => x.exists || mayOpen(x.entry));
   if (!claimable.length) {
     release();
     return Response.json(
@@ -187,7 +213,13 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
-  const skipped = entries.filter((_, n) => !existing[n] && !canOpenAccounts).map((e) => e.symbol);
+  const skipped = entries.filter((e) => !claimable.some((x) => x.entry === e)).map((e) => e.symbol);
+  // The durable budget, shared by every instance: reserved now, given back if the send fails.
+  const budget = await reserveBudget({ kind: "token", net: ip, invite, accounts: claimable.filter((x) => !x.exists).length });
+  if (!budget.ok) {
+    release();
+    return Response.json({ error: budgetMessage(budget.refused) }, { status: budget.refused === "global" ? 503 : 429 });
+  }
 
   const tx = new Transaction({ feePayer: payer.publicKey });
   for (const { entry, ata, exists } of claimable) {
@@ -236,6 +268,7 @@ export async function POST(request: Request) {
         ? "The faucet is out of SOL on this cluster."
         : "The faucet transaction failed. Try again in a moment.";
     release();
+    await budget.release();
     return Response.json({ error: message }, { status: 502 });
   }
 }

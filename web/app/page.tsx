@@ -26,7 +26,7 @@ const LIFE = [
     title: "Write the recipe",
     on: "One transaction",
     href: "/compose",
-    body: "Pick up to eight tokenized stocks, xStocks or PreStocks over OpenAI, Anthropic and SpaceX, and set the weights. The program stores the exact units behind one share and gives up the power to change them.",
+    body: "Pick up to eight tokenized stocks, such as Apple, NVIDIA and Tesla as xStocks, and set the weights. The program stores the exact units behind one share and gives up the power to change them.",
   },
   {
     n: "2",
@@ -68,7 +68,7 @@ const LIFE = [
     title: "Bet on it",
     on: "Beside the share",
     href: "#predict",
-    body: "Ask whether a basket beats SPY this week. It settles from a published number at two Friday closes, with every input listed so anyone can recompute it. Panta runs the market on Solana, in its sandbox today.",
+    body: "Ask whether a listed basket beats SPY this week. It settles from a published number at two week-ending closes, with every input listed so anyone can recompute it. Panta runs the market on Solana, in its sandbox today.",
   },
 ];
 
@@ -116,7 +116,7 @@ export default function Home() {
         <div className="self-center">
           <HomeSheaf />
           <p className="mt-3 text-center text-xs text-ink-3">
-            Backed today by devnet mirror tokens; on mainnet, by the real xStocks and PreStocks.
+            Backed today by devnet mirror tokens; on mainnet, by the real xStocks.
           </p>
         </div>
       </section>
@@ -142,6 +142,20 @@ export default function Home() {
               </Link>
             </li>
           ))}
+          {/* The eighth cell of the grid: where every step above can be checked. */}
+          <li>
+            <Link
+              href="/ledger"
+              className="lift flex h-full flex-col justify-between rounded-[var(--radius-panel)] border border-dashed border-line-strong bg-page p-7 hover:border-ink-3"
+            >
+              <span className="text-xs text-ink-3">Every step, on the chain</span>
+              <span className="mt-3 block text-sm leading-relaxed text-ink-2">
+                The first six have happened on devnet. The ledger lists every creation, order, fill, plan run and sale, each linked to
+                its transaction.
+              </span>
+              <span className="mt-4 text-sm text-bind">Open the ledger →</span>
+            </Link>
+          </li>
         </ol>
         <p className="mt-8 max-w-[62ch] text-sm leading-relaxed text-ink-3">
           <Link
@@ -236,6 +250,11 @@ export default function Home() {
 
         <div className="py-16">
           <LiveTape />
+          <p className="mt-6">
+            <Link href="/live" className="text-sm text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
+              Open the full tape →
+            </Link>
+          </p>
         </div>
 
         {/* premiums */}

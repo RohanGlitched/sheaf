@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { AlreadyAnsweredToday, AlreadyListed, addToWaitlist, waitlistConfigured, waitlistCounts } from "@/lib/waitlist-store";
 import { cleanContact, isBand, isHome, isRoute } from "@/lib/waitlist-options";
 import { originAllowed } from "@/lib/server-origin";
@@ -50,13 +51,30 @@ function allow(ip: string): boolean {
 
 const oidcOf = (request: Request) => request.headers.get("x-vercel-oidc-token");
 
+/**
+ * The last counts this instance read. A count is a listing of the bucket, which
+ * has taken up to 19 s; a reader never waits more than READ_WAIT_MS for it. Past
+ * that it gets the last counts marked `stale` (or a closed answer, which hides the
+ * count, if there are none yet), and the listing finishes in after() for the next.
+ */
+const READ_WAIT_MS = 2_500;
+let lastCounts: { at: number; counts: Awaited<ReturnType<typeof waitlistCounts>> } | null = null;
+
 export async function GET(request: Request) {
   // A closed waitlist is an ordinary answer for the page, not an error, so the count simply stays hidden.
   if (!waitlistConfigured()) return Response.json({ open: false, message: CLOSED }, { headers: NO_STORE });
+  const read = waitlistCounts(oidcOf(request)).then((counts) => {
+    lastCounts = { at: Date.now(), counts };
+    return counts;
+  });
   try {
-    const counts = await waitlistCounts(oidcOf(request));
-    return Response.json({ open: true, ...counts }, { headers: NO_STORE });
+    const counts = await Promise.race([read, new Promise<null>((r) => setTimeout(() => r(null), READ_WAIT_MS))]);
+    if (counts) return Response.json({ open: true, ...counts }, { headers: NO_STORE });
+    after(() => read.catch(() => undefined));
+    if (lastCounts) return Response.json({ open: true, ...lastCounts.counts, stale: true, ageMs: Date.now() - lastCounts.at }, { headers: NO_STORE });
+    return Response.json({ open: false, message: CLOSED, pending: true }, { headers: NO_STORE });
   } catch {
+    if (lastCounts) return Response.json({ open: true, ...lastCounts.counts, stale: true, ageMs: Date.now() - lastCounts.at }, { headers: NO_STORE });
     return Response.json({ open: false, message: CLOSED }, { headers: NO_STORE });
   }
 }

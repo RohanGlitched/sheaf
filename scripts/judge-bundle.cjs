@@ -23,6 +23,8 @@ const ROUTES = [
   ["ledger", "/ledger"],
   ["method", "/method"],
   ["business", "/business"],
+  ["voices", "/voices"],
+  ["live", "/live"],
 ];
 
 (async () => {

@@ -4,24 +4,24 @@ import Link from "next/link";
 const PREDICT_HREF = "/basket/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ#predict";
 
 const RULE = [
-  { when: "Friday", what: "After trading opens, one BIG5 share is valued from its recipe at the US close, 16:00 New York." },
-  { when: "Next Friday", what: "It is valued the same way again, at that close." },
+  { when: "Week's close", what: "After trading opens, one BIG5 share is valued from its recipe at the week's last US close, normally Friday 16:00 New York." },
+  { when: "A week later", what: "It is valued the same way again, at the next week's close." },
   { when: "Settles", what: "Yes if the share rose more than SPY between the same two closes, no otherwise." },
 ];
 
 /**
  * The last step of the story, told without a live quote: a basket's recipe is
- * public, so a bet on it settles from a published number at two Friday closes
+ * public, so a bet on it settles from a published number at two week-ending US closes
  * that anyone can recompute. The live market and its quotes are on the basket page.
  */
 export function HomePredict() {
   return (
     <div className="grid gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
       <div className="self-center">
-        <h2 className="display text-title max-w-[18ch] text-ink">Bet on a basket, settled at the Friday close.</h2>
+        <h2 className="display text-title max-w-[18ch] text-ink">Bet on a basket, settled at the week&apos;s close.</h2>
         <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-ink-2">
-          Every basket with listed holdings can carry a weekly question: will it beat SPY? It settles
-          from a published number at two Friday US closes, with every input listed so anyone can
+          Every listed basket, one whose holdings have listed closes, can carry a weekly question: will it beat SPY? It settles
+          from a published number at two week-ending US closes, with every input listed so anyone can
           recompute it. Sheaf writes the question and the rule. Panta runs the market on Solana, paid in
           USDC.
         </p>
@@ -61,8 +61,8 @@ export function HomePredict() {
           ))}
         </ol>
         <p className="border-t border-line px-6 py-4 text-xs leading-relaxed text-ink-3 sm:px-7">
-          On Panta&apos;s sandbox while Sheaf is on devnet, so quotes are real answers from its test
-          markets and no USDC is spent.
+          On Panta&apos;s sandbox while Sheaf is on devnet: quotes are the sandbox&apos;s sample answers,
+          labeled as such, and no USDC is spent.
         </p>
       </div>
     </div>

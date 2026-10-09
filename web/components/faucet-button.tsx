@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { FAUCET_TOKENS_PER_CLAIM } from "@/lib/mirror";
 import { explorerTx } from "@/lib/config";
+import { currentRef } from "@/lib/invite-keep";
 
 /**
  * Test tokens, on request.
@@ -12,6 +13,27 @@ import { explorerTx } from "@/lib/config";
  * this does. The button asks the server to mint the exact tickers the person is
  * short of, and says what happened in a sentence either way.
  */
+/** The basket this page is about, from its /basket/<address> URL, or null on any other page. */
+export function basketInView(): string | null {
+  if (typeof window === "undefined") return null;
+  return /^\/basket\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/|$)/.exec(window.location.pathname)?.[1] ?? null;
+}
+
+/**
+ * Body and headers for a faucet call: the basket in view and the invite code
+ * the visitor arrived with, so the faucet can tell which page and which invite
+ * a claim came from. Both are left out when there are none.
+ */
+export function faucetRequest(body: Record<string, unknown>, opts: { basket?: boolean } = {}): RequestInit {
+  const ref = currentRef();
+  const basket = opts.basket ? basketInView() : null;
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(ref ? { "x-sheaf-ref": ref } : {}) },
+    body: JSON.stringify({ ...body, ...(basket ? { basket } : {}), ...(ref ? { ref } : {}) }),
+  };
+}
+
 /** How long "Sent." stays up, even if the page re-renders the button after the balances reload. */
 const SENT_MS = 5_000;
 /** The last claim, kept outside the component so a remounted button still shows it. */
@@ -47,11 +69,7 @@ export function FaucetButton({
     setError(null);
     setSignature(null);
     try {
-      const response = await fetch("/api/faucet", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ owner: publicKey.toBase58(), symbols }),
-      });
+      const response = await fetch("/api/faucet", faucetRequest({ owner: publicKey.toBase58(), symbols }, { basket: true }));
       const body = (await response.json()) as {
         signature?: string;
         error?: string;

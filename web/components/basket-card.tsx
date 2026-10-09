@@ -10,6 +10,9 @@ import { BasketMosaic } from "./basket-mosaic";
 import { money, signedPercent, percent, count, shortAddress } from "@/lib/format";
 import { CardTrack } from "./track-record";
 
+/** Bar rows a card can show before the list is cut off (at the taller card height below). */
+const CARD_ROWS = 6;
+
 export function BasketCard({ basket, launched = false }: { basket: Basket; launched?: boolean }) {
   const { snapshot } = useMarket();
   const valuation = useMemo(
@@ -17,12 +20,31 @@ export function BasketCard({ basket, launched = false }: { basket: Basket; launc
     [basket, snapshot],
   );
 
-  const tiles = valuation.components.map((c) => ({
-    key: c.mint,
-    label: c.base,
-    weightBps: c.actualWeightBps ?? c.targetWeightBps,
-    slot: c.slot,
-  }));
+  // The card's bar list has room for six rows. A bigger basket shows its five
+  // heaviest holdings and folds the rest into one "+N more" row, so no holding
+  // silently disappears off the bottom of the card.
+  const tiles = useMemo(() => {
+    const all = valuation.components
+      .map((c) => ({
+        key: c.mint,
+        label: c.base,
+        weightBps: c.actualWeightBps ?? c.targetWeightBps,
+        slot: c.slot,
+      }))
+      .sort((a, b) => b.weightBps - a.weightBps);
+    if (all.length <= CARD_ROWS) return all;
+    const shown = all.slice(0, CARD_ROWS - 1);
+    const rest = all.slice(CARD_ROWS - 1);
+    return [
+      ...shown,
+      {
+        key: "rest",
+        label: `+${rest.length} more`,
+        weightBps: rest.reduce((sum, t) => sum + t.weightBps, 0),
+        slot: rest[0].slot,
+      },
+    ];
+  }, [valuation]);
 
   const hasPreStocks = valuation.components.some((c) =>
     PRESTOCK_SYMBOLS.has(c.symbol),
@@ -76,7 +98,7 @@ export function BasketCard({ basket, launched = false }: { basket: Basket; launc
       </div>
 
       <div className="mt-4 px-5">
-        <BasketMosaic tiles={tiles} height={132} />
+        <BasketMosaic tiles={tiles} height={tiles.length > 4 ? 164 : 132} />
       </div>
 
       <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line px-5 py-4 text-xs">

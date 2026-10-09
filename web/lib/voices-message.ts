@@ -27,7 +27,8 @@ export const SITE_LINE = "sheaf-index.vercel.app/voices";
  */
 export type WalletKind = "browser" | "app";
 export const WALLET_KIND_LINE: Record<WalletKind, string> = { browser: "browser", app: "extension or app" };
-export const WALLET_KIND_LABEL: Record<WalletKind, string> = { browser: "in-browser wallet", app: "wallet app" };
+/** How the card names it: a one-click key Sheaf made and funded from its test faucet, or the person's own wallet app. */
+export const WALLET_KIND_LABEL: Record<WalletKind, string> = { browser: "one-click browser wallet", app: "own wallet app" };
 export const isWalletKind = (k: unknown): k is WalletKind => k === "browser" || k === "app";
 
 export type VoiceFields = {
@@ -44,12 +45,23 @@ export type VoiceFields = {
 
 /** The wallet's first provable action, found on the chain by the server (lib/voices-proof.ts). */
 export type Proof = {
-  /** "sheaf": a Sheaf program event with this wallet as actor. "launch": a swap it paid for on an official launch pool. */
-  kind: "sheaf" | "launch";
+  /**
+   * "sheaf": a Sheaf program event with this wallet as actor. "launch": a swap it paid for on an official
+   * launch pool. "evm": a plan, a dollar order or an in-kind creation on one of the EVM testnets.
+   */
+  kind: "sheaf" | "launch" | "evm";
+  /** The transaction behind it: a Solana signature, an EVM tx hash, or "" when the proof is a contract read. */
   signature: string;
   time: number | null;
   text: string;
+  /** EVM only: the chain, a link to the proof (tx or address page) and to the wallet on that chain's explorer. */
+  network?: string;
+  url?: string;
+  walletUrl?: string;
 };
+
+/** Which kind of chain an address belongs to: 0x… is EVM, anything else is a Solana key. */
+export const chainOf = (wallet: string): "solana" | "evm" => (wallet.startsWith("0x") ? "evm" : "solana");
 
 /** A GitHub handle proven by a public gist from that account containing the signed message. */
 export type GithubProof = { gist: string; login: string; at: string };

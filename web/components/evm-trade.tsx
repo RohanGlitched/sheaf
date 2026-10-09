@@ -42,7 +42,7 @@ const MIRROR_FAUCET_SHARES = 2n * ONE_SHARE;
 const MIRROR_DOLLARS = 50_000_000n; // 50 test dollars, 6 decimals
 /**
  * A dollar order is a Dutch auction on the newest auction desk (v3 where deployed:
- * the same CreationDeskV2 code, its protocol fee going to a cold treasury), as on
+ * the same CreationDeskV2 code, its protocol fee going to a separate treasury key), as on
  * Solana: the escrow is the
  * shares' live value, and the count the buyer receives starts 2% above that and
  * falls to 2% below over ninety seconds. The house fills once the dollars cover the
@@ -78,7 +78,7 @@ export function EvmTradePanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [serverTxs, setServerTxs] = useState<{ label: string; hash: Hex }[]>([]);
   const [order, setOrder] = useState<{ id: number; keeper?: KeeperResult | null } | null>(null);
-  // The newest auction desk: v3 (cold treasury) where deployed, else v2.
+  // The newest auction desk: v3 (a separate treasury key) where deployed, else v2.
   const deskVersion = auctionDeskVersion(d);
   const desk = deskVersion ? deskAddress(d, deskVersion) : null;
 
@@ -189,7 +189,7 @@ export function EvmTradePanel({
         ]
       : [];
 
-  // The escrow is the shares' live value: the auction is centred on the count it buys at fair.
+  // The escrow is the shares' live value: the auction is centered on the count it buys at fair.
   const cashCost = shares && nav != null ? BigInt(Math.ceil(nav * fromRaw(shares) * 10 ** d.stable.decimals)) : null;
   const floorShares = shares ? (shares * BigInt(10_000 - BAND_BPS)) / 10_000n : 0n;
   const bounds = shares ? auctionBounds(shares, BAND_BPS, floorShares) : null;

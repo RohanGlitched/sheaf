@@ -4,7 +4,7 @@ import { PredictIndex } from "@/components/predict-index";
 export const metadata: Metadata = {
   title: "Predict",
   description:
-    "A Panta prediction market on every Sheaf basket: will it beat SPY this week? Resolved between two Friday US closes from a value anyone can recompute.",
+    "A Panta prediction market on every listed Sheaf basket: will it beat SPY this week? Resolved between two week-ending NYSE closes from a value anyone can recompute.",
 };
 
 export default function PredictPage() {

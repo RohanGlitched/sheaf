@@ -14,7 +14,7 @@ import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
 import { money } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 import { PlanSheaf } from "./plan-sheaf";
-import { useRouteCost, routeBpsFor, routeOutsideBand, routeCostText } from "./dollar-order";
+import { useRouteCost, routeBpsFor, routeOutsideBand, RouteCostNote } from "./dollar-order";
 import { useInrRate } from "./india-fx";
 import { fxNote, rupees } from "@/lib/fx";
 
@@ -24,16 +24,17 @@ import { fxNote, rupees } from "@/lib/fx";
  * before the next run is due and two never overlap.
  */
 const CADENCE = [
-  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month", auctionSecs: 1800, bandBps: 600, hardBps: 2500 },
-  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week", auctionSecs: 1800, bandBps: 400, hardBps: 1500 },
+  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month", auctionSecs: 1800, bandBps: 1500, hardBps: 2500 },
+  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week", auctionSecs: 1800, bandBps: 1000, hardBps: 1500 },
   { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", auctionSecs: 240, bandBps: 200, hardBps: 1000, hint: "demo speed, to watch runs land today" },
 ] as const;
 
 /**
- * Each run's auction opens this far either side of the reference. A month is a
- * long time for a price, so the band widens with the cadence: 6% a month, 4% a
- * week, 2% at demo speed, wide enough that one period's ordinary move still
- * leaves the auction a price a filler can meet. The default is the demo's.
+ * Each run's auction opens this far either side of the reference, the last
+ * fill. A month is a long time for a price, so the band widens with the
+ * cadence: 15% a month, 10% a week, 2% at demo speed. At 6% a monthly run's
+ * auction missed a typical month's move about one time in seven; at 15% it
+ * almost never does. The default is the demo's.
  */
 export const PLAN_BAND_BPS = 200;
 /** A fixed-bounds plan's bounds sit four points outside its band, so the band is never squeezed by its own floor. */
@@ -296,11 +297,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
           {feeBps > 0 ? `, after ${(feeBps / 100).toFixed(2)}% in fees` : ""}.
         </p>
       )}
-      {valid && routeBps != null && (
-        <p className="tnum mt-2 text-xs leading-relaxed text-ink-3">
-          On mainnet routes, buying these stocks costs a filler {routeCostText(routeBps)} one way.
-        </p>
-      )}
+      {valid && <RouteCostNote cost={routeCost} dollars={amount} bandBps={c.bandBps} />}
       {blocked && (
         <p className="mt-3 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
           On mainnet no filler could fill this inside the {c.bandBps / 100}% band today: buying the stocks costs about{" "}
@@ -309,12 +306,22 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
         </p>
       )}
       {navPerShare != null && (
+        <>
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          Each run&apos;s auction opens ±{c.bandBps / 100}% around the last fill and follows the market, but never pays more
-          than {c.hardBps / 100}% above or {c.hardBps / 100}% below today&apos;s price of {money(navPerShare)} a share
-          {feeBps > 0 ? " (fees included)" : ""}. If the price jumps further than the band between runs, re-center the plan
-          from your plans page.
+          Each run&apos;s auction opens ±{c.bandBps / 100}% around the last fill and follows the market. Whatever happens, it
+          never pays more than {money((navPerShare / (1 - feeBps / 10_000)) * (1 + c.hardBps / 10_000))} a share,{" "}
+          {c.hardBps / 100}% above today&apos;s {money(navPerShare / (1 - feeBps / 10_000))}
+          {feeBps > 0 ? " with fees" : ""}, and it stops following the price down past {c.hardBps / 100}% below it. If the
+          price jumps further than the band between runs, re-center the plan from your plans page.
         </p>
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">
+          Worst case with a single filler: every run fills at the bottom of its auction, paying up to{" "}
+          {(Math.round((10_000 / (10_000 - c.bandBps) - 1) * 1000) / 10).toFixed(1)}% more than the last fill, and after about{" "}
+          {Math.max(1, Math.ceil(Math.log(1 + c.hardBps / 10_000) / -Math.log(1 - c.bandBps / 10_000)))}{" "}
+          {Math.ceil(Math.log(1 + c.hardBps / 10_000) / -Math.log(1 - c.bandBps / 10_000)) === 1 ? "run" : "runs"} the plan
+          sits at that {c.hardBps / 100}% limit. Competing fillers keep it near the market.
+        </p>
+        </>
       )}
 
       {!connected ? (

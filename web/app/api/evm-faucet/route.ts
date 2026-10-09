@@ -18,6 +18,11 @@ export const maxDuration = 60;
  *  - Ethereum Sepolia: nothing. The house is nearly out of Sepolia ETH.
  *
  * Limited per address and per IP. Amounts are tiny on purpose.
+ *
+ * Two requests for one address at once (the browser wallet's automatic drip and
+ * a click on "Send me test tokens") share one claim: the second waits for the
+ * first and gets its answer, and a repeat within two minutes of a claim that
+ * sent something gets that answer again rather than "already claimed".
  */
 
 const perAddress = rateLimiter(6 * 60 * 60_000, 1);
@@ -30,7 +35,41 @@ const REAL_CASH = "3";
 
 type Tx = { label: string; hash: Hex };
 
+type Answer = { status: number; json: unknown; at: number };
+const inFlight = new Map<string, Promise<Answer>>();
+const recentlySent = new Map<string, Answer>();
+const SAME_ANSWER_MS = 2 * 60_000;
+
 export async function POST(request: Request) {
+  const text = await request.text();
+  let key: string | null = null;
+  try {
+    const b = JSON.parse(text) as { network?: string; address?: string };
+    if (b.network && b.address) key = `${b.network}:${b.address.toLowerCase()}`;
+  } catch {
+    // claim() answers a bad body.
+  }
+  const replay = new Request(request.url, { method: "POST", headers: request.headers, body: text });
+  if (!key) return claim(replay);
+  const recent = recentlySent.get(key);
+  if (recent && Date.now() - recent.at < SAME_ANSWER_MS) return Response.json(recent.json, { status: recent.status, headers: { "cache-control": "no-store" } });
+  let job = inFlight.get(key);
+  if (!job) {
+    job = claim(replay)
+      .then(async (res) => ({ status: res.status, json: await res.json().catch(() => ({})), at: Date.now() }))
+      .finally(() => inFlight.delete(key!));
+    inFlight.set(key, job);
+  }
+  const answer = await job;
+  const sent = answer.status === 200 && Array.isArray((answer.json as { txs?: unknown[] }).txs) && (answer.json as { txs: unknown[] }).txs.length > 0;
+  if (sent) {
+    recentlySent.set(key, answer);
+    if (recentlySent.size > 2_000) recentlySent.clear();
+  }
+  return Response.json(answer.json, { status: answer.status, headers: { "cache-control": "no-store" } });
+}
+
+async function claim(request: Request): Promise<Response> {
   let body: { network?: string; address?: string; basket?: string };
   try {
     body = await request.json();

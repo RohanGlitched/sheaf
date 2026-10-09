@@ -40,6 +40,9 @@ export function SiteFooter() {
             <Link href="/ledger" className="text-ink-2 hover:text-ink">
               Ledger
             </Link>
+            <Link href="/live" className="text-ink-2 hover:text-ink">
+              Live tape
+            </Link>
             <Link href="/method" className="text-ink-2 hover:text-ink">
               How it works
             </Link>

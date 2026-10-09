@@ -56,7 +56,7 @@ export function SiteHeader() {
        in reach. On a phone the destinations move to a second row, and two rows of
        chrome following you down a 390-pixel screen is too much to ask, so there
        the header scrolls away with everything else. */
-    <header className="border-b border-line bg-page/85 backdrop-blur-md sm:sticky sm:top-0 sm:z-40">
+    <header className="relative z-40 border-b border-line bg-page/85 backdrop-blur-md sm:sticky sm:top-0">
       <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-6 px-5 sm:px-8">
         <Link href="/" className="shrink-0">
           <Wordmark />

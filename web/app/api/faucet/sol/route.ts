@@ -9,15 +9,18 @@ import {
 import { WRITE_CLUSTER, WRITE_RPC } from "@/lib/config";
 import { clientIp } from "@/lib/faucet-server";
 import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
+import { rememberOidc } from "@/lib/gcs-store";
+import { budgetMessage, reserve as reserveBudget } from "@/lib/server-faucet-budget";
+import { cleanRef } from "@/lib/invite-ref";
 
 /**
- * Enough devnet SOL for a first visit: shares in kind, a dollar order, a plan
- * and a sale, most of it rent. A full run that also opens a launch market costs
- * about 0.04 SOL and may need a second source (faucet.solana.com). Only for
- * wallets that are nearly empty, so it covers a first visit rather than funding
- * anyone's testing, and small, so the key that funds the faucet lasts.
+ * Enough devnet SOL for a whole first visit, the longest path included: compose a
+ * basket, open its launch market and make the smallest (0.01 SOL) curve buy, which
+ * together take about 0.04 SOL. Only for wallets that are nearly empty, so it
+ * covers a first visit rather than funding anyone's testing. Every grant also
+ * counts against the faucet's durable daily budget (lib/server-faucet-budget.ts).
  */
-const GRANT = 0.03 * LAMPORTS_PER_SOL;
+const GRANT = 0.05 * LAMPORTS_PER_SOL;
 const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
 /**
  * What the paying key keeps back. The faucet has its own key (FAUCET_KEY), which
@@ -28,8 +31,9 @@ const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
 const RESERVE_OWN_KEY = 0.5 * LAMPORTS_PER_SOL;
 const RESERVE_HOUSE = 2 * LAMPORTS_PER_SOL;
 
+/** This instance's quick check per network; the durable per-network and global budgets are the real limit. */
 const IP_WINDOW_MS = 24 * 60 * 60_000;
-const IP_MAX_GRANTS = 3;
+const IP_MAX_GRANTS = 25;
 const grantsByIp = new Map<string, number[]>();
 const granted = new Set<string>();
 
@@ -43,10 +47,15 @@ export async function POST(request: Request) {
     return Response.json({ error: "The faucet is not configured on this deployment." }, { status: 503 });
   }
 
+  rememberOidc(request);
   let owner: PublicKey;
+  // An invite code (?ref= on the page, sent as `ref` or the x-sheaf-ref header) counts the
+  // grant against the invite instead of the network, so a group on one Wi-Fi is not turned away.
+  let invite: string | null = cleanRef(request.headers.get("x-sheaf-ref"));
   try {
-    const body = (await request.json()) as { owner?: string };
+    const body = (await request.json()) as { owner?: string; ref?: string };
     owner = new PublicKey(body.owner ?? "");
+    invite = cleanRef(body.ref) ?? invite;
   } catch {
     return Response.json({ error: "That does not look like a Solana address." }, { status: 400 });
   }
@@ -61,7 +70,7 @@ export async function POST(request: Request) {
   const ip = clientIp(request);
   const now = Date.now();
   const recent = (grantsByIp.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS);
-  if (recent.length >= IP_MAX_GRANTS) {
+  if (!invite && recent.length >= IP_MAX_GRANTS) {
     return Response.json(
       { error: "This network has had its test SOL for today. faucet.solana.com has more." },
       { status: 429 },
@@ -105,6 +114,12 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
+  // The durable budget, shared by every instance: reserved now, given back if the transfer fails.
+  const budget = await reserveBudget({ kind: "sol", net: ip, invite, lamports: GRANT });
+  if (!budget.ok) {
+    release();
+    return Response.json({ error: budgetMessage(budget.refused), empty: budget.refused === "global" }, { status: budget.refused === "global" ? 503 : 429 });
+  }
 
   try {
     const signature = await sendAndConfirmTransaction(
@@ -118,6 +133,7 @@ export async function POST(request: Request) {
     return Response.json({ signature, sol: GRANT / LAMPORTS_PER_SOL });
   } catch {
     release();
+    await budget.release();
     return Response.json({ error: "The transfer failed. Try again in a moment." }, { status: 502 });
   }
 }

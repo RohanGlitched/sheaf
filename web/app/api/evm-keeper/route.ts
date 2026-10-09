@@ -6,7 +6,10 @@ import {
   houseAccount,
   rateLimiter,
   runEvmKeeper,
+  runPlanSchedule,
   runSipSchedule,
+  evmPlanTerms,
+  type PlanRunResult,
   runTempoSip,
   SIP_ACTIONS,
   SipRefused,
@@ -70,6 +73,7 @@ async function handle(request: Request) {
   let orderParam = url.searchParams.get("order");
   let versionParam = url.searchParams.get("version");
   let sip: { account?: string; action?: string } | undefined;
+  let plan: { action?: string; basket?: string; cash?: string; cadence?: string; id?: number } | undefined;
   if (request.method === "POST") {
     try {
       const body = (await request.json()) as {
@@ -77,11 +81,13 @@ async function handle(request: Request) {
         order?: number | string;
         version?: number | string;
         sip?: { account?: string; action?: string };
+        plan?: { action?: string; basket?: string; cash?: string; cadence?: string; id?: number };
       };
       network = body.network ?? network;
       if (body.order != null) orderParam = String(body.order);
       if (body.version != null) versionParam = String(body.version);
       sip = body.sip;
+      plan = body.plan;
     } catch {
       // An empty POST is a sweep.
     }
@@ -90,7 +96,7 @@ async function handle(request: Request) {
   if (orderParam != null && orderParam !== "" && orderId == null) return Response.json({ error: "order must be an order id." }, { status: 400 });
   if (versionParam != null && !["1", "2", "3"].includes(versionParam)) return Response.json({ error: "version must be 1, 2 or 3." }, { status: 400 });
   const version = versionParam ? (Number(versionParam) as 1 | 2 | 3) : undefined;
-  const auto = !sip && orderId == null;
+  const auto = !sip && !plan && orderId == null;
 
   const ip = clientIp(request);
   const limiter = auto ? perIpAuto : perIp;
@@ -121,6 +127,28 @@ async function handle(request: Request) {
     }
   }
 
+  // PlanDeskV3 plans on chains without access keys: the terms a new plan signs, or run one due plan now.
+  if (plan) {
+    if (!originAllowed(request)) return Response.json({ error: "Plans are started from this site." }, { status: 403 });
+    const d = network ? deploymentFor(network) : undefined;
+    if (!d || d.network === "tempoTestnet") return Response.json({ error: "Plans here run on the chains without access keys; Tempo has its own." }, { status: 400 });
+    try {
+      if (plan.action === "terms") {
+        if (!plan.basket || !isAddress(plan.basket)) return Response.json({ error: "plan.basket must be an address." }, { status: 400 });
+        const cash = /^[0-9]{1,15}$/.test(plan.cash ?? "") ? BigInt(plan.cash!) : 0n;
+        if (cash <= 0n) return Response.json({ error: "plan.cash must be a positive raw amount." }, { status: 400 });
+        const cadence = plan.cadence === "monthly" ? "monthly" : "demo";
+        return Response.json(await evmPlanTerms(d, plan.basket, cash, cadence), noStore);
+      }
+      if (plan.action === "run" && Number.isInteger(plan.id) && (plan.id as number) >= 0) {
+        return Response.json({ plans: await runPlanSchedule(d, { planId: plan.id }) }, noStore);
+      }
+      return Response.json({ error: "Unknown plan action." }, { status: 400 });
+    } catch (err) {
+      return Response.json({ error: fail(err) }, { status: err instanceof SipRefused ? 429 : 500 });
+    }
+  }
+
   const targets = network
     ? [deploymentFor(network)].filter((d) => d != null)
     : DEPLOYED.map((c) => c.deployment!).filter((d) => d.network !== "sepolia");
@@ -139,11 +167,14 @@ async function handle(request: Request) {
   const results: FillResult[] = [];
   const errors: { network: string; error: string }[] = [];
   let sips: Awaited<ReturnType<typeof runSipSchedule>> | undefined;
+  const planRuns: PlanRunResult[] = [];
   try {
     await Promise.all([
       ...targets.map(async (d) => {
         try {
           results.push(...(await runEvmKeeper(d, { orderId, version, max: orderId != null ? 1 : 3 })));
+          // Due PlanDeskV3 plans that name the house as keeper (not on Tempo, whose plans run through access keys).
+          if (orderId == null) planRuns.push(...(await runPlanSchedule(d)));
         } catch (err) {
           errors.push({ network: d.network, error: fail(err) });
         }
@@ -159,7 +190,7 @@ async function handle(request: Request) {
     if (auto) sweeping.delete(target);
   }
   if (!network) await beat("evmKeeper", { results: results.length, filled: results.filter((r) => r.status === "filled").length });
-  return Response.json({ results, errors, ...(sips ? { sips } : {}) }, noStore);
+  return Response.json({ results, errors, ...(sips ? { sips } : {}), ...(planRuns.length ? { plans: planRuns } : {}) }, noStore);
 }
 
 export const GET = handle;

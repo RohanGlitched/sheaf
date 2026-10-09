@@ -242,7 +242,7 @@ export const XSTOCKS: XStock[] = [
   {
     "symbol": "STRCx",
     "base": "STRC",
-    "company": "Strategy (STRC)",
+    "company": "Strategy Stretch preferred",
     "mint": "Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",
     "decimals": 8,
     "equityFeedId": "27c7bbc9755d847f7fc63620c2edcc6a91d2c0c67a28c7999907b59c505b3c17",

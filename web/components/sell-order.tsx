@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import { tokenAccount } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
 import { placeSellOrderIx, cancelSellOrderIx, decodeSellOrder, freshNonce, requiredCash, type SellOrder } from "@/lib/desk";
@@ -13,7 +15,7 @@ import { explorerTx } from "@/lib/config";
 import { useCash, CASH, fromCashRaw } from "@/lib/use-cash";
 import { money, quantity } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
-import { MIN_ORDER_DOLLARS, START_BUFFER_SECS, kickFillers, routeBpsFor, routeCostText, routeOutsideBand, useRouteCost } from "./dollar-order";
+import { MIN_ORDER_DOLLARS, START_BUFFER_SECS, kickFillers, routeBpsFor, routeOutsideBand, RouteCostNote, useRouteCost } from "./dollar-order";
 
 const AUCTION_SECS = 90;
 const BAND_BPS = 200;
@@ -189,7 +191,16 @@ export function SellOrderPanel({
             startTs,
             endTs: startTs + AUCTION_SECS,
           });
-          return { sellOrder, transaction: new Transaction().add(ix) };
+          // The seller's own dollar account, where the filler pays, created here (idempotently) so no filler has to
+          // pay its rent; the keeper skips sales whose seller has none.
+          const cashAccount = createAssociatedTokenAccountIdempotentInstruction(
+            publicKey,
+            tokenAccount(CASH.mint, publicKey, CASH.program),
+            publicKey,
+            CASH.mint,
+            CASH.program,
+          );
+          return { sellOrder, transaction: new Transaction().add(cashAccount, ix) };
         },
       });
       setNotice(null);
@@ -310,11 +321,7 @@ export function SellOrderPanel({
                 The ask starts 2% above the fair value at {money(navPerShare)} a share and falls to 2% below, your floor, over ninety
                 seconds. The first filler to pay takes the shares; if nobody does, they come back to you. Sheaf takes no fee on a sale.
               </p>
-              {routeBps != null && (
-                <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
-                  On mainnet routes, trading these stocks costs a filler {routeCostText(routeBps)} one way.
-                </p>
-              )}
+              <RouteCostNote cost={routeCost} dollars={fairCash ?? 100} verb="selling" bandBps={BAND_BPS} />
             </div>
           )}
 

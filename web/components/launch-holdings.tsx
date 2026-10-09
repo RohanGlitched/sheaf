@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { openLaunches, readDbcState, type DbcPoolInfo } from "@/lib/dbc";
+import { fetchRejected } from "@/lib/use-launches";
 import { count, quantity } from "@/lib/format";
 import { TOKEN_2022_PROGRAM_ID, type Basket } from "@/lib/sheaf";
 
@@ -24,7 +25,7 @@ export function LaunchHoldings({ baskets }: { baskets: Basket[] | null }) {
     void (async () => {
       // Only official launches count: a pool squatting a basket's launch address
       // is not that basket's token, whatever its name says.
-      const official = await openLaunches(connection, baskets);
+      const official = await openLaunches(connection, baskets, await fetchRejected());
       const launched = baskets.filter((b) => official.has(b.address));
       const infos = launched.map((b) => official.get(b.address)!);
       const accounts = await connection.getParsedTokenAccountsByOwner(new PublicKey(owner), {

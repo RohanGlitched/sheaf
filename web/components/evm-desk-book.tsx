@@ -21,6 +21,7 @@ import {
 import { quantity, shortAddress, timeAgo } from "@/lib/format";
 import { useKeeperKick } from "@/lib/use-keeper-kick";
 import { KeeperPulse } from "./keeper-pulse";
+import { EvmPlanPanel } from "./evm-plan-panel";
 import type { EvmWallet } from "./evm-wallet";
 
 const th = "px-3 py-3 font-normal sm:px-4";
@@ -28,10 +29,11 @@ const td = "px-3 py-3 sm:px-4";
 
 /**
  * The creation desks' books, read straight from the contracts. First the auction
- * desks, newest first (v3, whose protocol fee goes to a cold treasury, then v2), each
+ * desks, newest first (v3, whose protocol fee goes to a separate treasury key, then v2), each
  * auction's count falling live; under them the v1 desk's fixed-price orders, which
  * still settle exactly as before. The house filler is just one participant; anyone
- * holding the components can fill.
+ * holding the components can fill. On chains without Tempo access keys, the monthly
+ * plan panel (EvmPlanPanel) sits just above the book, since its runs land in it.
  */
 export function EvmDeskBook({
   d,
@@ -246,7 +248,9 @@ export function EvmDeskBook({
   const v3 = v3Of(d);
 
   return (
-    <section className="mt-20 border-t border-line pt-16">
+    <>
+      {d.network !== "tempoTestnet" && v3Of(d) && <EvmPlanPanel d={d} basket={basket} wallet={wallet} onDone={onDone} />}
+      <section className="mt-20 border-t border-line pt-16">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="display text-title text-ink">The desk&apos;s book</h2>
@@ -282,7 +286,7 @@ export function EvmDeskBook({
         return (
           <div key={v}>
             <h3 className="mt-10 text-sm text-ink-3">
-              {v === 3 ? "Auctions, v3 desk (protocol fee to a cold treasury)" : v3 ? "Auctions, v2 desk (earlier; its protocol fee went to the house key)" : "Auctions, v2 desk"}
+              {v === 3 ? "Auctions, v3 desk (protocol fee to a separate treasury key)" : v3 ? "Auctions, v2 desk (earlier; its protocol fee went to the house key)" : "Auctions, v2 desk"}
             </h3>
             {!rows ? (
               <p className="mt-4 text-sm text-ink-3">Reading the desk…</p>
@@ -340,6 +344,7 @@ export function EvmDeskBook({
         </div>
       )}
       {note && <p className="mt-4 text-sm text-ink-2">{note}</p>}
-    </section>
+      </section>
+    </>
   );
 }

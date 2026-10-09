@@ -207,11 +207,11 @@ export function PredictIndex() {
       <section className="grid grid-cols-1 gap-10 pt-16 pb-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-end">
         <div className="min-w-0">
           <p className="text-sm text-bind">Predict</p>
-          <h1 className="display mt-2 text-hero leading-[0.95] text-ink">A market on every basket.</h1>
+          <h1 className="display mt-2 text-hero leading-[0.95] text-ink">A market on every listed basket.</h1>
           <p className="mt-6 max-w-[58ch] text-lg leading-relaxed text-ink-2">
             Every Sheaf basket carries one question: will it beat SPY this week? A basket&apos;s recipe is
             on chain, so the answer can be recomputed by anyone from public accounts and two public price
-            sources, between two Friday US closes. Panta runs the market: a USDC bonding curve on Solana,
+            sources, between two week-ending US closes. Panta runs the market: a USDC bonding curve on Solana,
             opened, traded and claimed through its API.
           </p>
           <PoweredByPanta className="mt-7" />
@@ -244,7 +244,7 @@ export function PredictIndex() {
           <p className="max-w-[56ch] text-sm leading-relaxed text-ink-3">
             Value per share is read live from each basket&apos;s recipe at mainnet prices and dividend
             multipliers. The trailing week compares the same recipe with SPY over the last five closes. A
-            market resolves from neither of these live figures: it reads navPerShare.listed at two Friday
+            market resolves from neither of these live figures: it reads navPerShare.listed at two week-ending
             closes, as set out below.
           </p>
         </div>

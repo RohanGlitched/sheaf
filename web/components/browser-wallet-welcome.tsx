@@ -6,6 +6,7 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { BrowserWalletName } from "@/lib/browser-wallet";
 import { WRITE_CLUSTER } from "@/lib/config";
 import { shortAddress } from "@/lib/format";
+import { faucetRequest } from "./faucet-button";
 
 const SEEN_KEY = "sheaf:browser-wallet:welcomed";
 const ENOUGH_FOR_FEES = 0.01 * LAMPORTS_PER_SOL;
@@ -28,13 +29,10 @@ function markSeen(address: string) {
   }
 }
 
-async function post(path: string, body: unknown): Promise<{ ok: boolean; error?: string }> {
+async function post(path: string, body: Record<string, unknown>, opts: { basket?: boolean } = {}): Promise<{ ok: boolean; error?: string }> {
   try {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // With the invite code (and, for test dollars, the basket in view), so the faucet knows where the claim came from.
+    const response = await fetch(path, faucetRequest(body, opts));
     const json = (await response.json().catch(() => ({}))) as { signature?: string; error?: string };
     return response.ok && json.signature ? { ok: true } : { ok: false, error: json.error ?? "The faucet did not answer." };
   } catch {
@@ -96,7 +94,7 @@ export function BrowserWalletWelcome({ onFunded }: { onFunded?: () => void }) {
     setErrors([]);
     const [sol, dollars] = await Promise.all([
       post("/api/faucet/sol", { owner: address }),
-      post("/api/faucet", { owner: address, symbols: ["USDC"] }),
+      post("/api/faucet", { owner: address, symbols: ["USDC"] }, { basket: true }),
     ]);
     const solOk = sol.ok || /already had/i.test(sol.error ?? "");
     const problems = [
