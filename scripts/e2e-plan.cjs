@@ -8,13 +8,15 @@ const path = require("path");
 
 const BASE = process.argv[2] || "http://localhost:3900";
 const BASKET = process.argv[3] || "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+// One of the 100 fixed test wallets (web/lib/test-wallets.generated.ts): TEST_WALLET_INDEX, or one at random.
+const INDEX = Number.isInteger(Number(process.env.TEST_WALLET_INDEX)) && process.env.TEST_WALLET_INDEX !== "" ? Number(process.env.TEST_WALLET_INDEX) : Math.floor(Math.random() * 100);
 const walletSrc = fs.readFileSync(path.join(__dirname, "browser-test-wallet.js"), "utf8").replace("export function", "function");
 
 (async () => {
   const browser = await chromium.launch();
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   // Register the wallet before the app loads, the way an extension would.
-  await context.addInitScript(`${walletSrc}; window.__testWallet = installTestWallet();`);
+  await context.addInitScript(`${walletSrc}; window.__testWallet = installTestWallet({ index: ${INDEX} });`);
   const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && !/429|Failed to load resource/.test(m.text()) && console.log("[page]", m.text().slice(0, 200)));
   await page.goto(`${BASE}/basket/${BASKET}`, { waitUntil: "domcontentloaded" });

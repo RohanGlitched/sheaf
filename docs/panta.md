@@ -8,14 +8,22 @@ The market resolves from a number anyone can recompute: one share's value at two
 
 The rule is built in one place (`web/lib/panta-window.ts`) and used by the market draft, the NAV route and the pages, so they cannot disagree.
 
-- **Window.** From one Friday's US regular-session close (16:00 New York) to the next Friday's close. Panta's `endTime` is the second close. `startTime` is when trading opens: at least an hour out, as Panta requires, and at least a day before `endTime`. Part of the measured week can already have passed when trading opens, and the rule states both closes as explicit times. `resolutionTime` is two hours after the close, once the close is final in Sheaf's history.
+- **Window.** `startTime` is when trading opens: two hours out (Panta requires at least one). The measured week starts at the **first Friday US regular-session close (16:00 New York) at or after `startTime`**, and ends at the Friday close a week later, which is Panta's `endTime`. Nothing of the measured week is known when the first share is bought. A market opened on a Thursday waits for Friday's close; one opened on a Saturday waits six days. An earlier version ended at the first Friday at least a day out and measured from the Friday before, so a market opened midweek already knew most of its week; that is fixed. `resolutionTime` is two hours after the second close, once that close is final in Sheaf's history.
+- **When to read.** Both `?at=` URLs are read at or after `resolutionTime`. The rule says so, because Yahoo re-adjusts past closes after an ex-dividend date. Read at the same time, both closes use the same adjustment. `?at=` answers are cached for an hour, not a day, for the same reason.
+- **Which baskets.** Only baskets whose every holding has a listed close. A basket holding a pre-IPO company (FRNTR holds Anthropic, OpenAI, SpaceX and Anduril) has no `navPerShare.listed`, so no market is offered on it:
+  - `/api/nav` answers `resolution: { offered: false, reason }`.
+  - The basket page shows "No market on FRNTR" in place of the Panta flow.
+  - `/predict` marks the row.
+  - `POST /api/panta {kind: "create-quote"}` refuses with a 400.
 - **Holidays.** If a Friday is a market holiday, the last close before it is used. The JSON reports the day actually used as `closeDay`.
 - **Numbers.** YES if `navPerShare.listed` at the later close divided by `navPerShare.listed` at the earlier close is greater than `spy.adjClose` divided the same way. Both values come from `/api/nav/<basket>?at=<unix>`. NO otherwise, including a tie.
 - **What `navPerShare.listed` means at a close.** The sum over components of `unitsPerShare / 10^decimals` x the listed share's adjusted close x the mint's multiplier today. Adjusted closes reinvest dividends, as the multiplier does, so the ratio between two closes is the share's total return. SPY's `adjClose` is on the same basis.
 
 The rule as sent to Panta, for BIG5 opened on Oct 9, 2026:
 
-> YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the US regular-session closes on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z); if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.
+> YES if BIG5's navPerShare.listed from https://sheaf-index.vercel.app/api/nav/FFGg…iEfJ?at=1792180800 divided by navPerShare.listed from …?at=1791576000 is greater than spy.adjClose divided the same way (the same two URLs). Those times are the US regular-session closes on Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z) and Fri, Oct 16, 2026, 16:00 New York (2026-10-16T20:00:00Z); if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. Both URLs are read at or after the resolution time, 2026-10-16T22:00:00Z, so both closes use the same data. NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.
+
+Trading on this market opened at 13:37 UTC that Friday, before the first close.
 
 ### `/api/nav/<basket>`
 
@@ -24,8 +32,9 @@ The rule as sent to Panta, for BIG5 opened on Oct 9, 2026:
   - A time in the future, or before the one-year history, gets a 400.
   - A close in the last hour gets a 503 with `Retry-After`. History is cached for an hour, so it is not final yet.
   - A close not yet in the history also gets a 503.
-  
-  A basket holding a pre-IPO PreStock has no listed history, so it answers `listed: null` with the reason. Past closes are cached for a day.
+  - If the mints' multipliers cannot be read from mainnet, the answer is a 503. It is never computed from Jupiter's copy of the multipliers.
+
+  A basket holding a pre-IPO PreStock has no listed history, so it answers `listed: null` with the reason. Past closes are cached for an hour.
 - **`recompute`** lists every input with a command to fetch it:
   - the share supply (`getTokenSupply`)
   - the basket account with the recipe (`getAccountInfo`)
@@ -36,7 +45,9 @@ The rule as sent to Panta, for BIG5 opened on Oct 9, 2026:
 
   `sources` names the history source and its date.
 
-"Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict` and `/portfolio`.
+"Powered by Panta", linked to panta.market, appears on every Panta module: the basket page panel (twice), `/predict`, and `/portfolio` once a wallet is connected.
+
+`/predict` also works the rule once on the last full week, from the same two `?at=` reads a resolver makes ("Last week, resolved the way a market would be").
 
 ### Endpoint → product mapping
 
@@ -89,7 +100,7 @@ Opening a market on Panta costs about 50 USDC (`paymentUsdc: 50000000`) plus SOL
 The UI tags every fixture value as "sandbox fixture" (Panta marks these answers with a `disclaimer` field). Three cases matter:
 - **Buy quotes.** The sandbox answers every buy with the same fixed quote, "$1.00 buys 2.00 shares". The panel shows the amount you asked for next to Panta's answer and says the answer is fixed.
 - **The market.** The sandbox has one fixture market, "Sandbox test market". It is labeled as standing in for the basket's market, never shown as if it were the basket's own.
-- **Signing.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash. Sheaf then compiles a memo-only stand-in on a fresh devnet blockhash, asks the wallet to sign it, and says so. The signed transaction is never sent anywhere. If a wallet declines, the sandbox flow can continue with a clearly labeled placeholder signature.
+- **Signing: a stand-in, never broadcast.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash, so there is nothing of Panta's to sign. Sheaf compiles a memo-only stand-in on a fresh devnet blockhash and asks the wallet to sign that, and the panel says so. The signed stand-in is **never broadcast** to any cluster. The signature reported to Panta's sandbox afterwards (register, submit, `/trades/`) demonstrates the flow, not a trade. If a wallet declines, the sandbox flow can continue with a clearly labeled placeholder signature. `/predict` and the basket page say this in plain words.
 
 `POST /api/panta` has two throttles: 20 requests a minute per IP, and per-kind caps below Panta's own account limits (24 quotes, 16 builds, 30 reports and 90 reads a minute). Identical create quotes are reused for 60 s. In the sandbox, a buy or claim must name a market in Panta's catalog.
 

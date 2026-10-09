@@ -11,6 +11,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { clientIp, faucetKeypair } from "@/lib/faucet-server";
+import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
 import { WRITE_RPC, WRITE_CLUSTER } from "@/lib/config";
 import { COMPOSABLE, FAUCET_TOKENS_PER_CLAIM, writeMint } from "@/lib/mirror";
 import { CASH_MINT, CASH_DECIMALS } from "@/lib/cash.generated";
@@ -22,11 +23,14 @@ const CASH_PER_CLAIM = 1_000;
  * Test shares, on request.
  *
  * Nobody should have to go looking for tokens to try a product. The mirror mints
- * on the write cluster keep their authority with this faucet, so a visitor can
+ * on the write cluster keep their authority with the house key, so a visitor can
  * ask for a handful of every ticker and go straight to composing.
  *
- * The faucet key is read from the server environment and never leaves it. It has
- * authority over nothing but these stand-in mints on a test cluster.
+ * Both keys are read from the server environment and never leave it. The house
+ * key (FAUCET_SECRET_KEY) signs the mints; it is also the keeper, the house filler
+ * and a devnet stand-in issuer, on a test cluster only. The faucet's own key
+ * (FAUCET_KEY, see lib/server-keys.ts) pays the fee and the rent for new token
+ * accounts, so handing out tokens never spends the keeper's SOL.
  */
 
 const COOLDOWN_MS = 60_000;
@@ -43,11 +47,14 @@ const IP_MAX_CLAIMS = 6;
 const claimsByIp = new Map<string, number[]>();
 
 /**
- * The faucet key is also the keeper's, which stops spending rent at 0.5 SOL. New
- * token accounts are only opened while the key holds well above that, so a run of
- * fresh wallets can never starve the keeper.
+ * The house key holds the stand-in mints' authority, so it signs every mint. The
+ * rent for a visitor's new token accounts and the fee are paid by the faucet's own
+ * key (FAUCET_KEY) when it has one, so a run of fresh wallets spends the faucet's
+ * SOL, never the keeper's. New accounts stop below this floor on the paying key:
+ * 1.5 SOL when that is still the house (the keeper stops at 0.5), 0.2 otherwise.
  */
-const ATA_FLOOR_LAMPORTS = 1.5e9;
+const ATA_FLOOR_HOUSE = 1.5e9;
+const ATA_FLOOR_OWN_KEY = 0.2e9;
 
 
 function recentClaims(ip: string): number[] {
@@ -60,7 +67,8 @@ function recentClaims(ip: string): number[] {
 
 export async function POST(request: Request) {
   const keypair = faucetKeypair();
-  if (!keypair) {
+  const payer = faucetPayerKeypair();
+  if (!keypair || !payer) {
     return Response.json(
       {
         error:
@@ -154,7 +162,7 @@ export async function POST(request: Request) {
   try {
     const [infos, lamports] = await Promise.all([
       connection.getMultipleAccountsInfo(atas),
-      connection.getBalance(keypair.publicKey),
+      connection.getBalance(payer.publicKey),
     ]);
     existing = infos.map((info) => info != null);
     houseLamports = lamports;
@@ -165,7 +173,7 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
-  const canOpenAccounts = houseLamports >= ATA_FLOOR_LAMPORTS;
+  const canOpenAccounts = houseLamports >= (faucetHasOwnKey() ? ATA_FLOOR_OWN_KEY : ATA_FLOOR_HOUSE);
   const claimable = entries
     .map((entry, n) => ({ entry, ata: atas[n], exists: existing[n] }))
     .filter((x) => x.exists || canOpenAccounts);
@@ -181,7 +189,7 @@ export async function POST(request: Request) {
   }
   const skipped = entries.filter((_, n) => !existing[n] && !canOpenAccounts).map((e) => e.symbol);
 
-  const tx = new Transaction();
+  const tx = new Transaction({ feePayer: payer.publicKey });
   for (const { entry, ata, exists } of claimable) {
     const mint = new PublicKey(entry.mint);
     const amount =
@@ -189,7 +197,7 @@ export async function POST(request: Request) {
     if (!exists) {
       tx.add(
         createAssociatedTokenAccountIdempotentInstruction(
-          keypair.publicKey,
+          payer.publicKey,
           ata,
           owner,
           mint,
@@ -210,7 +218,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const signature = await sendAndConfirmTransaction(connection, tx, [keypair], {
+    const signers = payer.publicKey.equals(keypair.publicKey) ? [keypair] : [payer, keypair];
+    const signature = await sendAndConfirmTransaction(connection, tx, signers, {
       commitment: "confirmed",
     });
     return Response.json({

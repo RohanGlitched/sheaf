@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { tokenAccount, type Basket } from "./sheaf";
+import { decodeBasket, tokenAccount, type Basket } from "./sheaf";
 import { stockForWriteMint, symbolForWriteMint } from "./mirror";
 import type { MarketSnapshot, Quote } from "./market";
 import { ONE_SHARE } from "./config";
@@ -22,7 +22,11 @@ export type VaultRow = {
   mint: string;
   /** Raw units the vault holds. */
   held: bigint;
-  /** Raw units the outstanding shares claim. */
+  /**
+   * Raw units the outstanding shares claim, plus the protocol-fee shares the
+   * basket has accrued but not yet minted to the treasury: the program backs
+   * `supply + protocol_fee_accrued`, so those units are owed, not surplus.
+   */
   owed: bigint;
   /** held / owed. At least 1 if the program is behaving. */
   coverage: number;
@@ -33,6 +37,8 @@ export type OnChainBasket = {
   supply: bigint;
   /** Whole shares. */
   shares: number;
+  /** Protocol-fee shares created and backed but not yet claimed (raw units). */
+  feeAccrued: bigint;
   vaults: VaultRow[];
   /** True when every vault covers what the shares claim. */
   fullyBacked: boolean;
@@ -58,7 +64,10 @@ export function useOnChainBasket(basket: Basket | null) {
     try {
       const basketKey = new PublicKey(basket.address);
       const tokenProgram = new PublicKey(basket.tokenProgram);
+      // The basket account itself comes first, read fresh: its accrued
+      // protocol fee changes with every creation and every claim.
       const keys = [
+        basketKey,
         new PublicKey(basket.shareMint),
         ...basket.components.map((c) =>
           tokenAccount(new PublicKey(c.mint), basketKey, tokenProgram),
@@ -66,15 +75,19 @@ export function useOnChainBasket(basket: Basket | null) {
       ];
       const infos = await connection.getMultipleAccountsInfo(keys);
 
-      const mintInfo = infos[0];
+      const fresh = infos[0] ? decodeBasket(basketKey, new Uint8Array(infos[0].data)) : null;
+      const feeAccrued = fresh?.protocolFeeAccrued ?? basket.protocolFeeAccrued ?? 0n;
+      const mintInfo = infos[1];
       const supply = mintInfo
         ? readU64(new Uint8Array(mintInfo.data), SUPPLY_OFFSET)
         : 0n;
 
       const vaults: VaultRow[] = basket.components.map((component, i) => {
-        const info = infos[i + 1];
+        const info = infos[i + 2];
         const held = info ? readU64(new Uint8Array(info.data), AMOUNT_OFFSET) : 0n;
-        const owed = (component.unitsPerShare * supply) / BigInt(ONE_SHARE);
+        // Rounded up, as a redemption of every outstanding claim would need.
+        const claimed = component.unitsPerShare * (supply + feeAccrued);
+        const owed = (claimed + BigInt(ONE_SHARE) - 1n) / BigInt(ONE_SHARE);
         return {
           mint: component.mint,
           held,
@@ -86,6 +99,7 @@ export function useOnChainBasket(basket: Basket | null) {
       setData({
         supply,
         shares: Number(supply) / ONE_SHARE,
+        feeAccrued,
         vaults,
         fullyBacked: vaults.every((v) => v.held >= v.owed),
         surplus: vaults.map((v) => (v.held > v.owed ? v.held - v.owed : 0n)),

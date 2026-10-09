@@ -4,6 +4,7 @@ import {
   AddressLookupTableProgram,
   Connection,
   PublicKey,
+  SYSVAR_SLOT_HASHES_PUBKEY,
   SystemProgram,
   TransactionMessage,
   VersionedTransaction,
@@ -134,7 +135,16 @@ export async function ensureAlt(connection: Connection, house: Keypair, basket: 
     let table = existing?.key;
     let todo = missing(existing);
     if (!table) {
-      const recentSlot = await connection.getSlot("finalized");
+      // The slot must be one the lookup-table program finds in SlotHashes. A
+      // slot from getSlot can be skipped (no block) or not yet in the bank
+      // that runs the transaction ("is not a recent slot"), so take one a few
+      // entries deep from the sysvar itself.
+      const slotHashes = await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, "confirmed");
+      const entries = slotHashes ? Number(slotHashes.data.readBigUInt64LE(0)) : 0;
+      const recentSlot =
+        slotHashes && entries > 8
+          ? Number(slotHashes.data.readBigUInt64LE(8 + 8 * 40))
+          : (await connection.getSlot("finalized")) - 8;
       const [create, address] = AddressLookupTableProgram.createLookupTable({ authority: house.publicKey, payer: house.publicKey, recentSlot });
       const first = todo.slice(0, EXTEND_CHUNK);
       await sendV0(connection, house, [

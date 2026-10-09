@@ -10,9 +10,11 @@ import { isTestBasket } from "@/lib/hidden";
 
 /** Shown first, in this order; any other basket only fills a gap if one cannot be read. */
 const FEATURED = [
+  // The Big Five leads: listed megacaps, with a year of history and dividends inside.
+  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
   // Bitcoin, by proxy: its launch market is on the current curve (sheaf-nav-shelf-v2).
   "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
-  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",
   "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
 ];
 

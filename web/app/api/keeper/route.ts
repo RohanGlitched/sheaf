@@ -1,4 +1,5 @@
 import { runKeeper } from "@/lib/keeper-server";
+import { rememberOidc } from "@/lib/gcs-store";
 import { beat } from "@/lib/server-heartbeat";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,8 @@ export const maxDuration = 60;
 let lastRun = 0;
 let running: Promise<unknown> | null = null;
 
-async function handle() {
+async function handle(request: Request) {
+  rememberOidc(request);
   // A repeat is answered with a 200, not an error, so a scheduler never sees a failure.
   if (running) return Response.json({ busy: true }, { headers: { "cache-control": "no-store" } });
   if (Date.now() - lastRun < 4_000) return Response.json({ throttled: true }, { headers: { "cache-control": "no-store" } });
@@ -22,7 +24,7 @@ async function handle() {
   running = runKeeper();
   try {
     const report = await running;
-    beat("keeper", report);
+    await beat("keeper", report);
     return Response.json(report, { headers: { "cache-control": "no-store" } });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });

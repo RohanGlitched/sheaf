@@ -118,6 +118,8 @@ export async function readTrades(
     teamTrades: trades.length - outside.length,
     outsideTrades: outside.length,
   };
+  // Keys are official launch pools only (the routes check), but keep the map bounded anyway.
+  if (cache.size >= 100) cache.clear();
   cache.set(key, { at: Date.now(), value });
   return value;
 }

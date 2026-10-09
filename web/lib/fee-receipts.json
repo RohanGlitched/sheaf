@@ -1,0 +1,14 @@
+{
+  "basket": "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x",
+  "symbol": "MAG7",
+  "protocolFeeBps": 10,
+  "treasury": "9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF",
+  "treasuryShareAccount": "EYiUUNiynqrEpzMyyu5fd5QXNDTTS9XsMGv9P62T5knQ",
+  "claims": [
+    {
+      "signature": "5zZHGfEUcixiJb3xPmg9cFczjW6rfxFqyAeZU4iyQkeu6SnKGsGGEB8DYT66dLYhUr3rLARPYP6TiMgkopYCyx8n",
+      "shares": "10245",
+      "at": "2026-10-09T11:50:46.444Z"
+    }
+  ]
+}

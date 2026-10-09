@@ -46,6 +46,9 @@ export function SiteFooter() {
             <Link href="/business" className="text-ink-2 hover:text-ink">
               Business
             </Link>
+            <Link href="/voices" className="text-ink-2 hover:text-ink">
+              People
+            </Link>
             <a
               href="https://github.com/RohanGlitched/sheaf"
               target="_blank"

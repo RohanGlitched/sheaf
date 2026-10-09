@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CONTACT_MAX, MONTHLY_BANDS, US_ROUTES, cleanContact, type MonthlyBand, type UsRoute } from "@/lib/waitlist-options";
+import { CONTACT_MAX, HOMES, MONTHLY_BANDS, US_ROUTES, cleanContact, type Home, type MonthlyBand, type UsRoute, type WaitlistCounts } from "@/lib/waitlist-options";
 import { count } from "@/lib/format";
-import { WAITLIST_EVENT, readWaitlistCount } from "./india-traction";
+import { WAITLIST_EVENT, readWaitlistCounts } from "./india-traction";
 
-type Status = { state: "checking" } | { state: "closed" } | { state: "open"; count: number };
+type Status = { state: "checking" } | { state: "closed" } | ({ state: "open" } & WaitlistCounts);
 
 function Choice<K extends string>({
   name,
@@ -46,9 +46,10 @@ function Choice<K extends string>({
   );
 }
 
-/** Three questions for Indian savers, stored keylessly; the count shows only once the waitlist is open. */
+/** Four questions for Indian savers, stored keylessly; the counts show only once the waitlist is open. */
 export function IndiaWaitlist() {
   const [status, setStatus] = useState<Status>({ state: "checking" });
+  const [home, setHome] = useState<Home | null>(null);
   const [band, setBand] = useState<MonthlyBand | null>(null);
   const [route, setRoute] = useState<UsRoute | null>(null);
   const [contact, setContact] = useState("");
@@ -59,14 +60,14 @@ export function IndiaWaitlist() {
 
   useEffect(() => {
     let live = true;
-    void readWaitlistCount().then((n) => live && setStatus(n != null ? { state: "open", count: n } : { state: "closed" }));
+    void readWaitlistCounts().then((c) => live && setStatus(c ? { state: "open", ...c } : { state: "closed" }));
     return () => {
       live = false;
     };
   }, []);
 
   const contactOk = cleanContact(contact) != null;
-  const ready = band != null && route != null && contactOk && status.state === "open";
+  const ready = home != null && band != null && route != null && contactOk && status.state === "open";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -77,18 +78,18 @@ export function IndiaWaitlist() {
       const r = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ band, route, contact: contact.trim(), website }),
+        body: JSON.stringify({ home, band, route, contact: contact.trim(), website }),
       });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; count?: number | null; error?: string };
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; counts?: WaitlistCounts | null; error?: string };
       if (!r.ok || !j.ok) {
         setError(j.error ?? "We couldn't save that just now. Try again in a minute.");
         if (r.status === 503) setStatus({ state: "closed" });
         return;
       }
       setDone(true);
-      if (typeof j.count === "number") {
-        setStatus({ state: "open", count: j.count });
-        window.dispatchEvent(new CustomEvent(WAITLIST_EVENT, { detail: j.count }));
+      if (j.counts) {
+        setStatus({ state: "open", ...j.counts });
+        window.dispatchEvent(new CustomEvent(WAITLIST_EVENT, { detail: j.counts }));
       }
     } catch {
       setError("We couldn't reach the server. Check your connection and try again.");
@@ -105,27 +106,29 @@ export function IndiaWaitlist() {
         </h2>
         {status.state === "open" && (
           <p className="tnum text-sm text-ink-2" aria-live="polite">
-            {count(status.count)} {status.count === 1 ? "person" : "people"} on the India waitlist
+            {count(status.count)} {status.count === 1 ? "person" : "people"} on the India waitlist · {count(status.withContact)} left a contact
           </p>
         )}
       </div>
       <p className="mt-3 max-w-[52ch] text-sm leading-relaxed text-ink-2">
-        If you would run a monthly plan into US stocks from India, three questions tell us how much and how you do it today.
+        If you would run a monthly plan into US stocks, four questions tell us where you live, how much, and how you do it
+        today. Where you live decides when Sheaf could serve you.
       </p>
 
       {done ? (
         <div className="mt-8 rounded-[var(--radius-control)] bg-bind-wash p-5">
           <p className="text-ink">You&apos;re on the list. Thank you.</p>
           <p className="mt-1 text-sm leading-relaxed text-ink-2">
-            {contact.trim() ? "We'll write once, when Sheaf opens in India." : "You left no contact, so your answer counts but we can't write to you."}
+            {contact.trim() ? "We'll write once, when Sheaf opens where you live." : "You left no contact, so your answer counts but we can't write to you."}
           </p>
         </div>
       ) : (
         <form onSubmit={submit} className="mt-8 space-y-7" noValidate>
-          <Choice name="band" legend="1. How much would you invest a month?" options={MONTHLY_BANDS} value={band} onChange={setBand} />
-          <Choice name="route" legend="2. How do you invest in US stocks today?" options={US_ROUTES} value={route} onChange={setRoute} />
+          <Choice name="home" legend="1. Where do you live?" options={HOMES} value={home} onChange={setHome} />
+          <Choice name="band" legend="2. How much would you invest a month?" options={MONTHLY_BANDS} value={band} onChange={setBand} />
+          <Choice name="route" legend="3. How do you invest in US stocks today?" options={US_ROUTES} value={route} onChange={setRoute} />
           <label className="block">
-            <span className="text-sm font-medium text-ink">3. Email or Telegram handle</span>
+            <span className="text-sm font-medium text-ink">4. Email or Telegram handle</span>
             <span className="ml-2 text-xs text-ink-3">optional</span>
             <input
               value={contact}
@@ -149,8 +152,9 @@ export function IndiaWaitlist() {
               {status.state === "closed" ? "Waitlist is not open yet" : status.state === "checking" ? "Checking…" : busy ? "Saving…" : "Join the waitlist"}
             </button>
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
-              We use this only to tell you when Sheaf opens in India. We keep your three answers and the day you sent them, and
-              nothing else: no IP address, no wallet.
+              We use this only to tell you when Sheaf opens where you live. We keep your answers, the day you sent them and, if
+              you leave one, your contact, stored once. A salted hash of the contact stops repeat answers. No IP address, no
+              wallet.
             </p>
           </div>
           {error && <p className="border-l-2 border-loss pl-3 text-sm text-loss">{error}</p>}

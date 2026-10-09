@@ -18,7 +18,7 @@ const u128 = (d, at) => u64(d, at) | (u64(d, at + 8) << 64n);
 const key = (d, at) => new PublicKey(d.subarray(at, at + 32)).toBase58();
 
 // The offsets web/lib/dbc.ts reads. Keep the two in step.
-const POOL = { config: 72, creator: 104, baseMint: 136, quoteReserve: 240, sqrtPrice: 280, isMigrated: 305, protocolQuoteFee: 320, totalFees: 336, creatorQuoteFee: 360, partnerQuoteFee: 272 };
+const POOL = { config: 72, creator: 104, baseMint: 136, quoteReserve: 240, sqrtPrice: 280, activationPoint: 296, isMigrated: 305, protocolQuoteFee: 320, totalFees: 336, creatorQuoteFee: 360, partnerQuoteFee: 272 };
 const CONFIG = {
   quoteMint: 8, feeClaimer: 40, leftoverReceiver: 72,
   baseFeeCliff: 104, baseFeeSecond: 112, baseFeeThird: 120, baseFeeFirst: 128, baseFeeMode: 130,
@@ -47,6 +47,7 @@ const LAUNCHES = [
   ["BIG5A", BASKETS.BIG5, 0, "v1"],
   ["FRNTRA", BASKETS.FRNTR, 0, "v1"],
   ["PROXYA", PROXY, 1, "v2"],
+  ["IDXA", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 0, "v2"],
   ["squat", PROXY, 0, "rejected"],
   ["rogue terms", PROXY, 2, "rejected"],
 ];
@@ -70,6 +71,7 @@ for (const [name, basket, slot, expected] of LAUNCHES) {
   check("pool.quoteReserve", u64(p, POOL.quoteReserve), pool.quoteReserve.toString());
   check("pool.partnerQuoteFee", u64(p, POOL.partnerQuoteFee), pool.partnerQuoteFee.toString());
   check("pool.sqrtPrice", u128(p, POOL.sqrtPrice), pool.sqrtPrice.toString());
+  check("pool.activationPoint", u64(p, POOL.activationPoint), pool.activationPoint.toString());
   check("pool.isMigrated", p[POOL.isMigrated], pool.isMigrated);
   check("pool.metrics.totalProtocolQuoteFee", u64(p, POOL.protocolQuoteFee), pool.metrics.totalProtocolQuoteFee.toString());
   check("pool.metrics.totalTradingQuoteFee", u64(p, POOL.totalFees), pool.metrics.totalTradingQuoteFee.toString());

@@ -15,7 +15,9 @@
  * users, never to overcount them. Add new test wallets as runs create them.
  */
 
-export type TeamRole = "house" | "deploy" | "treasury" | "test";
+import { TEST_WALLETS } from "./test-wallets.generated";
+
+export type TeamRole = "house" | "deploy" | "treasury" | "faucet" | "second filler" | "test";
 
 export type TeamWallet = { address: string; role: TeamRole; label: string };
 
@@ -34,7 +36,17 @@ export const TEAM_WALLETS: TeamWallet[] = [
   {
     address: "9uuYuCQsZEfjXomEGV7eH5ByDuYLry9oaf1263vPJnuF",
     role: "treasury",
-    label: "Treasury: claims launch-market fees",
+    label: "Treasury: claims launch-market fees and protocol-fee shares",
+  },
+  {
+    address: "EmvPkVx5fTJvmFvyTM4stJ69w9SfmgXHexaSLSu6RCNi",
+    role: "faucet",
+    label: "Faucet key: pays for test SOL and new token accounts",
+  },
+  {
+    address: "92pGcdsAHGvW2PNezm3QmcaNubadHarYVrSCN1rj6W4T",
+    role: "second filler",
+    label: "Second filler (ours): runs the published reference filler with its own key and faucet-sourced stocks",
   },
   { address: "7gVxJVLpSZpuuPQ8uaJs7S98NRvj5hMs1h1S9Hr1Y4CT", role: "test", label: "Meteora lifecycle wallet 1" },
   { address: "8vQiyPfcXN9FzLojHdj4hanRvCqWJFxp6ZKXKGnWFvxP", role: "test", label: "Meteora lifecycle wallet 2" },
@@ -68,6 +80,10 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "8rLCuBxm5Fa3Z13WkxtuuUmYj3zxP9m3sRzwbdGczzNg", role: "test", label: "Test wallet, QA round 3 (created QAWSC1)" },
   { address: "8Sz2tn75aqKSNLuVcgN58Z5XSmCXKk9DjZ1rSwnfE3QK", role: "test", label: "Test wallet, QA round 3" },
   { address: "3k6be2LEt7L5XC1sDaYe1YQmYuJFTcF4jQujkjjaJEkX", role: "test", label: "Test wallet, QA round 3" },
+  // Judge round 4 QA against the live site, 9 October (.judge/qa4/wallets.txt).
+  { address: "PZ9NCefBteZ7SDFPBbQvFhexSRyXCGbdUjX4HcGYLt2", role: "test", label: "Test wallet, QA round 4" },
+  { address: "AWwhyVghzrA2MZfkqvWjpMFqwEajV5Uqj8Az6ks77mnm", role: "test", label: "Test wallet, QA round 4 (created QA4LC8)" },
+  { address: "QLEkagmL82EiYNvesRAXzD9X1TsB93gKUwznayTSMoy", role: "test", label: "Test wallet, QA round 4" },
 
   // ------------------------------------------------------------------- EVM
   {
@@ -82,6 +98,8 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "0xEae83b650726a9bfb600FFF74c3AeD54a54805b8", role: "test", label: "Tempo test plan account, QA round 3" },
   { address: "0xDF9e887bbA6A569845D0cD1ddA91461Bb60321e1", role: "test", label: "Tempo test plan account, QA round 2" },
   { address: "0x71975d3923B467963c675e981641722e92675239", role: "test", label: "Tempo test plan account, chain walkthrough" },
+  { address: "0xD93a68464edFA30C929AB9eF71016f01a91BcCaF", role: "test", label: "EVM test wallet, QA round 4 (Arbitrum Sepolia)" },
+  { address: "0x1deDD65C95287DAfc128e4Bc752Ab3bE2d250005", role: "test", label: "Tempo test plan account, QA round 4" },
   // Placed seconds after our own Tempo SIP test runs, with the same amount and nonce; counted as ours rather than as outside buyers.
   { address: "0xcDb524B789146A872f4D019e7B2145ef2e2B9ec0", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
   { address: "0x3F3219F8F577772a90367a864153AD1f3BAb180b", role: "test", label: "Tempo test plan account, chain walkthrough (by timing)" },
@@ -91,6 +109,14 @@ export const TEAM_WALLETS: TeamWallet[] = [
 const norm = (address: string) => (address.startsWith("0x") ? address.toLowerCase() : address);
 
 const BY_ADDRESS = new Map(TEAM_WALLETS.map((w) => [norm(w.address), w]));
+// The 100 fixed-seed wallets every test script now signs with (lib/test-wallets.generated.ts),
+// so a test run can never count as an outside user even if nobody lists it here.
+TEST_WALLETS.forEach((address, i) => {
+  if (!BY_ADDRESS.has(norm(address))) BY_ADDRESS.set(norm(address), { address, role: "test", label: `Fixed test wallet #${i}` });
+});
+
+/** How many wallets are ours: the listed ones plus the fixed-seed test set. */
+export const TEAM_WALLET_COUNT = BY_ADDRESS.size;
 
 /** The team wallet at this address, if it is one. EVM addresses match in any case. */
 export function teamWallet(address: string): TeamWallet | undefined {
@@ -108,5 +134,5 @@ export function teamTag(address: string): string | null {
   return w.role === "test" ? "test wallet" : w.role;
 }
 
-/** The tag a ledger row shows ("house", "deploy", "treasury" or "test wallet"), or null if the wallet is not ours. */
+/** The tag a ledger row shows ("house", "deploy", "treasury", "faucet", "second filler" or "test wallet"), or null if the wallet is not ours. */
 export const teamLabel = teamTag;

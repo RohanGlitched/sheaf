@@ -195,6 +195,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
 
   if (at != null) {
     if (!history) return bad("Daily closes could not be read right now; try again shortly.", 503, { "retry-after": "60" });
+    // The rule's value uses each mint's multiplier as the chain states it. If the
+    // mainnet read failed, refuse rather than answer from Jupiter's copy.
+    if (!snapshot.chain) {
+      return bad("The mints' multipliers could not be read from mainnet right now; try again shortly.", 503, { "retry-after": "30" });
+    }
     const day = closeDayAtOrBefore(at);
     const spySeries = history.series.SPY;
     const latest = spySeries?.t[spySeries.t.length - 1] ?? 0;
@@ -242,15 +247,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           "navPerShare.listed at a close = sum over components of unitsPerShare / 10^decimals x adjusted close x the mint's multiplier today. Adjusted closes reinvest dividends, as the multiplier does, so the ratio between two closes is the share's total return; spy.adjClose is on the same basis.",
         sources: {
           closes: historySource(history),
-          multipliers: snapshot.chain
-            ? `Token-2022 ScaledUiAmount config on each mainnet mint, read at slot ${snapshot.chain.slot}`
-            : "Jupiter's copy of each mint's multiplier (the chain read failed)",
+          multipliers: `Token-2022 ScaledUiAmount config on each mainnet mint, read at slot ${snapshot.chain.slot}`,
           recipe: `The basket account ${basket.address} on Solana ${WRITE_CLUSTER}`,
         },
         recompute,
       },
-      // A past close does not change: cache it for a day.
-      { headers: { "cache-control": "public, s-maxage=86400, stale-while-revalidate=3600", "access-control-allow-origin": "*" } },
+      // An hour, not a day: Yahoo re-adjusts past closes after an ex-dividend
+      // date, and the rule reads both closes at resolution time, so a long-cached
+      // earlier close must not meet a freshly adjusted later one.
+      { headers: { "cache-control": "public, s-maxage=3600, stale-while-revalidate=600", "access-control-allow-origin": "*" } },
     );
   }
 
@@ -305,15 +310,29 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
       trailingWeek: week,
       resolution: (() => {
         const w = marketWindow();
+        // No listed history (a pre-IPO holding): there is no number to resolve
+        // from, so no market is offered on this basket.
+        const unlisted = components
+          .filter((c) => !c.base || (history ? !history.series[c.base] : c.listedPrice == null))
+          .map((c) => c.base ?? c.vaultMint);
+        if (unlisted.length) {
+          return {
+            offered: false,
+            reason: `No listed price history for ${unlisted.join(", ")} (pre-IPO), so navPerShare.listed cannot be read at a close and no market is offered on this basket.`,
+          };
+        }
         return {
+          offered: true,
           navField: "navPerShare.listed",
           benchmarkField: "spy.adjClose",
           readWith: `${navUrl}?at=<unix seconds>`,
           nextWindow: {
+            opens: new Date(w.opens * 1000).toISOString(),
             fromClose: w.fromClose,
             toClose: w.toClose,
             from: fmtClose(w.fromClose),
             to: fmtClose(w.toClose),
+            resolves: new Date(w.resolves * 1000).toISOString(),
           },
           rule: resolutionRule(basket.symbol, navUrl, w),
         };

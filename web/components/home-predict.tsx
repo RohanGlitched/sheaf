@@ -4,25 +4,26 @@ import Link from "next/link";
 const PREDICT_HREF = "/basket/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ#predict";
 
 const RULE = [
-  { when: "Friday", what: "One BIG5 share is valued from its recipe at the US close, 16:00 New York." },
+  { when: "Friday", what: "After trading opens, one BIG5 share is valued from its recipe at the US close, 16:00 New York." },
   { when: "Next Friday", what: "It is valued the same way again, at that close." },
   { when: "Settles", what: "Yes if the share rose more than SPY between the same two closes, no otherwise." },
 ];
 
 /**
- * The last step of the story, told without a live quote: a basket has a value
- * anyone can read from its vault, so a bet on it can settle without a price feed.
- * The live market and its quotes are on the basket page.
+ * The last step of the story, told without a live quote: a basket's recipe is
+ * public, so a bet on it settles from a published number at two Friday closes
+ * that anyone can recompute. The live market and its quotes are on the basket page.
  */
 export function HomePredict() {
   return (
     <div className="grid gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
       <div className="self-center">
-        <h2 className="display text-title max-w-[18ch] text-ink">Bet on a basket, settled from its vault.</h2>
+        <h2 className="display text-title max-w-[18ch] text-ink">Bet on a basket, settled at the Friday close.</h2>
         <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-ink-2">
-          Every basket can carry a weekly question: will it beat SPY? Its recipe and vault are public
-          accounts and its prices come from public sources, so anyone can recompute the answer. Sheaf
-          writes the question and the rule. Panta runs the market on Solana, paid in USDC.
+          Every basket with listed holdings can carry a weekly question: will it beat SPY? It settles
+          from a published number at two Friday US closes, with every input listed so anyone can
+          recompute it. Sheaf writes the question and the rule. Panta runs the market on Solana, paid in
+          USDC.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <Link

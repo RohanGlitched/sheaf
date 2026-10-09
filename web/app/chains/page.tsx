@@ -22,7 +22,7 @@ const RULES = [
     fn: "components()",
   },
   {
-    title: "A vault nobody can drain",
+    title: "A vault only a redemption empties",
     body: "Nothing leaves except through a redemption, and deposits round up while payouts round down.",
     fn: "vaultBalances() ≥ owed",
   },

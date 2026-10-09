@@ -7,7 +7,8 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { WRITE_CLUSTER, WRITE_RPC } from "@/lib/config";
-import { clientIp, faucetKeypair } from "@/lib/faucet-server";
+import { clientIp } from "@/lib/faucet-server";
+import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
 
 /**
  * Enough devnet SOL to try everything with room to spare: create a basket and
@@ -18,10 +19,13 @@ import { clientIp, faucetKeypair } from "@/lib/faucet-server";
 const GRANT = 0.05 * LAMPORTS_PER_SOL;
 const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
 /**
- * Keep enough back that the token faucet can still open token accounts (it stops
- * at 1.5 SOL) and the keeper, on the same key, can still pay plan rent (0.5 SOL).
+ * What the paying key keeps back. The faucet has its own key (FAUCET_KEY), which
+ * only needs enough left for the token faucet's account rent. Without one it
+ * pays from the house key, which must also keep the keeper's plan rent (0.5 SOL)
+ * and the token faucet's floor (1.5 SOL), so it keeps 2 SOL.
  */
-const RESERVE = 2 * LAMPORTS_PER_SOL;
+const RESERVE_OWN_KEY = 0.5 * LAMPORTS_PER_SOL;
+const RESERVE_HOUSE = 2 * LAMPORTS_PER_SOL;
 
 const IP_WINDOW_MS = 24 * 60 * 60_000;
 const IP_MAX_GRANTS = 3;
@@ -32,7 +36,8 @@ export async function POST(request: Request) {
   if (WRITE_CLUSTER !== "devnet") {
     return Response.json({ error: "Test SOL is only handed out on devnet." }, { status: 400 });
   }
-  const keypair = faucetKeypair();
+  const keypair = faucetPayerKeypair();
+  const RESERVE = faucetHasOwnKey() ? RESERVE_OWN_KEY : RESERVE_HOUSE;
   if (!keypair) {
     return Response.json({ error: "The faucet is not configured on this deployment." }, { status: 503 });
   }

@@ -6,60 +6,66 @@ import { fetchPlans, type Plan } from "@/lib/desk";
 import { fromCashRaw } from "@/lib/use-cash";
 import { isTeamWallet } from "@/lib/team-wallets";
 import { count, money } from "@/lib/format";
-import { rupees, useInrRate } from "./plan-form";
+import { fxNote, rupees, type Fx } from "@/lib/fx";
+import type { WaitlistCounts } from "@/lib/waitlist-options";
+import { useInrRate } from "./india-fx";
 
-/** Fired by the waitlist form after an answer is saved, with the new count. */
-export const WAITLIST_EVENT = "sheaf:waitlist-count";
+/** Fired by the waitlist form after an answer is saved, with the new counts. */
+export const WAITLIST_EVENT = "sheaf:waitlist-counts";
 
-/** The waitlist count, or null while the waitlist is closed; one request per page view, shared by every component. */
-let waitlistRead: Promise<number | null> | null = null;
-export function readWaitlistCount(): Promise<number | null> {
+/** The waitlist counts, or null while the waitlist is closed; one request per page view, shared by every component. */
+let waitlistRead: Promise<WaitlistCounts | null> | null = null;
+export function readWaitlistCounts(): Promise<WaitlistCounts | null> {
   waitlistRead ??= fetch("/api/waitlist", { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
-    .then((j) => (j?.open === true && typeof j.count === "number" ? (j.count as number) : null))
+    .then((j) => (j?.open === true && typeof j.count === "number" ? (j as WaitlistCounts) : null))
     .catch(() => null);
   return waitlistRead;
 }
 
 const MONTH_SECS = 30 * 86400;
+const DAY_SECS = 86400;
 
-/**
- * A running plan's dollars per month. Monthly and weekly plans count at their
- * real rate; a demo-speed plan (every few minutes) counts one run a month, as
- * if it were the monthly plan it stands in for.
- */
-function perMonth(p: Plan): number {
-  const run = fromCashRaw(p.cashPerRun);
-  return p.periodSecs >= 86400 ? (run * MONTH_SECS) / p.periodSecs : run;
-}
+/** A plan's dollars a month at its real pace; demo-speed plans (runs minutes apart) have no monthly figure. */
+const monthly = (p: Plan) => (p.periodSecs >= DAY_SECS ? (fromCashRaw(p.cashPerRun) * MONTH_SECS) / p.periodSecs : 0);
+const isDemoPace = (p: Plan) => p.periodSecs < DAY_SECS;
 
-type Totals = { plans: number; outsidePlans: number; monthly: number; outsideMonthly: number; toGo: number };
+type Split = {
+  /** Plans opened by wallets that aren't ours. */
+  outside: { plans: number; monthly: number; demoPace: number; toGo: number };
+  /** Our own running plans: the house demo and any team test plan. Shown apart, never added to the headline. */
+  ours: { plans: number; demoPace: number; perRun: number[] };
+};
 
-function totals(plans: Plan[]): Totals {
+function split(plans: Plan[]): Split {
   const running = plans.filter((p) => !p.legacy && p.runsLeft > 0);
   const outside = running.filter((p) => !isTeamWallet(p.owner));
-  const sum = (xs: Plan[], f: (p: Plan) => number) => xs.reduce((s, p) => s + f(p), 0);
+  const ours = running.filter((p) => isTeamWallet(p.owner));
   return {
-    plans: running.length,
-    outsidePlans: outside.length,
-    monthly: sum(running, perMonth),
-    outsideMonthly: sum(outside, perMonth),
-    toGo: sum(running, (p) => fromCashRaw(p.cashPerRun) * p.runsLeft),
+    outside: {
+      plans: outside.length,
+      monthly: outside.reduce((s, p) => s + monthly(p), 0),
+      demoPace: outside.filter(isDemoPace).length,
+      toGo: outside.reduce((s, p) => s + fromCashRaw(p.cashPerRun) * p.runsLeft, 0),
+    },
+    ours: { plans: ours.length, demoPace: ours.filter(isDemoPace).length, perRun: ours.map((p) => fromCashRaw(p.cashPerRun)) },
   };
 }
 
-/** The India numbers Sheaf can show today, read live: rupees committed by running plans, and the waitlist. */
+const both = (usd: number, fx: Fx) => `${rupees(usd * fx.rate)} (${money(usd)})`;
+
+/** The India numbers Sheaf can show today, read live: visitors' plans and the waitlist. Our own plans sit apart. */
 export function IndiaTraction() {
   const { connection } = useConnection();
-  const { rate } = useInrRate();
-  const [t, setT] = useState<Totals | null>(null);
-  const [waitlist, setWaitlist] = useState<number | null>(null);
+  const { fx } = useInrRate();
+  const [s, setS] = useState<Split | null>(null);
+  const [waitlist, setWaitlist] = useState<WaitlistCounts | null>(null);
 
   useEffect(() => {
     let live = true;
     const load = () =>
       fetchPlans(connection)
-        .then((p) => live && setT(totals(p)))
+        .then((p) => live && setS(split(p)))
         .catch(() => {});
     void load();
     const r = setInterval(() => document.visibilityState === "visible" && void load(), 30_000);
@@ -71,39 +77,46 @@ export function IndiaTraction() {
 
   useEffect(() => {
     let live = true;
-    void readWaitlistCount().then((n) => live && n != null && setWaitlist(n));
-    const onCount = (e: Event) => {
-      const n = (e as CustomEvent<number>).detail;
-      if (typeof n === "number") setWaitlist(n);
+    void readWaitlistCounts().then((c) => live && c && setWaitlist(c));
+    const onCounts = (e: Event) => {
+      const c = (e as CustomEvent<WaitlistCounts>).detail;
+      if (c && typeof c.count === "number") setWaitlist(c);
     };
-    window.addEventListener(WAITLIST_EVENT, onCount);
+    window.addEventListener(WAITLIST_EVENT, onCounts);
     return () => {
       live = false;
-      window.removeEventListener(WAITLIST_EVENT, onCount);
+      window.removeEventListener(WAITLIST_EVENT, onCounts);
     };
   }, []);
 
-  const inr = (usd: number) => (rate ? rupees(usd * rate) : money(usd));
-  const usdNote = (usd: number) => (rate ? `${money(usd)} in test dollars` : "in test dollars");
-
+  const o = s?.outside;
   const tiles: { k: string; v: string; s: string }[] = [
     {
-      k: "Committed a month by running plans",
-      v: t ? inr(t.monthly) : "—",
-      s: t ? `${usdNote(t.monthly)}, across ${count(t.plans)} ${t.plans === 1 ? "plan" : "plans"}` : "Reading plans from devnet…",
+      k: "Visitors' plans running",
+      v: o ? count(o.plans) : "—",
+      s: o ? (o.plans === 0 ? "No wallet outside the team has opened a plan yet." : "Opened by wallets that aren't ours") : "Reading plans from devnet…",
     },
     {
-      k: "Of that, from wallets that aren't ours",
-      v: t ? inr(t.outsideMonthly) : "—",
-      s: t ? `${count(t.outsidePlans)} ${t.outsidePlans === 1 ? "plan" : "plans"} opened by visitors` : "",
+      k: "Committed a month by visitors",
+      v: o ? rupees(o.monthly * fx.rate) : "—",
+      s: o
+        ? `${money(o.monthly)} in test dollars, monthly and weekly plans${o.demoPace ? `; ${count(o.demoPace)} demo-pace ${o.demoPace === 1 ? "plan isn't" : "plans aren't"} counted as monthly` : ""}`
+        : "",
     },
     {
-      k: "Still to go in over the remaining runs",
-      v: t ? inr(t.toGo) : "—",
-      s: t ? usdNote(t.toGo) : "",
+      k: "Still to go in from visitors' plans",
+      v: o ? rupees(o.toGo * fx.rate) : "—",
+      s: o ? `${money(o.toGo)} in test dollars over their remaining runs` : "",
     },
   ];
-  if (waitlist != null) tiles.push({ k: "On the India waitlist", v: count(waitlist), s: `${waitlist === 1 ? "person has" : "people have"} asked to hear when Sheaf opens in India` });
+  if (waitlist) {
+    const abroad = waitlist.byHome.nri;
+    tiles.push({
+      k: "On the India waitlist",
+      v: count(waitlist.count),
+      s: `${count(waitlist.withContact)} left a contact · ${count(abroad)} ${abroad === 1 ? "is an NRI" : "are NRIs"} outside the US, UK, Canada and Australia`,
+    });
+  }
 
   return (
     <div>
@@ -116,9 +129,18 @@ export function IndiaTraction() {
           </div>
         ))}
       </dl>
+      {s && s.ours.plans > 0 && (
+        <p className="tnum mt-3 rounded-[var(--radius-control)] border border-dashed border-line-strong px-4 py-3 text-xs leading-relaxed text-ink-3">
+          <span className="text-ink-2">Ours (demo pace), not counted above:</span>{" "}
+          {`${count(s.ours.plans)} ${s.ours.plans === 1 ? "plan" : "plans"} run by the team, ${s.ours.perRun.map((u) => both(u, fx)).join(", ")} a run`}
+          {s.ours.demoPace > 0
+            ? `, ${s.ours.demoPace === s.ours.plans ? "" : `${count(s.ours.demoPace)} of them `}every few minutes so you can watch runs land. A demo pace isn't a monthly commitment, so it has no monthly figure.`
+            : "."}
+        </p>
+      )}
       <p className="mt-3 max-w-[80ch] text-xs leading-relaxed text-ink-3">
-        Read live from the Sheaf program on devnet. Monthly and weekly plans count at their real rate; a demo-speed plan counts
-        one run a month. Rupees at today&apos;s rate{rate ? ` (₹${rate.toFixed(2)} to the dollar)` : ""}.
+        Read live from the Sheaf program on devnet, in test dollars. Monthly and weekly plans count at their real rate. Rupees at{" "}
+        {fxNote(fx)}.
       </p>
     </div>
   );

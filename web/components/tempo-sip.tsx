@@ -25,6 +25,9 @@ import { quantity, shortAddress } from "@/lib/format";
  */
 
 const chain = tempoModerato.extend({ feeToken: TEMPO_PATH_USD });
+/** One date format, in UTC: "8 Nov 2026". */
+const day = (secs: bigint | number) =>
+  new Date(Number(secs) * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const fmt = (v: bigint | null | undefined) => (v == null ? "—" : quantity(fromRaw(v, 6), 2));
 const link = "underline decoration-line-strong underline-offset-4 hover:text-ink";
 
@@ -70,6 +73,11 @@ export function TempoSip({ d }: { d: Deployment }) {
           spend {fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD every 30 days, and only on two calls, <span className="tnum">AlphaUSD.approve</span> with
           the desk as spender and <span className="tnum">CreationDesk.placeOrder</span>. Ask for more, or call anything else, and the chain refuses.
           Gas is paid in pathUSD, a dollar, because Tempo has no gas token.
+        </p>
+        <p className="mt-3 max-w-[66ch] text-sm leading-relaxed text-ink-3">
+          What the chain does not yet check: today the house key both prices and fills each installment, at a fixed{" "}
+          {fromRaw(TEMPO_SIP.instalment, 6).toFixed(2)} AlphaUSD a share. The budget caps how much it can spend in a period, but not the
+          price it pays per share inside that budget.
         </p>
       </div>
       <div className="mt-10 grid gap-8 [&>*]:min-w-0 lg:grid-cols-2">
@@ -148,7 +156,7 @@ function Recorded({ d }: { d: Deployment }) {
         <div className="bg-raised p-3">
           <p className="text-xs text-ink-3">Resets</p>
           <p className="tnum display mt-1 text-xl text-ink">
-            {budget?.periodEnd ? new Date(Number(budget.periodEnd) * 1000).toISOString().slice(0, 10) : "—"}
+            {budget?.periodEnd ? day(budget.periodEnd) : "—"}
           </p>
         </div>
       </div>
@@ -200,7 +208,7 @@ const STEPS = [
   { n: 4, label: "The keeper places this month's installment", note: "approve and placeOrder in one transaction, filled in kind" },
   { n: 5, label: "The keeper tries to overspend", note: "The chain refuses: SpendingLimitExceeded" },
   { n: 6, label: "The keeper calls outside the scope", note: "The chain refuses: CallNotAllowed" },
-  { n: 7, label: "Revoke the plan", note: "One signature, and the keeper can spend nothing" },
+  { n: 7, label: "Revoke the plan (optional)", note: "One signature stops it. Skip it and the keeper keeps investing once a period" },
 ];
 
 function LiveSip({ d }: { d: Deployment }) {
@@ -419,7 +427,7 @@ function LiveSip({ d }: { d: Deployment }) {
           <dl className="tnum mt-5 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
             <Stat label="Plan account" value={shortAddress(account!.address, 6, 4)} href={`${d.explorer}/address/${account!.address}`} />
             <Stat label="Budget left" value={revoked ? "revoked" : authorized ? `${fmt(budget?.remaining)}` : "—"} />
-            <Stat label="AlphaUSD" value={fmt(balances?.alpha)} />
+            <Stat label="AlphaUSD in account" value={fmt(balances?.alpha)} />
             <Stat label={`${basket.symbol} held`} value={balances ? quantity(fromRaw(balances.shares), 2) : "—"} />
           </dl>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
@@ -428,10 +436,16 @@ function LiveSip({ d }: { d: Deployment }) {
             <SipButton n={4} label="Keeper: this month's installment" busy={busy === "instalment"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("instalment")} />
             <SipButton n={5} label="Keeper: try to overspend" busy={busy === "overspend"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("overspend")} />
             <SipButton n={6} label="Keeper: call outside the scope" busy={busy === "outOfScope"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("outOfScope")} />
-            <SipButton n={7} label="Revoke the plan" done={revoked} busy={busy === "revoke"} disabled={!!busy || !authorized} onClick={revoke} quiet />
+            <SipButton n={7} label="Revoke the plan (optional)" done={revoked} busy={busy === "revoke"} disabled={!!busy || !authorized} onClick={revoke} quiet />
           </div>
           {budget?.periodEnd != null && authorized && (
-            <p className="tnum mt-3 text-xs text-ink-3">Budget resets {new Date(Number(budget.periodEnd) * 1000).toISOString().slice(0, 10)}.</p>
+            <p className="tnum mt-3 text-xs leading-relaxed text-ink-3">
+              Budget resets {day(budget.periodEnd)}.{" "}
+              {budget.remaining < TEMPO_SIP.limit
+                ? `Next installment happens automatically on ${day(budget.periodEnd)}: the keeper places it on its own.`
+                : "If you skip step 4, the keeper places this period's installment on its own within about 20 minutes, then once every 30 days."}{" "}
+              Revoke to stop it.
+            </p>
           )}
         </>
       )}

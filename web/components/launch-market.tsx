@@ -9,7 +9,9 @@ import {
   METEORA_DOCS_URL,
   PRESET_NAMES,
   PRESET_URL,
+  RETIRED_METADATA_MINTS,
   dammV2PoolAddress,
+  preIpoCompanies,
   findLaunch,
   launchFor,
   readDbcState,
@@ -70,7 +72,23 @@ function solText(value: number): string {
 /** Who gets what of every curve fee, from the published preset. */
 const FEE_SPLIT = `Of every fee a trader pays, Meteora keeps ${METEORA_FEE_PERCENT}%, the basket's creator gets ${CREATOR_FEE_PERCENT}% and Sheaf's treasury ${TREASURY_FEE_PERCENT}%.`;
 
-type LaunchBasketProps = { address: string; name: string; symbol: string; creator: string };
+type LaunchBasketProps = {
+  address: string;
+  name: string;
+  symbol: string;
+  creator: string;
+  /** Present on basket pages; used to warn about pre-IPO components. */
+  components?: { mint: string }[];
+};
+
+/** What /api/launch/<basket> says about the curve's anchor: opened at half of NAV or not. */
+type Anchor = {
+  status: "verified" | "mismatch" | "unverifiable";
+  reason: string | null;
+  deviationPct: number | null;
+  closeDay: string | null;
+  navProof: string | null;
+};
 
 /** A pool's preset, linked to where it is published: v2 to its JSON, v1 to the write-up that retires it. */
 function PresetLink({ state }: { state: DbcState }) {
@@ -100,15 +118,32 @@ function useLaunch(basket: LaunchBasketProps) {
   const [state, setState] = useState<DbcState | null | undefined>(undefined);
   const [unofficial, setUnofficial] = useState<FoundLaunch[]>([]);
   const [readError, setReadError] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const { address, name, symbol, creator } = basket;
 
   const load = useCallback(async () => {
     try {
       const found = await findLaunch(connection, { address, name, symbol, creator });
+      // The anchor check needs prices from outside the chain, so the server does it.
+      const checked: Anchor | null = found.launch
+        ? await fetch(`/api/launch/${address}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => d?.provenance?.anchor ?? null)
+            .catch(() => null)
+        : null;
+      // A curve that did not open at half the basket's NAV is not this basket's launch.
+      if (found.launch && checked?.status === "mismatch") {
+        found.unofficial.unshift({
+          info: found.launch.info,
+          check: { official: false, reason: checked.reason ?? "It did not open at half the basket's NAV.", preset: null },
+        });
+        found.launch = null;
+      }
       // The official launch if there is one, else where the creator would open it.
       const next = found.launch?.info ?? found.free ?? (await launchFor({ address, name, symbol }));
       setInfo(next);
       setUnofficial(found.unofficial);
+      setAnchor(checked);
       setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
     } catch (err) {
@@ -121,7 +156,7 @@ function useLaunch(basket: LaunchBasketProps) {
     void Promise.resolve().then(load);
   }, [load]);
 
-  return { info, state, unofficial, readError, reload: load };
+  return { info, state, unofficial, readError, anchor, reload: load };
 }
 
 /** "20 × NAV", read off a pool's own open and graduation caps, so old and new curves both say the truth. */
@@ -135,16 +170,17 @@ export function LaunchMarket() {
     <div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
         <div className="max-w-[40ch] self-center">
-          <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+          <p className="text-xs tracking-wide text-bind">Launch market on Meteora</p>
           <h2 className="display mt-3 text-title text-ink">
-            A basket can trade before anyone has built a share.
+            A launch market, priced from the basket&rsquo;s own value.
           </h2>
           <p className="mt-5 text-base leading-relaxed text-ink-2">
-            A new basket starts with no shares, and nobody wants to be first to
-            assemble every component. So a bonding curve opens in front of it: a
-            token priced along a curve that starts at half the basket&rsquo;s NAV
+            A basket&rsquo;s creator can open a Meteora bonding curve beside it: a
+            separate launch token whose curve starts at half the basket&rsquo;s NAV
             and graduates into a permanent Meteora DAMM v2 pool at {GRADUATION_MULTIPLE} times
-            it, with every LP position locked for good.
+            it, with every LP position locked for good. The launch token is not a
+            share. The vault does not back it, and it cannot be redeemed for the
+            stocks.
           </p>
           <p className="mt-4 text-sm leading-relaxed text-ink-3">
             This one stands in front of {FEATURED_LAUNCH.basket.name}. It graduates once about{" "}
@@ -187,6 +223,7 @@ function FeaturedCard({ launch }: { launch: ReturnType<typeof useLaunch> }) {
       info={launch.info}
       state={launch.state ?? null}
       readError={launch.readError}
+      anchor={launch.anchor}
       onTraded={launch.reload}
     />
   );
@@ -204,10 +241,11 @@ export function BasketLaunch({
   basket,
   navUsd,
 }: {
-  basket: { address: string; name: string; symbol: string; creator: string };
+  basket: LaunchBasketProps;
   navUsd: number | null;
 }) {
   const launch = useLaunch(basket);
+  const preIpo = preIpoCompanies(basket);
   const { publicKey } = useWallet();
   const isCreator = publicKey?.toBase58() === basket.creator;
   const ready = launch.info != null && launch.state !== undefined;
@@ -225,7 +263,7 @@ export function BasketLaunch({
     return (
       <section id="launch" className="mt-12 scroll-mt-24">
         <div className="mb-5 max-w-[62ch]">
-          <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+          <p className="text-xs tracking-wide text-bind">Launch market on Meteora</p>
           <h2 className="display mt-2 text-xl text-ink">{basket.symbol} has a launch market</h2>
           <p className="mt-2 text-sm leading-relaxed text-ink-2">
             {launch.info.baseSymbol} is a separate token priced off {basket.symbol}&rsquo;s NAV: the
@@ -233,16 +271,20 @@ export function BasketLaunch({
             {launch.state.migrated
               ? `raised ${solText(launch.state.threshold)} SOL, then graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
               : `graduates at ${graduationMultiple(launch.state)} times it, once ${solText(launch.state.threshold)} SOL has gone in, into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
-            Buy and sell it here either way. It is a bet on the basket, not a redemption right into it.
+            It is not a {basket.symbol} share: the vault does not back it, and it cannot be redeemed
+            for the stocks.
           </p>
+          {preIpo.length > 0 && <PreIpoWarning basketName={basket.name} companies={preIpo} />}
         </div>
         <LaunchCard
           basketAddress={basket.address}
           info={launch.info}
           state={launch.state}
           readError={launch.readError}
+          anchor={launch.anchor}
           onTraded={launch.reload}
           onBasketPage
+          preIpo={preIpo.length > 0}
         />
       </section>
     );
@@ -314,7 +356,7 @@ function OpenLaunch({
     setError(null);
     try {
       const { buildLaunch } = await import("@/lib/launch");
-      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol, solUsd: sol });
+      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol });
       const sig = await sendTransaction(transaction, connection);
       await confirmSignature(connection, sig);
       await onOpened();
@@ -328,17 +370,19 @@ function OpenLaunch({
   return (
     <div className="border border-line bg-raised">
       <div className="px-6 py-6">
-        <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+        <p className="text-xs tracking-wide text-bind">Launch market on Meteora</p>
         <h2 className="display mt-2 text-xl text-ink">Open a launch market for {basket.symbol}</h2>
         <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-ink-2">
-          Give people a way in before anyone has assembled a share. {info.baseSymbol} trades on
-          a Meteora curve priced from this basket&rsquo;s own value: it opens at half the NAV and
-          graduates into a Meteora DAMM v2 pool, liquidity locked for good, at{" "}
+          {info.baseSymbol} would be a separate token on a Meteora curve priced from this
+          basket&rsquo;s own value: not a share, not backed by the vault and not redeemable. It
+          opens at half the NAV and graduates into a Meteora DAMM v2 pool, liquidity locked for
+          good, at{" "}
           {GRADUATION_MULTIPLE} times it. About a quarter of the supply goes into that pool, so
           it is a real market on the day it opens, and the first fifth of the money in buys
           about a third of the supply, so no single early wallet takes half the token. It
           graduates once about {THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL has gone in.{" "}
-          {FEE_SPLIT} The token records the NAV, the SOL price and the time it opened at.
+          {FEE_SPLIT} After it opens, the site checks the opening price against the
+          basket&rsquo;s NAV at the last close and SOL&rsquo;s price that hour.
         </p>
       </div>
       <dl className="grid grid-cols-1 gap-px border-y border-line bg-line sm:grid-cols-3">
@@ -491,19 +535,55 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
   );
 }
 
+/** A plain warning above a launch whose basket holds pre-IPO SPV tokens. */
+function PreIpoWarning({ basketName, companies }: { basketName: string; companies: string[] }) {
+  return (
+    <p className="mt-3 border-l-2 border-loss pl-3 text-sm leading-relaxed text-ink-2">
+      <span className="text-ink">Pre-IPO basket.</span> {basketName} holds PreStocks, SPV tokens
+      for {companies.join(", ")}, not company shares. In May 2026 Anthropic and OpenAI said that
+      any transfer of their stock without board approval, tokenized ones included, is void and
+      not recognized on their books. This launch token is one step further away still: it is
+      not a basket share and is not redeemable for anything.
+    </p>
+  );
+}
+
+/** The three first launches point their immutable metadata at a domain Sheaf no longer controls. */
+function RetiredMetadataNote({ basketAddress }: { basketAddress: string }) {
+  return (
+    <p className="mt-4 text-xs leading-relaxed text-ink-3">
+      This token was minted while the site lived at sheaf.vercel.app, and its immutable metadata
+      link still points there. We no longer control that domain, so wallets and explorers show no
+      metadata for it. Its provenance is served at{" "}
+      <a
+        href={`/api/launch/${basketAddress}`}
+        className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+      >
+        /api/launch
+      </a>
+      .
+    </p>
+  );
+}
+
 /** The live curve and a buy, for one launch. */
 export function LaunchCard({
   basketAddress,
   info,
   state,
   readError,
+  anchor = null,
   onTraded,
   onBasketPage = false,
+  preIpo = false,
 }: {
   basketAddress: string;
   info: DbcPoolInfo;
   state: DbcState | null;
   readError: string | null;
+  anchor?: Anchor | null;
+  /** A pre-IPO basket's launch: shown plainly, never promoted ("be the first buyer"). */
+  preIpo?: boolean;
   onTraded: () => Promise<void>;
   onBasketPage?: boolean;
 }) {
@@ -704,7 +784,13 @@ export function LaunchCard({
         <Fact
           label="Opened at"
           value={state ? `${quantity(state.openCap, 2)} SOL` : "—"}
-          note="½ × NAV"
+          note={
+            anchor?.status === "verified"
+              ? `½ × NAV, checked against the ${anchor.closeDay ?? "last"} close`
+              : anchor?.status === "unverifiable"
+                ? "½ × NAV, as set; not checkable"
+                : "½ × NAV"
+          }
         />
         <Fact
           label="Market cap now"
@@ -727,7 +813,7 @@ export function LaunchCard({
       </dl>
 
       <div className="px-6 py-5">
-        {untouched && state && (
+        {untouched && state && !preIpo && (
           <p className="mb-4 text-sm leading-relaxed text-ink-2">
             <span className="text-ink">Opens at {quantity(state.openCap, 2)} SOL. Be the first buyer.</span>{" "}
             Nobody has bought yet, so the first buy gets the curve&rsquo;s lowest price; it takes{" "}
@@ -915,6 +1001,12 @@ export function LaunchCard({
         )}
 
         {state && <LaunchTrades pool={info.pool} refresh={done?.signature ?? null} />}
+        {anchor?.status === "unverifiable" && anchor.reason && (
+          <p className="mt-4 text-xs leading-relaxed text-ink-3">
+            The opening price could not be checked against the basket&rsquo;s NAV: {anchor.reason}
+          </p>
+        )}
+        {RETIRED_METADATA_MINTS.has(info.baseMint) && <RetiredMetadataNote basketAddress={basketAddress} />}
 
         <p className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
           {state && <PresetLink state={state} />}
@@ -1060,6 +1152,8 @@ function Fact({ label, value, note }: { label: string; value: string; note: stri
 }
 
 const H = 220;
+/** A halo in the card's colour under every label, so the curve never strikes through text. */
+const HALO = { paintOrder: "stroke", stroke: "var(--color-raised)", strokeWidth: 4, strokeLinejoin: "round" } as const;
 const PAD = { top: 20, right: 16, bottom: 30, left: 16 };
 
 /**
@@ -1170,6 +1264,7 @@ function CurvePlot({ state, W }: { state: DbcState; W: number }) {
         y={labelLeft ? y(cap) + 20 : y(cap) - 10}
         fill="var(--color-ink)"
         fontSize="13"
+        {...HALO}
         textAnchor={labelLeft ? "end" : "start"}
       >
         {state.migrated
@@ -1180,14 +1275,14 @@ function CurvePlot({ state, W }: { state: DbcState; W: number }) {
       </text>
       <circle cx={x(state.threshold)} cy={y(state.graduationCap)} r="4" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.5" />
       {fraction < 0.85 && (
-        <text x={x(state.threshold) - 10} y={y(state.graduationCap) + 4} fill="var(--color-ink-2)" fontSize="12" textAnchor="end">
+        <text x={x(state.threshold) - 10} y={y(state.graduationCap) + 4} fill="var(--color-ink-2)" fontSize="12" textAnchor="end" {...HALO}>
           graduates to Meteora DAMM v2
         </text>
       )}
-      <text x={x(0)} y={H - 8} fill="var(--color-ink-3)" fontSize="12">
-        0 SOL raised
+      <text x={x(0)} y={H - 8} fill="var(--color-ink-3)" fontSize="12" {...HALO}>
+        {state.migrated ? "curve start" : "0 SOL raised"}
       </text>
-      <text x={x(state.threshold)} y={H - 8} fill="var(--color-ink-3)" fontSize="12" textAnchor="end">
+      <text x={x(state.threshold)} y={H - 8} fill="var(--color-ink-3)" fontSize="12" textAnchor="end" {...HALO}>
         {quantity(state.threshold, 2)} SOL
       </text>
     </svg>

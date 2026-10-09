@@ -1,6 +1,6 @@
 import "server-only";
-import { randomBytes } from "node:crypto";
-import type { MonthlyBand, UsRoute } from "./waitlist-options";
+import { createHmac, randomBytes } from "node:crypto";
+import { HOMES, type Home, type MonthlyBand, type UsRoute, type WaitlistCounts } from "./waitlist-options";
 
 /**
  * The India waitlist, kept in a private Google Cloud Storage bucket and reached
@@ -8,20 +8,27 @@ import type { MonthlyBand, UsRoute } from "./waitlist-options";
  * for a short-lived access token on the bucket (workload identity federation).
  * The same approach as Routed's lib/storage.ts.
  *
- * Configured by two environment variables:
+ * Configured by environment variables:
  *   WAITLIST_GCS_BUCKET    the bucket, e.g. sheaf-waitlist-a1ae9591
  *   WAITLIST_WIF_AUDIENCE  //iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
- * With either missing, the waitlist reports itself closed and nothing is stored.
+ *   WAITLIST_SALT          a random secret for hashing contacts (optional, but set it before answers arrive:
+ *                          changing it later stops older contacts from being recognised as repeats)
+ * With the first two missing, the waitlist reports itself closed and nothing is stored.
  *
- * Each answer is its own small object, so two submissions never contend for
- * one file, and the count is a listing of the prefix. Nothing about the person
- * is kept beyond the three answers and the day they gave them: no IP address,
+ * Each answer is its own small object, and what the page shows is read from the
+ * object names alone, so counting never opens an answer:
+ *   india/c/<hash>/<home>.json              an answer that left a contact. <hash> is a salted HMAC of the
+ *                                           contact, so one contact can answer once; the contact itself is
+ *                                           stored once, inside the object, and nowhere else.
+ *   india/a/<home>/<day>-<ts>-<rand>.json   an answer without a contact.
+ * Nothing about the person is kept beyond the answers and the day: no IP address,
  * no user agent, no wallet.
  */
 
 export type WaitlistEntry = {
   band: MonthlyBand;
   route: UsRoute;
+  home: Home;
   /** An email or Telegram handle, or "" when none was given. */
   contact: string;
   /** The day the answer arrived, YYYY-MM-DD (UTC). */
@@ -31,10 +38,15 @@ export type WaitlistEntry = {
 const PREFIX = "india/";
 const COUNT_TTL_MS = 30_000;
 const SCOPE = "https://www.googleapis.com/auth/devstorage.read_write";
+const GCS = "https://storage.googleapis.com/storage/v1/b";
+const UPLOAD = "https://storage.googleapis.com/upload/storage/v1/b";
 
 export function waitlistConfigured(): boolean {
   return Boolean(process.env.WAITLIST_GCS_BUCKET && process.env.WAITLIST_WIF_AUDIENCE);
 }
+
+/** Thrown when a contact is already on the list. */
+export class AlreadyListed extends Error {}
 
 let token: { value: string; exp: number } | null = null;
 
@@ -65,37 +77,82 @@ async function accessToken(oidc: string | null): Promise<string> {
 
 const bucket = () => encodeURIComponent(process.env.WAITLIST_GCS_BUCKET!);
 
-let counted: { n: number; at: number } | null = null;
-
-/** How many answers the waitlist holds, read from the bucket at most every 30 seconds per instance. */
-export async function waitlistCount(oidc: string | null): Promise<number> {
-  if (counted && Date.now() - counted.at < COUNT_TTL_MS) return counted.n;
-  const auth = { authorization: `Bearer ${await accessToken(oidc)}` };
-  let n = 0;
-  let pageToken: string | undefined;
-  do {
-    const q = new URLSearchParams({ prefix: PREFIX, maxResults: "1000", fields: "items(name),nextPageToken" });
-    if (pageToken) q.set("pageToken", pageToken);
-    const r = await fetch(`https://storage.googleapis.com/storage/v1/b/${bucket()}/o?${q}`, { headers: auth, cache: "no-store", signal: AbortSignal.timeout(15_000) });
-    if (!r.ok) throw new Error(`Waitlist count: HTTP ${r.status}`);
-    const j = (await r.json()) as { items?: { name: string }[]; nextPageToken?: string };
-    n += j.items?.length ?? 0;
-    pageToken = j.nextPageToken;
-  } while (pageToken && n < 50_000);
-  counted = { n, at: Date.now() };
-  return n;
+/** A salted HMAC of a cleaned contact, 128 bits in hex: enough to recognise a repeat, useless for reading it back. */
+function contactHash(contact: string): string {
+  const salt = process.env.WAITLIST_SALT || "sheaf-waitlist-v1";
+  return createHmac("sha256", salt).update(contact).digest("hex").slice(0, 32);
 }
 
-/** Stores one answer as its own object; ifGenerationMatch=0 means it can never overwrite another. */
+/** Object names under a prefix. */
+async function names(prefix: string, auth: Record<string, string>, limit = 50_000): Promise<string[]> {
+  const out: string[] = [];
+  let pageToken: string | undefined;
+  do {
+    const q = new URLSearchParams({ prefix, maxResults: String(Math.min(1000, limit)), fields: "items(name),nextPageToken" });
+    if (pageToken) q.set("pageToken", pageToken);
+    const r = await fetch(`${GCS}/${bucket()}/o?${q}`, { headers: auth, cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) throw new Error(`Waitlist list: HTTP ${r.status}`);
+    const j = (await r.json()) as { items?: { name: string }[]; nextPageToken?: string };
+    out.push(...(j.items ?? []).map((i) => i.name));
+    pageToken = j.nextPageToken;
+  } while (pageToken && out.length < limit);
+  return out;
+}
+
+const emptyByHome = (): Record<Home, number> => Object.fromEntries(HOMES.map((h) => [h.key, 0])) as Record<Home, number>;
+const asHome = (s: string | undefined): Home | null => (HOMES.some((h) => h.key === s) ? (s as Home) : null);
+
+let counted: { c: WaitlistCounts; at: number } | null = null;
+
+/** How many answers the waitlist holds, how many left a contact, and where people live; read at most every 30 s per instance. */
+export async function waitlistCounts(oidc: string | null): Promise<WaitlistCounts> {
+  if (counted && Date.now() - counted.at < COUNT_TTL_MS) return counted.c;
+  const all = await names(PREFIX, { authorization: `Bearer ${await accessToken(oidc)}` });
+  const c: WaitlistCounts = { count: 0, withContact: 0, byHome: emptyByHome() };
+  for (const name of all) {
+    const parts = name.split("/");
+    c.count++;
+    let home: Home | null = null;
+    if (parts[1] === "c") {
+      c.withContact++;
+      home = asHome(parts[3]?.replace(/\.json$/, ""));
+    } else if (parts[1] === "a") {
+      home = asHome(parts[2]);
+    }
+    if (home) c.byHome[home]++;
+  }
+  counted = { c, at: Date.now() };
+  return c;
+}
+
+/**
+ * Stores one answer as its own object. With a contact, the object is named by the contact's hash and
+ * written with ifGenerationMatch=0 after checking the hash isn't already listed, so one contact answers once.
+ */
 export async function addToWaitlist(entry: WaitlistEntry, oidc: string | null): Promise<void> {
-  const name = `${PREFIX}${entry.day}/${Date.now()}-${randomBytes(6).toString("hex")}.json`;
+  const auth = { authorization: `Bearer ${await accessToken(oidc)}` };
+  let name: string;
+  if (entry.contact) {
+    const hash = contactHash(entry.contact);
+    if ((await names(`${PREFIX}c/${hash}/`, auth, 1)).length > 0) throw new AlreadyListed();
+    name = `${PREFIX}c/${hash}/${entry.home}.json`;
+  } else {
+    name = `${PREFIX}a/${entry.home}/${entry.day}-${Date.now()}-${randomBytes(6).toString("hex")}.json`;
+  }
   const q = new URLSearchParams({ uploadType: "media", name, ifGenerationMatch: "0" });
-  const r = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${bucket()}/o?${q}`, {
+  const r = await fetch(`${UPLOAD}/${bucket()}/o?${q}`, {
     method: "POST",
-    headers: { authorization: `Bearer ${await accessToken(oidc)}`, "content-type": "application/json" },
+    headers: { ...auth, "content-type": "application/json" },
     body: JSON.stringify(entry),
     signal: AbortSignal.timeout(20_000),
   });
+  if (r.status === 412) throw new AlreadyListed();
   if (!r.ok) throw new Error(`Waitlist write: HTTP ${r.status}`);
-  if (counted) counted = { n: counted.n + 1, at: counted.at };
+  if (counted) {
+    const c = counted.c;
+    counted = {
+      at: counted.at,
+      c: { count: c.count + 1, withContact: c.withContact + (entry.contact ? 1 : 0), byHome: { ...c.byHome, [entry.home]: c.byHome[entry.home] + 1 } },
+    };
+  }
 }

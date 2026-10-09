@@ -21,7 +21,7 @@ export function HomePlans() {
           the stocks.
         </p>
         <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-ink-3">
-          No oracle sets the price. Each fill moves the plan&apos;s reference to where the market cleared, so next
+          The program reads no price. Each fill moves the plan&apos;s reference to where the market cleared, so next
           month&apos;s order starts from what this month&apos;s actually cost.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">

@@ -88,7 +88,7 @@ export function MarketMosaic({
         <figcaption className="mb-3 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="display text-xl text-ink">
-              Tokenized equities and pre-IPO SPVs, live on Solana
+              Tokenized stocks and private companies, live on Solana
             </h2>
             <p className="mt-1 text-sm text-ink-2">
               Tile area is {SIZE_LABEL[size]}. Color is the 24-hour move. The{" "}
@@ -97,7 +97,7 @@ export function MarketMosaic({
                 style={{ background: COMPONENT_SLOTS[3] }}
                 aria-hidden
               />{" "}
-              mark is PreStocks: a pre-IPO SPV, not a listed company.
+              mark is PreStocks: a token backed by a fund that holds shares in a private company, not a listed one.
             </p>
           </div>
           <div className="flex items-center gap-1 text-xs">
@@ -350,7 +350,7 @@ function TileTooltip({
 
       <dl className="mt-4 space-y-1.5 text-xs">
         {PRESTOCK_SYMBOLS.has(quote.symbol) ? (
-          <Row label="Source" value="PreStocks · pre-IPO SPV" gold={false} lapis />
+          <Row label="Source" value="PreStocks · private company, held through a fund" gold={false} lapis />
         ) : (
           <>
             <Row
@@ -432,7 +432,7 @@ export function ChangeLegend() {
           style={{ background: COMPONENT_SLOTS[3] }}
           aria-hidden
         />
-        <span>PreStocks: a pre-IPO SPV, not a public company</span>
+        <span>PreStocks: a private company, held through a fund</span>
       </div>
     </div>
   );

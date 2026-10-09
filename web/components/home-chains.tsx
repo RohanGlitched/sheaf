@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { EVM_CHAINS } from "@/lib/chains";
 
+const src = "underline decoration-line-strong underline-offset-4 hover:text-ink-2";
+
 /** Where Sheaf runs, at a glance. The full page reads every vault live. */
 export function HomeChains() {
   const rows = [
@@ -19,6 +21,24 @@ export function HomeChains() {
         <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-ink-2">
           Tokenized stocks are spreading across chains, and so is Sheaf: the same recipe that can never change, the
           same vault that pays out only against a burned share, and the same dollar orders, written natively for each one.
+        </p>
+        <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-ink-3">
+          No single chain holds the market. Of the record $15.6 billion in tokenized stocks traded onchain in
+          September 2026, Robinhood&rsquo;s tokens took about 42% and Binance&rsquo;s bStocks $5.4 billion (
+          <a href="https://forkast.news/?p=131481" target="_blank" rel="noreferrer" className={src}>
+            Forkast
+          </a>
+          ); Solana&rsquo;s exchanges did about $4.4 billion (
+          <a
+            href="https://www.idnfinancials.com/digital-asset/69848/solana-tokenized-stock-volume-reached-us4-4-billion"
+            target="_blank"
+            rel="noreferrer"
+            className={src}
+          >
+            Blockworks, via IDN
+          </a>
+          ). Solana is home, because the program, plans and auctions work best there; the vaults on the other
+          chains are the hedge for wherever the stocks end up trading.
         </p>
         <Link href="/chains" className="mt-8 inline-flex rounded-[var(--radius-control)] border border-line-strong bg-surface px-5 py-3 text-sm text-ink hover:border-ink-3">
           See every chain

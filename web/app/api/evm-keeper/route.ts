@@ -14,6 +14,7 @@ import {
 } from "@/lib/evm-server";
 import { originAllowed } from "@/lib/server-origin";
 import { beat } from "@/lib/server-heartbeat";
+import { rememberOidc } from "@/lib/gcs-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -53,6 +54,7 @@ const fail = (err: unknown) => ((err as Error).message ?? "error").split("\n")[0
 const noStore = { headers: { "cache-control": "no-store" } };
 
 async function handle(request: Request) {
+  rememberOidc(request);
   if (!houseAccount()) {
     return Response.json({ error: "The keeper is not configured here. Set EVM_FAUCET_PRIVATE_KEY on the server." }, { status: 503 });
   }
@@ -132,7 +134,7 @@ async function handle(request: Request) {
   } finally {
     if (auto) sweeping.delete(target);
   }
-  if (!network) beat("evmKeeper", results.length);
+  if (!network) await beat("evmKeeper", { results: results.length, filled: results.filter((r) => r.status === "filled").length });
   return Response.json({ results, errors, ...(sips ? { sips } : {}) }, noStore);
 }
 

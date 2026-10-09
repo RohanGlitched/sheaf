@@ -10,7 +10,7 @@ import { useMarket } from "./market-provider";
 import { SheafMark, type Stalk } from "./sheaf-mark";
 
 /** The basket the hero draws, when it can be read; otherwise the first one. */
-const HERO_BASKET = "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv";
+const HERO_BASKET = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
 
 /** Drawn while the chain is being read, so the hero is never empty. */
 const PLACEHOLDER: Stalk[] = [

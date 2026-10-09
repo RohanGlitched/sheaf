@@ -43,7 +43,7 @@ export default async function Image() {
             Bind up to eight stocks into one share.
           </div>
           <div style={{ fontSize: 26, lineHeight: 1.4, color: "#44544a", marginTop: 30, maxWidth: 540 }}>
-            Index funds of tokenized stocks, backed by the real stocks in an onchain vault.
+            Baskets of tokenized stocks, backed by the stocks in an onchain vault.
           </div>
           <div style={{ display: "flex", marginTop: "auto", fontSize: 18, color: "#56635b", gap: 8 }}>
             {CHAINS.map((c, i) => (

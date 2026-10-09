@@ -26,7 +26,7 @@ const SINCE = Date.now();
  * can poll every few seconds while the server stays inside Solami's free limit
  * of five requests a second.
  *
- * Calls go out one at a time, 500 ms apart. A normal poll is getSlot,
+ * Calls go out one at a time, 667 ms apart. A normal poll is getSlot,
  * getSignaturesForAddress x2, getTransaction x<=5 (up to three that just
  * landed, up to two from the backfill while the tape is short) and
  * getBlockTime x<=1. An instance's first poll is the backfill: the last 20
@@ -547,7 +547,7 @@ function refresh(): Promise<Tape> {
  * `after()`, which keeps a serverless function alive until the poll finishes
  * instead of freezing it the moment the response is sent.
  *
- * A cold instance's backfill is about fifteen paced calls (eight seconds or
+ * A cold instance's backfill is about fifteen paced calls (ten seconds or
  * so). The caller waits up to four; past that it gets an empty tape marked
  * `warming` (the page keeps its earlier-trades seed on screen) and the
  * backfill finishes in the background for the next request.

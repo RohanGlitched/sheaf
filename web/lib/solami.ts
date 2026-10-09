@@ -7,9 +7,12 @@ import { MAINNET_RPC } from "./config";
  * Solami's RPC answers when SOLAMI_API_KEY is set. The free tier allows five
  * requests a second per key, and a burst past that answers 429 with
  * `Retry-After: 1`, so this module paces every call it sends: one slot every
- * 500 ms per server instance, two a second, so two warm instances together
- * still fit under the key's five (Vercel keeps more than one warm, and at
- * 240 ms three of them together drew 429s). A 429 waits out its
+ * 667 ms per server instance, 1.5 a second, so three warm instances together
+ * (4.5 a second) still fit under the key's five. Vercel has been seen keeping
+ * three warm at once; at 240 ms they drew 429s on 7 of 67 calls, at 500 ms on
+ * about 1 in 100. There is no global limiter: a token bucket shared through
+ * storage would cost more round trips than the calls it guards, so the
+ * per-instance rate is set for the instance count observed. A 429 waits out its
  * Retry-After once and tries again; a second failure puts Solami on a short
  * cool-down and the call is answered by the public RPC instead, and the caller
  * is told so. Nothing here ever reports "solami" for an answer Solami did not give.
@@ -26,7 +29,7 @@ export type Via = "solami" | "public";
 
 const SOLAMI_BASE = "https://rpc.solami.dev/solana";
 /** Gap between calls to one upstream from one instance. */
-const SPACING_MS: Record<Via, number> = { solami: 500, public: 240 };
+const SPACING_MS: Record<Via, number> = { solami: 667, public: 240 };
 const COOL_DOWN_MS = 8_000;
 
 export function solamiKey(): string | null {

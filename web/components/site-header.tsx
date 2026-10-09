@@ -8,15 +8,20 @@ import { MarketClock } from "./market-clock";
 import { ConnectButton } from "./connect-button";
 import { EvmHeaderConnect } from "./evm-wallet";
 
+/**
+ * Seven destinations, in the order of the story: make a basket, find one, buy it
+ * every month, check the record, then how it works, how it pays, and who has
+ * tried it. Portfolio, Chains and Predict are one click away in the footer and
+ * from their sections on the home page.
+ */
 const NAV = [
   { href: "/compose", label: "Create", long: "Create a basket" },
   { href: "/explore", label: "Explore" },
   { href: "/plans", label: "Plans" },
-  { href: "/predict", label: "Predict" },
-  { href: "/chains", label: "Chains" },
-  { href: "/portfolio", label: "Portfolio" },
   { href: "/ledger", label: "Ledger" },
   { href: "/method", label: "How it works" },
+  { href: "/business", label: "Business" },
+  { href: "/voices", label: "People" },
 ];
 
 export function SiteHeader() {

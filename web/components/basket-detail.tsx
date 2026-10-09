@@ -195,9 +195,33 @@ function Loaded({
           {basket.components.length === 1
             ? "one holding"
             : `${basket.components.length} holdings`}{" "}
-          sitting in a vault this program controls. Nobody can move them except by
-          redeeming a share, and a share can always be redeemed.
+          sitting in a vault this program controls. The program releases them only
+          against a redeemed share, and a share can always be redeemed; the
+          tokens&rsquo; issuers keep their own powers over them, as{" "}
+          <Link href="/method#risks" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
+            the risks
+          </Link>{" "}
+          explain.
         </p>
+
+        {valuation.components.some((c) => PRESTOCK_SYMBOLS.has(c.symbol)) && (
+          <p className="mt-6 max-w-[66ch] border-l-2 border-loss pl-4 text-sm leading-relaxed text-ink-2">
+            <span className="text-ink">Pre-IPO holdings carry a risk listed shares do not.</span> In May 2026
+            Anthropic said any transfer of its shares its board has not approved is void, and OpenAI warned
+            that unauthorized transfers could invalidate the underlying equity. PreStocks&rsquo; Anthropic and
+            OpenAI tokens fell by roughly a third or more within a week (
+            <a
+              href="https://www.theblock.co/post/401088/anthropic-openai-tokenized-prestocks-plunge"
+              target="_blank"
+              rel="noreferrer"
+              className="underline decoration-line-strong underline-offset-4 hover:text-ink"
+            >
+              The Block
+            </a>
+            ). PreStocks holds the shares indirectly, through special-purpose vehicles. On mainnet today a basket like this could only be created in kind; buying it with dollars here is a
+            devnet demonstration.
+          </p>
+        )}
 
         <div className="mt-9">
           <BasketMosaic tiles={tiles} height={260} />
@@ -350,8 +374,9 @@ function Composition({
       <h2 className="display text-title text-ink">The recipe</h2>
       <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
         These numbers were written once, when the basket was created, and cannot be
-        changed. The weight on the right drifts as prices move; nothing rebalances
-        it, because rebalancing would mean somebody deciding to trade your holdings.
+        changed: a fixed basket, like a unit investment trust, with no manager and no
+        rebalancing. The weight on the right drifts as prices move. To change the
+        recipe, publish a new basket.
       </p>
 
       {/* The market price of one component is the least useful column here — the
@@ -490,7 +515,7 @@ function Backing({
           >
             <span aria-hidden className="size-2 rotate-45 bg-current" />
             {onChain.fullyBacked
-              ? "Every outstanding share is fully backed."
+              ? "Every outstanding share is fully backed, today by devnet mirror tokens; on mainnet it would be by the real xStocks and PreStocks."
               : "A vault is short. Do not create more shares."}
           </div>
 
@@ -966,7 +991,7 @@ function TradePanel({
 
         <p className="mt-5 text-xs leading-relaxed text-ink-3">
           {mode === "create"
-            ? "In kind, so no price is quoted and no oracle is trusted. Amounts round up in the vault's favor."
+            ? "In kind, so the program reads no price. Amounts round up in the vault's favor."
             : "In kind, so redemption always works, whatever the market thinks the basket is worth. Amounts round down in the vault's favor."}
         </p>
       </div>

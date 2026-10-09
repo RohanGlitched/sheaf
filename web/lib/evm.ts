@@ -88,8 +88,9 @@ export const UI_MULTIPLIER_ABI = parseAbi(["function uiMultiplier() view returns
 export const TEMPO_PATH_USD = "0x20c0000000000000000000000000000000000000" as const;
 
 /**
- * The Tempo SIP: what one access-key authorization grants the keeper. The same
- * numbers the recorded demo in evm/scripts/tempo-sip.mjs used.
+ * The v1 Tempo SIP: what one access-key authorization grants the keeper, scoped
+ * to the v1 desk's placeOrder (so the key picks the price). The same numbers the
+ * recorded demo in evm/scripts/tempo-sip.mjs used. v2 is TEMPO_SIP_V2 below.
  */
 export const TEMPO_SIP = {
   period: 30 * 86_400,
@@ -102,6 +103,316 @@ export const TEMPO_SIP = {
   /** Deliberately past what is left after one instalment. */
   overspend: 20_000_000n,
 } as const;
+
+// ------------------------------------------------------------------- v2
+
+/**
+ * v2: CreationDeskV2 (a Dutch auction on share count, the 0.10% protocol fee) and
+ * PlanDesk (plans whose amount, schedule and worst price are on chain). Deployed
+ * beside v1 on every chain and serving the same factory's baskets; v1's desk and
+ * DESK_ABI keep working unchanged. Addresses are under `v2` in each deployment
+ * record: read them with v2Of(d).
+ */
+export const DESK_V2_ABI = parseAbi([
+  "function PROTOCOL_FEE_BPS() view returns (uint16)",
+  "function MAX_ORDER_SECS() view returns (uint64)",
+  "function cash() view returns (address)",
+  "function factory() view returns (address)",
+  "function treasury() view returns (address)",
+  "function orderCount() view returns (uint256)",
+  "function getOrder(uint256 id) view returns ((address buyer, uint64 startTs, uint8 status, address basket, uint64 endTs, uint128 cashAmount, uint128 sharesOut, uint128 startShares, uint128 endShares, address filler))",
+  "function sharesAt(uint256 id, uint256 ts) view returns (uint256)",
+  "function grossFor(address basket, uint256 sharesOut) view returns (uint256)",
+  "function quoteFill(uint256 id) view returns (uint256 sharesOut, uint256 grossShares, uint256[] amounts)",
+  "function auctionBounds(uint256 fairShares, uint16 bandBps, uint256 minShares) pure returns (uint256 startShares, uint256 endShares)",
+  "function placeOrder(address basket, uint256 cashAmount, uint256 startShares, uint256 endShares, uint64 startTs, uint64 endTs) returns (uint256)",
+  "function placeOrderFor(address buyer, address basket, uint256 cashAmount, uint256 startShares, uint256 endShares, uint64 startTs, uint64 endTs) returns (uint256)",
+  "function placeAuction(address basket, uint256 cashAmount, uint256 fairShares, uint16 bandBps, uint64 auctionSecs, uint256 minShares) returns (uint256)",
+  "function fill(uint256 id) returns (uint256)",
+  "function cancel(uint256 id)",
+  "event OrderPlaced(uint256 indexed id, address indexed buyer, address indexed basket, address payer, uint256 cashAmount, uint256 startShares, uint256 endShares, uint64 startTs, uint64 endTs)",
+  "event OrderFilled(uint256 indexed id, address indexed filler, uint256 sharesToBuyer, uint256 grossShares, uint256 creatorFeeShares, uint256 protocolFeeShares, uint256 cashPaid)",
+  "event OrderCancelled(uint256 indexed id, uint256 refund)",
+  "event ProtocolFeePaid(address indexed basket, address indexed treasury, uint256 shares)",
+  "error UnknownBasket()",
+  "error ZeroAmount()",
+  "error ZeroAddress()",
+  "error BadAuctionShares()",
+  "error BadAuctionWindow()",
+  "error BandTooWide()",
+  "error FairBelowFloor()",
+  "error ShortCash(uint256 expected, uint256 received)",
+  "error NotOpen()",
+  "error Expired()",
+  "error NotBuyer()",
+  "error SafeCastOverflowedUintDowncast(uint8 bits, uint256 value)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
+  "error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)",
+  "error SafeERC20FailedOperation(address token)",
+]);
+
+export const PLAN_DESK_ABI = parseAbi([
+  "function desk() view returns (address)",
+  "function cash() view returns (address)",
+  "function planCount() view returns (uint256)",
+  "function getPlan(uint256 id) view returns ((address owner, uint64 interval, uint32 runs, bool active, address basket, uint64 lastRunAt, address keeper, uint64 auctionSecs, uint16 bandBps, uint128 cashPerRun, uint128 minShares, uint128 maxShares))",
+  "function plansOf(address owner) view returns (uint256[])",
+  "function nextRunAt(uint256 id) view returns (uint256)",
+  "function auctionFor(uint256 id, uint256 fairShares) view returns (uint256 startShares, uint256 endShares)",
+  "function openPlan(address basket, uint256 cashPerRun, uint64 interval, uint64 auctionSecs, uint16 bandBps, uint256 minShares, uint256 maxShares, address keeper) returns (uint256)",
+  "function closePlan(uint256 id)",
+  "function instalment(uint256 id, uint256 fairShares) returns (uint256)",
+  "event PlanOpened(uint256 indexed id, address indexed owner, address indexed basket, address keeper, uint256 cashPerRun, uint64 interval, uint64 auctionSecs, uint16 bandBps, uint256 minShares, uint256 maxShares)",
+  "event PlanClosed(uint256 indexed id)",
+  "event Instalment(uint256 indexed id, uint256 indexed orderId, address indexed caller, uint256 fairShares, uint256 startShares, uint256 endShares, uint32 run)",
+  "error UnknownBasket()",
+  "error ZeroAmount()",
+  "error BadSchedule()",
+  "error BandTooWide()",
+  "error BadBounds()",
+  "error NotOwner()",
+  "error NotAllowed()",
+  "error PlanClosedAlready()",
+  "error TooSoon(uint256 nextRunAt)",
+  "error FairOutOfBounds(uint256 fairShares, uint256 minShares, uint256 maxShares)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
+  "error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)",
+  "error SafeERC20FailedOperation(address token)",
+]);
+
+/** The v2 desk's protocol fee, in basis points of the gross shares a fill creates. Immutable. */
+export const PROTOCOL_FEE_BPS = 10n;
+const BPS = 10_000n;
+
+/** The v2 contracts on one chain, as evm/scripts/deploy-v2.js records them. */
+export type DeploymentV2 = {
+  desk: string;
+  planDesk: string;
+  treasury: string;
+  protocolFeeBps: number;
+  cash: string;
+  factory: string;
+  startBlock?: number;
+  deployedAt?: string;
+  verified?: { via: string; at: string; contracts: Record<string, boolean> };
+  smoke?: { passedAt: string; basket: string; auctionOrderId: number; planId: number; planOrderId: number; txs: Record<string, string> };
+  /** Tempo only: the recorded access-key run against PlanDesk (evm/scripts/tempo-sip-v2.mjs). */
+  sip?: {
+    at: string;
+    keeperKey: string;
+    planId: number;
+    openPlanTx: string;
+    authorizeTx: string;
+    instalmentTx: string;
+    fillTx: string;
+    orderId: number;
+    cashPerRun: string;
+    minSharesPerRun: string;
+    maxSharesPerRun: string;
+    sharesToInvestor: string;
+    limitPerPeriod: string;
+    periodSeconds: number;
+    scopes: string[];
+    refused: Record<string, string>;
+  };
+};
+
+/** The chain's v2 contracts, or null where v2 is not deployed. */
+export function v2Of(d: Deployment): DeploymentV2 | null {
+  return (d as Deployment & { v2?: DeploymentV2 }).v2 ?? null;
+}
+
+export type DeskOrderV2 = {
+  id: number;
+  buyer: Address;
+  basket: Address;
+  cashAmount: bigint;
+  startShares: bigint;
+  endShares: bigint;
+  startTs: number;
+  endTs: number;
+  status: OrderStatus;
+  /** Shares the buyer received; 0 until filled. */
+  sharesOut: bigint;
+  filler: Address;
+};
+
+/** SheafAuction.sharesAt: the shares the buyer must receive at `ts` (unix seconds). */
+export function auctionSharesAt(o: Pick<DeskOrderV2, "startShares" | "endShares" | "startTs" | "endTs">, ts: number): bigint {
+  if (ts <= o.startTs) return o.startShares;
+  if (ts >= o.endTs) return o.endShares;
+  return o.startShares - ((o.startShares - o.endShares) * BigInt(ts - o.startTs)) / BigInt(o.endTs - o.startTs);
+}
+
+/** SheafAuction.bounds: fair × (1 ± band), both floored, the end never below `minShares`. */
+export function auctionBounds(fairShares: bigint, bandBps: number, minShares = 0n): { startShares: bigint; endShares: bigint } {
+  let startShares = (fairShares * (BPS + BigInt(bandBps))) / BPS;
+  let endShares = (fairShares * (BPS - BigInt(bandBps))) / BPS;
+  if (endShares < minShares) endShares = minShares;
+  if (startShares < endShares) startShares = endShares;
+  return { startShares, endShares };
+}
+
+/**
+ * How a v2 fill of `sharesOut` splits, exactly as CreationDeskV2.fill does it: the
+ * gross shares created, the basket's creator cut, the protocol's 0.10%, and what
+ * the buyer receives (never less than `sharesOut`, at most 2 raw units more).
+ */
+export function v2FillSplit(sharesOut: bigint, creatorFeeBps: number) {
+  const fee = BigInt(creatorFeeBps) + PROTOCOL_FEE_BPS;
+  const gross = mulDivCeil(sharesOut, BPS, BPS - fee);
+  const creatorFee = (gross * BigInt(creatorFeeBps)) / BPS;
+  const protocolFee = (gross * PROTOCOL_FEE_BPS) / BPS;
+  return { gross, creatorFee, protocolFee, toBuyer: gross - creatorFee - protocolFee };
+}
+
+/** Whole-share count (18 decimals) that `cash` raw units buy at `navUsd` a share. */
+export function fairSharesFor(cash: bigint, cashDecimals: number, navUsd: number): bigint {
+  // Price in micro-dollars, so the division stays in integers.
+  const micro = BigInt(Math.round(navUsd * 1e6));
+  if (micro <= 0n) return 0n;
+  return (cash * ONE_SHARE * 1_000_000n) / (micro * 10n ** BigInt(cashDecimals));
+}
+
+/**
+ * The v2 Tempo SIP. The visitor's root key opens a PlanDesk plan (the amount, the
+ * schedule and the price cap), then authorizes the keeper's access key for two
+ * calls only: approve with PlanDesk as spender, and PlanDesk.instalment. The key
+ * signs as the owner, so openPlan and closePlan must stay out of its scope; it can
+ * run the plan, never rewrite it, and a run below `minShares` reverts on chain.
+ */
+export const TEMPO_SIP_V2 = {
+  period: 30 * 86_400,
+  /** AlphaUSD per period on the access key, 6 decimals: room for two runs. */
+  limit: 25_000_000n,
+  feeLimit: 2_000_000n,
+  /** One run's cash, 6 decimals. */
+  cashPerRun: 10_100_000n,
+  /** The plan's own schedule: one run per 30 days, enforced by PlanDesk (TooSoon). */
+  interval: 30n * 86_400n,
+  auctionSecs: 3_600n,
+  bandBps: 200,
+  /** The visitor's cap, as a fraction of the fair count at authorization: no run below 97% of it. */
+  capBps: 9_700,
+  /** And no fair above 105% of it, so a keeper cannot post a run no filler would take. */
+  ceilingBps: 10_500,
+} as const;
+
+/** The plan terms a visitor signs for `navUsd` a share now (see TEMPO_SIP_V2). */
+export function tempoSipV2Terms(navUsd: number, cashDecimals = 6) {
+  const fair = fairSharesFor(TEMPO_SIP_V2.cashPerRun, cashDecimals, navUsd);
+  return {
+    cashPerRun: TEMPO_SIP_V2.cashPerRun,
+    interval: TEMPO_SIP_V2.interval,
+    auctionSecs: TEMPO_SIP_V2.auctionSecs,
+    bandBps: TEMPO_SIP_V2.bandBps,
+    fairShares: fair,
+    minShares: (fair * BigInt(TEMPO_SIP_V2.capBps)) / BPS,
+    maxShares: (fair * BigInt(TEMPO_SIP_V2.ceilingBps)) / BPS,
+  };
+}
+
+/** The access-key scopes for a v2 Tempo SIP: approve(PlanDesk) and PlanDesk.instalment, nothing else. */
+export function tempoSipV2Scopes(d: Deployment) {
+  const v2 = v2Of(d);
+  if (!v2) throw new Error(`no v2 deployment on ${d.network}`);
+  return [
+    { address: d.stable.address as Address, selector: "approve(address,uint256)", recipients: [v2.planDesk as Address] },
+    { address: v2.planDesk as Address, selector: "instalment(uint256,uint256)" },
+  ];
+}
+
+function toOrderV2(id: number, o: {
+  buyer: Address;
+  startTs: bigint;
+  status: number;
+  basket: Address;
+  endTs: bigint;
+  cashAmount: bigint;
+  sharesOut: bigint;
+  startShares: bigint;
+  endShares: bigint;
+  filler: Address;
+}): DeskOrderV2 {
+  return {
+    id,
+    buyer: o.buyer,
+    basket: o.basket,
+    cashAmount: o.cashAmount,
+    startShares: o.startShares,
+    endShares: o.endShares,
+    startTs: Number(o.startTs),
+    endTs: Number(o.endTs),
+    status: ORDER_STATUS[o.status] ?? "None",
+    sharesOut: o.sharesOut,
+    filler: o.filler,
+  };
+}
+
+/** The last `limit` v2 desk orders, newest first; [] where v2 is not deployed. */
+export async function readDeskOrdersV2(d: Deployment, limit = 12): Promise<DeskOrderV2[]> {
+  const v2 = v2Of(d);
+  if (!v2) return [];
+  const client = publicClientFor(d);
+  const desk = v2.desk as Address;
+  const count = Number(await client.readContract({ address: desk, abi: DESK_V2_ABI, functionName: "orderCount" }));
+  const ids = Array.from({ length: Math.min(limit, count) }, (_, i) => count - 1 - i);
+  const rows = await Promise.all(
+    ids.map((id) => client.readContract({ address: desk, abi: DESK_V2_ABI, functionName: "getOrder", args: [BigInt(id)] })),
+  );
+  return rows.map((o, i) => toOrderV2(ids[i], o));
+}
+
+export async function readDeskOrderV2(d: Deployment, id: number): Promise<DeskOrderV2> {
+  const v2 = v2Of(d);
+  if (!v2) throw new Error(`no v2 deployment on ${d.network}`);
+  const o = await publicClientFor(d).readContract({ address: v2.desk as Address, abi: DESK_V2_ABI, functionName: "getOrder", args: [BigInt(id)] });
+  return toOrderV2(id, o);
+}
+
+export type PlanV2 = {
+  id: number;
+  owner: Address;
+  basket: Address;
+  keeper: Address;
+  cashPerRun: bigint;
+  interval: number;
+  auctionSecs: number;
+  bandBps: number;
+  minShares: bigint;
+  maxShares: bigint;
+  runs: number;
+  lastRunAt: number;
+  active: boolean;
+  /** Unix seconds; 0 means it may run now. */
+  nextRunAt: number;
+};
+
+/** Every PlanDesk plan `owner` has opened, oldest first; [] where v2 is not deployed. */
+export async function readPlansOf(d: Deployment, owner: Address): Promise<PlanV2[]> {
+  const v2 = v2Of(d);
+  if (!v2) return [];
+  const client = publicClientFor(d);
+  const plans = v2.planDesk as Address;
+  const ids = await client.readContract({ address: plans, abi: PLAN_DESK_ABI, functionName: "plansOf", args: [owner] });
+  const rows = await Promise.all(ids.map((id) => client.readContract({ address: plans, abi: PLAN_DESK_ABI, functionName: "getPlan", args: [id] })));
+  return rows.map((p, i) => ({
+    id: Number(ids[i]),
+    owner: p.owner,
+    basket: p.basket,
+    keeper: p.keeper,
+    cashPerRun: p.cashPerRun,
+    interval: Number(p.interval),
+    auctionSecs: Number(p.auctionSecs),
+    bandBps: p.bandBps,
+    minShares: p.minShares,
+    maxShares: p.maxShares,
+    runs: p.runs,
+    lastRunAt: Number(p.lastRunAt),
+    active: p.active,
+    nextRunAt: p.runs === 0 ? 0 : Number(p.lastRunAt) + Number(p.interval),
+  }));
+}
 
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
@@ -227,6 +538,30 @@ export function explainEvmError(err: unknown): string {
           return "The desk does not know this basket.";
         case "MintCapExceeded":
           return "The faucet caps each call. Ask for less.";
+        case "FairOutOfBounds":
+          return "Refused by the plan: that price is outside the bounds the owner set.";
+        case "TooSoon":
+          return "Refused by the plan: this period's installment has already run.";
+        case "NotAllowed":
+          return "Only the plan's owner, or the keeper it names, can run this plan.";
+        case "NotOwner":
+          return "Only the plan's owner can close it.";
+        case "PlanClosedAlready":
+          return "That plan is closed.";
+        case "BadBounds":
+          return "The plan's price bounds are inverted or zero.";
+        case "BadSchedule":
+          return "The plan needs a non-zero interval and an auction of at most 30 days.";
+        case "BadAuctionShares":
+          return "The auction must start at or above where it ends, and end above zero.";
+        case "BadAuctionWindow":
+          return "The auction window is empty, already over, or more than 30 days out.";
+        case "BandTooWide":
+          return "The auction band is capped at 50%.";
+        case "FairBelowFloor":
+          return "The fair share count is below your own floor.";
+        case "ShortCash":
+          return "The cash token arrived short. The desk refuses tokens that skim on transfer.";
         case "ZeroShares":
         case "DustMint":
           return "That amount is too small to create a share.";
@@ -238,6 +573,7 @@ export function explainEvmError(err: unknown): string {
     if (/user rejected|denied|rejected the request/i.test(msg)) return "You declined it in the wallet.";
     if (/insufficient funds/i.test(msg)) return "Not enough gas in this wallet. Use the gas drip above.";
     if (/SpendingLimitExceeded/i.test(err.message)) return "Refused by the chain: SpendingLimitExceeded.";
+    if (/CallNotAllowed/i.test(err.message)) return "Refused by the chain: CallNotAllowed (outside the access key's scope).";
     return msg.split("\n")[0];
   }
   const anyErr = err as { code?: number; message?: string };

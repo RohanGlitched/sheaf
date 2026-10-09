@@ -21,6 +21,8 @@
 
 import { Connection, Keypair, PublicKey, type AccountInfo } from "@solana/web3.js";
 import preset from "./meteora-preset.json";
+import { symbolForWriteMint } from "./mirror";
+import { BY_SYMBOL_PRESTOCKS } from "./prestocks";
 
 export const DBC_PROGRAM = new PublicKey("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
 export const NATIVE_SOL = new PublicKey("So11111111111111111111111111111111111111112");
@@ -60,7 +62,7 @@ export type DbcPoolInfo = {
   quoteSymbol: string;
   baseDecimals: number;
   supply: number;
-  /** Which derived slot the launch lives in; 0 for every launch opened so far. */
+  /** Which derived slot the launch lives in: 0 unless an earlier slot was squatted (PROXYA is in 1). */
   slot?: number;
 };
 
@@ -113,9 +115,33 @@ export const FEATURED_LAUNCH: { basket: LaunchBasket; info: DbcPoolInfo } = {
   },
 };
 
+/**
+ * Launch mints whose immutable metadata URI points at sheaf.vercel.app, the
+ * site's old domain, which Sheaf no longer controls: BIG5A, FRNTRA and PROXYA.
+ * Their cards say so; their provenance is served at /api/launch/<basket>.
+ */
+export const RETIRED_METADATA_MINTS: ReadonlySet<string> = new Set([
+  "7X46CBfPfFg2cBMaCFKJ8XpEqY7iCn9rMUsnAZnftKxB",
+  "8GcjtcMYoMAAncQs7JWcmfmSbLmNyeZ8CMixsBPfpBSY",
+  "5wMGUdLisfNW1kMiQoeYN4hQcv1rpUXma6Apf8mpjtw9",
+]);
+
 /** Where the published curve presets and the integration write-up live. */
 export const PRESET_URL = "https://github.com/RohanGlitched/sheaf/blob/main/web/lib/meteora-preset.json";
 export const METEORA_DOCS_URL = "https://github.com/RohanGlitched/sheaf/blob/main/docs/meteora.md";
+
+/**
+ * The pre-IPO companies (PreStocks: SPV tokens, not shares) in a basket, by
+ * name. A launch in front of such a basket gets a plain warning and is kept
+ * off the featured and Explore surfaces: in May 2026 Anthropic and OpenAI said
+ * transfers of their stock without board approval, tokenized ones included,
+ * are void.
+ */
+export function preIpoCompanies(basket: { components?: { mint: string }[] }): string[] {
+  return (basket.components ?? [])
+    .map((c) => BY_SYMBOL_PRESTOCKS[symbolForWriteMint(c.mint) ?? ""]?.company)
+    .filter((name): name is string => !!name);
+}
 
 export function launchSymbol(symbol: string): string {
   return `${symbol}A`.slice(0, 10);
@@ -192,7 +218,8 @@ export function launchSlots(basket: Omit<LaunchBasket, "creator">): Promise<DbcP
  * the SDK's own decoder on devnet.
  *
  *   VirtualPool: volatility_tracker 8..72, config 72, creator 104, base_mint 136,
- *     quote_reserve 240, partner_quote_fee 272, sqrt_price 280, is_migrated 305,
+ *     quote_reserve 240, partner_quote_fee 272, sqrt_price 280,
+ *     activation_point 296, is_migrated 305,
  *     metrics.total_protocol_quote_fee 320, metrics.total_trading_quote_fee 336,
  *     creator_quote_fee 360.
  *   PoolConfig: quote_mint 8, fee_claimer 40, leftover_receiver 72,
@@ -222,6 +249,7 @@ const POOL = {
   quoteReserve: 240,
   partnerQuoteFee: 272,
   sqrtPrice: 280,
+  activationPoint: 296,
   isMigrated: 305,
   protocolQuoteFee: 320,
   totalQuoteFee: 336,
@@ -570,8 +598,9 @@ export type DbcState = {
   partnerFees: number;
   protocolFees: number;
   totalFees: number;
-  /** Whether the fee scheduler counts in slots or in seconds. */
+  /** Whether the fee scheduler counts in slots or in seconds, and the point (slot or unix time) the pool opened at. */
   activation: "slot" | "timestamp";
+  activationPoint: number;
   /** Whether this pool passed `checkLaunch`, and why not if it did not. */
   official: boolean;
   unofficialReason: string | null;
@@ -667,6 +696,7 @@ export async function readDbcState(
     protocolFees: Number(u64(pool.data, POOL.protocolQuoteFee)) / 1e9,
     totalFees: Number(u64(pool.data, POOL.totalQuoteFee) + u64(pool.data, POOL.protocolQuoteFee)) / 1e9,
     activation: config.data[CONFIG.activationType] === 1 ? "timestamp" : "slot",
+    activationPoint: Number(u64(pool.data, POOL.activationPoint)),
     official: check.official,
     unofficialReason: check.reason,
     preset: check.preset,

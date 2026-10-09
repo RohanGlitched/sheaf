@@ -9,7 +9,7 @@ export const revalidate = 3600;
 
 /** The fixed pages, every basket on the program except our own test baskets, then every EVM basket page. */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const pages = ["", "/compose", "/explore", "/plans", "/chains", "/predict", "/portfolio", "/ledger", "/method"].map((path) => ({
+  const pages = ["", "/compose", "/explore", "/plans", "/chains", "/predict", "/portfolio", "/ledger", "/method", "/business", "/voices"].map((path) => ({
     url: `${SITE_URL}${path}`,
     changeFrequency: "daily" as const,
   }));

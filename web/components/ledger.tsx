@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import type { LedgerEntry } from "@/lib/ledger";
 import { useLedger } from "@/lib/use-ledger";
@@ -9,7 +9,9 @@ import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
 import { count, duration, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
-import { isTeamWallet, teamTag, teamWallet, TEAM_WALLETS } from "@/lib/team-wallets";
+import { isTeamWallet, teamTag, teamWallet, TEAM_WALLET_COUNT } from "@/lib/team-wallets";
+import { KeeperPulse } from "./keeper-pulse";
+import { isTestBasket } from "@/lib/hidden";
 
 /**
  * The program's whole history, from its own logs.
@@ -59,8 +61,8 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
   } else if (e.kind === "ordered" || e.kind === "planRun" || e.kind === "returned") {
     main = money(e.cash ?? 0);
   } else if (e.kind === "planOpened") {
-    main = `${money(e.cash ?? 0)} × ${e.runs ?? 0}`;
-    notes.push("per run");
+    main = `${money(e.cash ?? 0)} a run`;
+    notes.push(`${count(e.runs ?? 0)} ${plural(e.runs ?? 0, "run")}`);
   } else {
     const n = e.shares ?? 0;
     main = `${quantity(n, 4)} ${plural(n, "share")}`;
@@ -92,6 +94,37 @@ export function walletCounts(entries: LedgerEntry[]) {
   return { wallets: wallets.size, outside, actions: entries.length };
 }
 
+/** One day, the same everywhere: dates on this site are UTC, so a basket page and the ledger agree. */
+export function utcDate(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+type Row = { kind: "one"; entry: LedgerEntry } | { kind: "returns"; id: string; entries: LedgerEntry[] };
+
+/** Three or more refunds in a row fold into one line; each is still one click away. */
+const FOLD_RETURNS = 3;
+
+function foldReturns(entries: LedgerEntry[]): Row[] {
+  const rows: Row[] = [];
+  for (let i = 0; i < entries.length; ) {
+    let j = i;
+    while (j < entries.length && entries[j].kind === "returned") j++;
+    if (j - i >= FOLD_RETURNS) {
+      rows.push({ kind: "returns", id: `${entries[i].signature}-returns`, entries: entries.slice(i, j) });
+      i = j;
+    } else {
+      rows.push({ kind: "one", entry: entries[i] });
+      i++;
+    }
+  }
+  return rows;
+}
+
+function foldSummary(entries: LedgerEntry[]) {
+  const total = entries.reduce((a, e) => a + (e.cash ?? 0), 0);
+  return `${count(entries.length)} orders returned · ${money(total)} back to the buyers`;
+}
+
 export function LedgerTable({
   entries,
   baskets,
@@ -101,11 +134,40 @@ export function LedgerTable({
   baskets: Map<string, Basket>;
   showBasket?: boolean;
 }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  // Every row, with each folded run of refunds as one item until it is opened.
+  const visible = useMemo(
+    () =>
+      foldReturns(entries).flatMap((r): (LedgerEntry | { fold: { id: string; entries: LedgerEntry[] } })[] =>
+        r.kind === "one" ? [r.entry] : open.has(r.id) ? r.entries : [{ fold: { id: r.id, entries: r.entries } }],
+      ),
+    [entries, open],
+  );
   return (
     <>
       {/* A phone gets one card per event: what and when, then how much and the proof. */}
       <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface sm:hidden">
-        {entries.map((e) => {
+        {visible.map((e) => {
+          if ("fold" in e) {
+            return (
+              <li key={e.fold.id} className="px-4 py-3 text-sm">
+                <button type="button" onClick={() => toggle(e.fold.id)} aria-expanded={false} className="flex w-full items-baseline justify-between gap-3 text-left">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: KIND.returned.color }} />
+                    <span className="text-ink-2">{foldSummary(e.fold.entries)}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-bind">Show</span>
+                </button>
+              </li>
+            );
+          }
           const basket = baskets.get(e.basket);
           const kind = KIND[e.kind];
           const amount = amountOf(e);
@@ -152,7 +214,20 @@ export function LedgerTable({
             </tr>
           </thead>
           <tbody>
-            {entries.map((e) => {
+            {visible.map((e) => {
+              if ("fold" in e) {
+                return (
+                  <tr key={e.fold.id} className="border-b border-line/60 last:border-0">
+                    <td colSpan={showBasket ? 7 : 6} className="px-4 py-3">
+                      <button type="button" onClick={() => toggle(e.fold.id)} aria-expanded={false} className="flex items-center gap-2 text-left text-ink-2 hover:text-ink">
+                        <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: KIND.returned.color }} />
+                        {foldSummary(e.fold.entries)}, {timeAgo(e.fold.entries[e.fold.entries.length - 1].time)} to {timeAgo(e.fold.entries[0].time)}
+                        <span className="text-xs text-bind">Show each</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }
               const basket = baskets.get(e.basket);
               const kind = KIND[e.kind];
               const amount = amountOf(e);
@@ -216,8 +291,12 @@ export function LedgerPage() {
     const creations = entries.filter((e) => e.kind === "minted" || e.kind === "filled");
     const created = creations.reduce((a, e) => a + (e.shares ?? 0) + (e.feeShares ?? 0), 0);
     const redeemed = entries.filter((e) => e.kind === "redeemed").reduce((a, e) => a + (e.shares ?? 0), 0);
+    // A basket counts once, and baskets our own QA runs made are counted apart, as on Explore.
+    const createdEvents = entries.filter((e) => e.kind === "created");
+    const testBaskets = createdEvents.filter((e) => isTestBasket({ address: e.basket, creator: e.actor })).length;
     return {
-      baskets: entries.filter((e) => e.kind === "created").length,
+      baskets: createdEvents.length - testBaskets,
+      testBaskets,
       creations: creations.length,
       redemptions: entries.filter((e) => e.kind === "redeemed").length,
       wallets,
@@ -237,29 +316,32 @@ export function LedgerPage() {
           <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
             Every basket, every share created or redeemed, every dollar order and
             every plan run, read from the events the program wrote into its own
-            transactions.
-            There is no database behind this page: anyone can rebuild it from the
-            chain.
+            transactions. There is no database behind it: the server decodes the
+            chain and caches the result for half a minute, and anyone can rebuild it
+            from the chain.
           </p>
         </div>
         {ledger && (
           <dl className="tnum grid grid-cols-2 gap-x-8 gap-y-4 text-sm sm:flex">
             {[
-              ["Actions", count(stats.actions)],
-              ["Baskets", count(stats.baskets)],
-              ["Creations", count(stats.creations)],
-              ["Redemptions", count(stats.redemptions)],
-              ["Wallets", count(stats.wallets)],
-              ["Wallets that aren’t ours", decoding ? "…" : count(stats.outside)],
-            ].map(([label, value]) => (
+              ["Actions", count(stats.actions), null],
+              ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} of our tests` : null],
+              ["Creations", count(stats.creations), null],
+              ["Redemptions", count(stats.redemptions), null],
+              ["Wallets", count(stats.wallets), null],
+              ["Wallets that aren’t ours", decoding ? "…" : count(stats.outside), null],
+            ].map(([label, value, note]) => (
               <div key={label}>
                 <dt className="text-xs text-ink-3">{label}</dt>
                 <dd className="display mt-1 text-xl text-ink">{value}</dd>
+                {note && <dd className="mt-0.5 text-xs text-ink-3">{note}</dd>}
               </div>
             ))}
           </dl>
         )}
       </div>
+
+      <KeeperPulse className="mt-6" />
 
       {loading && <p className="mt-12 text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>}
       {error && (
@@ -277,29 +359,45 @@ export function LedgerPage() {
             {decoding
               ? `Decoded ${count(ledger.done)} of ${count(ledger.total)} transactions so far…`
               : `${count(ledger.entries.length)} events on ${WRITE_CLUSTER}`}
-            {!decoding && stats.first ? ` since ${new Date(stats.first * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}` : ""}
+            {!decoding && stats.first ? ` since ${utcDate(stats.first)} (UTC)` : ""}
             {!decoding && (
               <>
                 {" · "}
                 {quantity(stats.created, 2)} shares created and {quantity(stats.redeemed, 2)} redeemed across every basket
               </>
             )}
-            {ledger.truncated ? " · showing the most recent 300 transactions" : ""}
+            {ledger.truncated ? ` · showing the most recent ${count(ledger.entries.length)} events; counts cover the whole history` : ""}
           </p>
           {served && served.orders > 0 && (
             <p className="tnum mt-2 text-xs text-ink-3">
               {count(served.fills)} {plural(served.fills, "fill")} for {money(served.dollarsFilled)}
-              {served.fillRate != null && ` · ${Math.round(served.fillRate * 100)}% of finished orders filled`}
-              {served.medianSecsToFill != null && ` · median ${duration(served.medianSecsToFill)} from order to fill`}
+              {served.byCause
+                ? (
+                    [
+                      ["dollar orders", served.byCause.dollar],
+                      ["plan runs", served.byCause.plan],
+                    ] as const
+                  )
+                    .filter(([, f]) => f.orders > 0)
+                    .map(
+                      ([label, f]) =>
+                        ` · ${label}: ${f.fillRate != null ? `${Math.round(f.fillRate * 100)}% filled` : "none finished"}${
+                          f.medianSecsToFill != null ? `, median ${duration(f.medianSecsToFill)} to fill` : ""
+                        }`,
+                    )
+                    .join("")
+                : `${served.fillRate != null ? ` · ${Math.round(served.fillRate * 100)}% of finished orders filled` : ""}${
+                    served.medianSecsToFill != null ? ` · median ${duration(served.medianSecsToFill)} from order to fill` : ""
+                  }`}
               {` · ${count(served.plans)} ${plural(served.plans, "plan")} opened`}
             </p>
           )}
           {!decoding && (
             <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
               {stats.outside === 0
-                ? `Every wallet here so far is ours: the house key that seeded the baskets and fills dollar orders, and the test wallets our end-to-end and QA runs used. `
+                ? `Every wallet here so far is ours: the house key that seeded the baskets and fills dollar orders, and the test wallets our end-to-end and QA runs used. Nobody from outside has acted yet; open any basket, take free test tokens and create a share to be the first. `
                 : `${count(stats.outside)} of the ${count(stats.wallets)} wallets here are not ours. The rest are the house key and our own test wallets. `}
-              Our {count(TEAM_WALLETS.length)} wallets are listed in{" "}
+              Our {count(TEAM_WALLET_COUNT)} wallets (including 100 fixed test wallets) are listed in{" "}
               <a
                 href="https://github.com/RohanGlitched/sheaf/blob/main/web/lib/team-wallets.ts"
                 target="_blank"
@@ -308,9 +406,26 @@ export function LedgerPage() {
               >
                 team-wallets.ts
               </a>{" "}
-              and tagged in the rows below.
+              and tagged in the rows below. People who tried it signed their names on{" "}
+              <Link href="/voices" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+                /voices
+              </Link>
+              .
             </p>
           )}
+          <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
+            This program was deployed, and its baskets created, on October 8, 2026. Sheaf began as Tessera on September 13;
+            that earlier program&rsquo;s history is in{" "}
+            <a
+              href="https://github.com/RohanGlitched/sheaf"
+              target="_blank"
+              rel="noreferrer"
+              className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+            >
+              the repository
+            </a>
+            . Dates on this site are in UTC.
+          </p>
           <div className="mt-4">
             {ledger.entries.length === 0 && decoding ? (
               <p className="text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>

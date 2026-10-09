@@ -11,8 +11,17 @@ type Nav = {
   navPerShare: { recipe: number | null; vault: number | null; listed: number | null };
   sharesOutstanding: number | null;
   trailingWeek: { from: number; to: number; navReturnPct: number; spyReturnPct: number | null; beatsSpy: boolean | null } | null;
-  resolution?: { rule: string; nextWindow: { from: string; to: string; fromClose: number; toClose: number } };
+  resolution?: {
+    /** False when a holding has no listed history (pre-IPO): there is no number to resolve from. */
+    offered?: boolean;
+    reason?: string;
+    rule?: string;
+    nextWindow?: { opens: string; from: string; to: string; fromClose: number; toClose: number; resolves: string };
+  };
 };
+
+/** The ?at= answer at a past close, trimmed for the page. */
+type AtNav = { closeDay: string; navPerShare: { listed: number | null }; spy: { closeDay: string; close: number; adjClose: number } };
 
 type CatalogMarket = {
   marketId: string;
@@ -117,6 +126,30 @@ export function PredictIndex() {
     return n && n !== "error" && n.trailingWeek != null && n.navPerShare.listed != null;
   });
   const sampleNav = sampleBasket ? (navs[sampleBasket.address] as Nav) : undefined;
+  const win = sampleNav?.resolution?.nextWindow;
+  // Two past closes a week apart, the way a resolver reads them: the last two
+  // Fridays before the next window starts.
+  const pastTo = win ? win.fromClose - 7 * 86_400 : null;
+  const pastFrom = pastTo != null ? pastTo - 7 * 86_400 : null;
+  const [past, setPast] = useState<{ from: AtNav; to: AtNav } | null>(null);
+  useEffect(() => {
+    if (!sampleBasket || pastFrom == null || pastTo == null) return;
+    let live = true;
+    void Promise.all([
+      pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${pastFrom}`),
+      pantaGet<AtNav>(`/api/nav/${sampleBasket.address}?at=${pastTo}`),
+    ]).then(([a, b]) => live && a.ok && b.ok && setPast({ from: a.data, to: b.data }));
+    return () => {
+      live = false;
+    };
+  }, [sampleBasket, pastFrom, pastTo]);
+  const pastRatio =
+    past && past.from.navPerShare.listed && past.to.navPerShare.listed
+      ? {
+          basket: (past.to.navPerShare.listed / past.from.navPerShare.listed - 1) * 100,
+          spy: (past.to.spy.adjClose / past.from.spy.adjClose - 1) * 100,
+        }
+      : null;
   const sample =
     sampleNav
       ? (() => {
@@ -198,7 +231,9 @@ export function PredictIndex() {
           <h2 className="display text-title text-ink">The questions</h2>
           <p className="max-w-[56ch] text-sm leading-relaxed text-ink-3">
             Value per share is read live from each basket&apos;s recipe at mainnet prices and dividend
-            multipliers. The trailing week compares the same recipe with SPY over the last five closes.
+            multipliers. The trailing week compares the same recipe with SPY over the last five closes. A
+            market resolves from neither of these live figures: it reads navPerShare.listed at two Friday
+            closes, as set out below.
           </p>
         </div>
         {error && <p className="mt-6 text-sm text-loss">{error}</p>}
@@ -241,12 +276,18 @@ export function PredictIndex() {
                         {dayLabel(w.from)} to {dayLabel(w.to)} · {w.beatsSpy ? "ahead" : "behind"}
                       </span>
                     </>
+                  ) : nav?.resolution?.offered === false || (nav && nav.navPerShare.listed == null) ? (
+                    <span className="text-xs text-ink-3">No listed history (pre-IPO)</span>
                   ) : (
                     <span className="text-ink-3">{n ? "—" : ""}</span>
                   )}
                 </p>
                 <p className="text-sm text-ink-2">
-                  {mode === "sandbox" ? (
+                  {nav?.resolution?.offered === false ? (
+                    <span className="text-ink-3" title={nav.resolution.reason}>
+                      No market: nothing listed to resolve from
+                    </span>
+                  ) : mode === "sandbox" ? (
                     <>
                       Not opened on mainnet.{" "}
                       <Link href={`/basket/${b.address}`} className="text-ink underline underline-offset-4">
@@ -279,9 +320,10 @@ export function PredictIndex() {
         <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">How a market resolves.</h2>
           <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
-            The week runs between two US closes: 16:00 New York time on a Friday, and on the Friday after.
-            Stock tokens trade around the clock, but SPY only has a close at the close, so both sides are
-            read there. If a Friday is a market holiday, the last close before it counts.
+            The week runs between two US closes, 16:00 New York time: the first Friday at or after trading
+            opens, and the Friday after. So none of the measured week is known when the first share is
+            bought. Stock tokens trade around the clock, but SPY only has a close at the close, so both sides
+            are read there. If a Friday is a market holiday, the last close before it counts.
           </p>
           <ol className="mt-5 max-w-[50ch] list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink-2">
             <li>
@@ -290,13 +332,16 @@ export function PredictIndex() {
             </li>
             <li>Divide the later value by the earlier one, for the basket and for SPY.</li>
             <li>YES if the basket&apos;s ratio is greater. NO otherwise, including a tie.</li>
+            <li>Read both at or after the market&apos;s resolution time, two hours after the second close, so both use the same data.</li>
           </ol>
-          {sampleNav?.resolution && (
+          {win && (
             <p className="mt-5 max-w-[50ch] text-sm leading-relaxed text-ink-3">
-              A market opened on {sampleBasket?.symbol} now would measure {sampleNav.resolution.nextWindow.from}{" "}
-              to {sampleNav.resolution.nextWindow.to}. Both are total return: adjusted closes reinvest
-              dividends, the way an xStock&apos;s multiplier does. A close is served once it is final, an hour
-              after the bell; a time in the future is refused, never answered with today&apos;s number.
+              A market opened on {sampleBasket?.symbol} now would trade from{" "}
+              {new Date(win.opens).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{" "}
+              and measure {win.from} to {win.to}. Both are total return: adjusted closes reinvest dividends, the
+              way an xStock&apos;s multiplier does. A close is served once it is final, an hour after the bell; a
+              time in the future is refused, never answered with today&apos;s number. A basket holding a company
+              that is not listed yet has no such number, so it gets no market.
             </p>
           )}
           <p className="mt-5 max-w-[50ch] text-sm leading-relaxed text-ink-3">
@@ -311,24 +356,61 @@ export function PredictIndex() {
             <li>• Live prices for the &ldquo;now&rdquo; figures: Jupiter&apos;s price API.</li>
           </ul>
         </div>
-        <div className="min-w-0 rounded-[var(--radius-panel)] border border-line bg-vault p-6 text-vault-ink">
-          <p className="text-xs opacity-70">
-            What /api/nav answers for {sampleBasket ? sampleBasket.symbol : "a basket"}, live, trimmed
-          </p>
-          <pre className="mt-3 max-h-[26rem] overflow-auto text-[12px] leading-relaxed">{sample ?? "Reading…"}</pre>
-          {sampleBasket && sampleNav?.resolution && (
-            <p className="mt-4 text-xs leading-relaxed opacity-70">
-              Read a past close:{" "}
-              <a
-                href={`/api/nav/${sampleBasket.address}?at=${sampleNav.resolution.nextWindow.fromClose - 7 * 86_400}`}
-                target="_blank"
-                rel="noreferrer"
-                className="break-all underline underline-offset-4"
-              >
-                /api/nav/{short(sampleBasket.address, 4, 4)}?at={sampleNav.resolution.nextWindow.fromClose - 7 * 86_400}
-              </a>
+        <div className="grid min-w-0 content-start gap-6">
+          <div className="min-w-0 rounded-[var(--radius-panel)] border border-line bg-vault p-6 text-vault-ink">
+            <p className="text-xs opacity-70">
+              What /api/nav answers for {sampleBasket ? sampleBasket.symbol : "a basket"}, live, trimmed
             </p>
-          )}
+            <pre className="mt-3 max-h-[26rem] overflow-auto text-[12px] leading-relaxed">{sample ?? "Reading…"}</pre>
+          </div>
+
+          {/* The rule worked once, on the last full week, from the same ?at= reads a resolver makes. */}
+          <div className="min-w-0 rounded-[var(--radius-panel)] border border-line bg-surface p-6">
+            <p className="text-xs text-ink-3">
+              Last week, resolved the way a market would be{sampleBasket ? ` (${sampleBasket.symbol})` : ""}
+            </p>
+            {past && pastRatio && sampleBasket && pastFrom != null && pastTo != null ? (
+              <>
+                <dl className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <dt className="text-xs text-ink-3">Close</dt>
+                    <dd className="tnum mt-1 text-ink-2">{past.from.closeDay}</dd>
+                    <dd className="tnum text-ink-2">{past.to.closeDay}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-ink-3">navPerShare.listed</dt>
+                    <dd className="tnum mt-1 text-ink">{usd(past.from.navPerShare.listed)}</dd>
+                    <dd className="tnum text-ink">{usd(past.to.navPerShare.listed)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-ink-3">spy.adjClose</dt>
+                    <dd className="tnum mt-1 text-ink">{usd(past.from.spy.adjClose)}</dd>
+                    <dd className="tnum text-ink">{usd(past.to.spy.adjClose)}</dd>
+                  </div>
+                </dl>
+                <p className="mt-4 text-sm text-ink-2">
+                  {sampleBasket.symbol} {pct(pastRatio.basket)} against SPY {pct(pastRatio.spy)}:{" "}
+                  <span className={pastRatio.basket > pastRatio.spy ? "text-gain" : "text-loss"}>
+                    {pastRatio.basket > pastRatio.spy ? "YES" : "NO"}
+                  </span>
+                  .
+                </p>
+                <p className="mt-3 break-all text-xs leading-relaxed text-ink-3">
+                  From{" "}
+                  <a href={`/api/nav/${sampleBasket.address}?at=${pastFrom}`} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    ?at={pastFrom}
+                  </a>{" "}
+                  and{" "}
+                  <a href={`/api/nav/${sampleBasket.address}?at=${pastTo}`} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    ?at={pastTo}
+                  </a>
+                  .
+                </p>
+              </>
+            ) : (
+              <div className="mt-4 h-24 rounded skeleton" />
+            )}
+          </div>
         </div>
       </section>
 
@@ -412,6 +494,12 @@ export function PredictIndex() {
             fixtures: same endpoints, same request bodies, canned answers, nothing on mainnet. Those answers
             are labeled wherever they appear, so a fixed sandbox quote is never passed off as this
             basket&apos;s price.
+          </p>
+          <p className="mt-4 max-w-[50ch] text-sm leading-relaxed text-ink-3">
+            One thing in the sandbox flow is not Panta&apos;s: its builds return no real transaction, so the
+            wallet signs a stand-in Sheaf compiles (a memo on a fresh devnet blockhash). That signed stand-in
+            is never broadcast to any cluster, and the signature reported back to Panta&apos;s sandbox
+            proves the flow, not a trade.
           </p>
         </div>
         <div className="min-w-0">

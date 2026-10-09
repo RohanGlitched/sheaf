@@ -4,13 +4,13 @@ Sheaf reads Solana mainnet through [Solami](https://solami.dev). Solami supplies
 
 ### What Sheaf uses, exactly
 
-Sheaf uses one Solami product: the **RPC** (`https://rpc.solami.dev/solana?api-key=…`), on the free tier. It does not use WebSocket, gRPC, Webhooks or the Data API.
+Sheaf uses one Solami product: the **RPC** (`https://rpc.solami.dev/solana?api-key=…`), on the free tier. It does not use WebSocket, gRPC, Webhooks or the Data API; the next section says why, and what it would take.
 
 | Route | Solami RPC methods | Cadence | What it is for |
 |---|---|---|---|
 | `GET /api/tape` | `getSlot`, `getSignaturesForAddress` (2 mints per poll, rotating through 10), `getTransaction` (up to 3 that just landed plus up to 2 from the backfill queue per poll, `maxSupportedTransactionVersion: 1`), `getBlockTime` (at most 1 per poll) | One poll at most every 3 s per server instance, plus 2 s of CDN cache | The home page tape: who bought or sold which stock token, at what fill price, through which venue |
 | `GET /api/tape` (first poll of an instance) | `getSignaturesForAddress` with `limit: 20` on all 10 mints, then the newest 4 decoded | Once per cold instance | The backfill, so a new instance is not empty |
-| `GET /api/tape` (comparison) | `getSlot` sent to Solami and the public RPC at the same instant, 1 warm-up pair plus 3 measured pairs; `getTransaction` on both for the newest signature, if it landed in the last ~30 s | Once a minute | The "How fresh is this?" figures under the tape |
+| `GET /api/tape` (comparison) | `getSlot` sent to Solami and the public RPC at the same instant, 1 warm-up pair plus 3 measured pairs; `getTransaction` on both for the newest signature, if it landed in the last ~30 s | Once a minute | The "What Solami does for this tape" figures under the tape |
 | `GET /api/market` | `getMultipleAccounts` over all 28 mints, in one call | Each 10 s of CDN cache | Each mint's Token-2022 `ScaledUiAmount` multiplier and supply. These value every basket. |
 | `GET /api/nav/<basket>` | The same `getMultipleAccounts` read (cached 15 s) | On request, 30 s CDN cache | The JSON NAV that a basket's Panta market resolves from |
 
@@ -19,7 +19,23 @@ Code:
 - `web/lib/tape-server.ts` and `web/app/api/tape/route.ts`: the tape.
 - `web/lib/mainnet.ts`: the mint multipliers.
 - `web/components/live-tape.tsx`: the page.
-- `scripts/tape-seed.mjs` and `web/public/tape.seed.json`: the earlier-trades seed.
+- `web/lib/tape-store.ts` and `web/app/api/tape/seed/route.ts`: the rolling earlier-trades seed in GCS.
+- `scripts/tape-seed.mjs` and `web/public/tape.seed.json`: the committed fallback seed.
+
+### Solami beyond plain RPC, and why the tape does not use it yet
+
+Researched Oct 9, 2026, from `solami.dev/llms.txt`, the live pricing API (`GET https://api.solami.dev/pricing`, no auth) and the API reference at `solami.dev/docs`:
+
+| Product | What it would do for the tape | Free tier | Status in Sheaf |
+|---|---|---|---|
+| Yellowstone gRPC streams | Push every transaction on the 10 xStock mints the moment it lands, with no polling | `grpc_streams: 0`, `grpc_access: false` (Pro plan and up; a 2-day trial) | Not used. A serverless function also cannot hold a stream open. |
+| WebSocket | `logsSubscribe` on the mints | `ws_connections: 0` | Not used |
+| Webhooks (`POST /webhooks/create`) | Stream subscriptions delivered to a URL, "filters included, down to individual trades" | `max_webhooks: 1` in the pricing API, but 0 in the site's own plan table | Not used. Creating one needs a signed-in dashboard session (`AccountContext` bearer), not the API key. |
+| Data API ("Blur data"): `GET /data/token/trades?chain=solana&address=<mint>` | Decoded trades per mint, with `dex`, `side`, `trader`, `price_usd` and `volume_usd`. That would replace Sheaf's balance-diff decoder and cover all 10 mints in 10 calls. | Billed per GB from a prepaid balance (`payg.blur`); the key needs the `DataApi` permission | Tested with Sheaf's key: **403 "missing required permission: DataApi"**. |
+
+So on the free tier, with no money spent, the only Solami product available to Sheaf is the RPC. The tape therefore makes its case on sustained throughput: thousands of paced reads an hour on one key, with no read dropped after one retry. The public endpoint documents 40 calls per method per 10 s per IP, shared with every app on that IP.
+
+If the owner enables it, the Data API is the one-change upgrade. In the Solami dashboard, grant the key's role the `DataApi` permission (and fund the minimum prepaid balance if Solami requires it for "Blur data"). The backfill can then read `/data/token/trades` per mint instead of `getSignaturesForAddress` plus `getTransaction`. A webhook on the 10 mints into a small receiver route would make the tape push-based. That needs a dashboard session to create it, and storage (the GCS bucket already used for the seed) to hand events to whichever instance answers the page.
 
 ### What the tape decodes
 
@@ -31,6 +47,7 @@ From each transaction's pre and post token balances, Sheaf works out three thing
 The page then:
 - multiplies the raw amount by the mint's dividend multiplier, so the price is per UI token
 - sets the fill against Jupiter's price **from the moment the trade was read** (`refPrice`, fetched at `refAt`), never today's price. The percentage is shown only when that price is within two minutes of the trade's block time; otherwise the row says "no price then". Seed rows carry the price from their capture.
+- shows the dollar value from the decoded quote leg. When the quote leg was not decoded (`usd: null`), the value is estimated from Jupiter's price and marked `≈`. With no price at all, the row shows the token amount in place of a dollar figure, never a bare "—".
 - tags the venue from the program ids in the transaction (Jupiter, Meteora, Raydium, Orca and others), on its own line under the trade
 
 Rows are filtered out in these cases:
@@ -42,11 +59,12 @@ The tape is a sample: the newest trades on two of ten mints per poll, not every 
 
 ### Cold starts: backfill and seed
 
-A new serverless instance starts with nothing in memory. Three things keep the tape from sitting empty or hanging:
+A new serverless instance starts with nothing in memory. Four things keep the tape from sitting empty or hanging:
 
 - **Backfill.** An instance's first poll reads the last 20 signatures on every watched mint (ten paced calls) and decodes the newest four. The rest wait in a queue (at most 80), and while the tape has fewer than 30 rows each later poll decodes one or two of them alongside the new trades. `backlog` in the response says how many are still queued. Backfilled rows are real chain reads with real block times, but they carry `live: false`.
 - **No hanging first request.** The backfill is about fifteen paced calls, roughly eight seconds. The first caller waits at most four. After that it gets an empty tape marked `warming: true` (not cached by the CDN), and the backfill finishes in `after()` for the next request.
-- **Seed.** `web/public/tape.seed.json` holds 40 real trades captured earlier by `scripts/tape-seed.mjs`. The script polls a running Sheaf server's `/api/tape?depth=60` (the same decoder and filters) and stores each row's Jupiter price and dividend multiplier from its own moment. The page shows these rows at once, under an "Earlier trades, not live" divider with the capture time, until eight rows have come from the server. Seed rows show their real block times, are never highlighted, and never feed the figures.
+- **Rolling seed in storage.** A warm instance whose tape has at least 20 live rows writes its newest 40 rows to the project's private GCS bucket (`tape/seed.json`, keyless through Vercel OIDC and workload identity federation, `web/lib/tape-store.ts`), at most every 10 minutes, from `after()`. The page asks `GET /api/tape/seed` first, so on a cold load the earlier trades are as recent as the last busy stretch, not the last deploy. With GCS unset or nothing written yet, that route answers 204 and the page falls back to the committed file below.
+- **Committed seed (last fallback).** `web/public/tape.seed.json` holds 40 real trades captured earlier by `scripts/tape-seed.mjs`. The script polls a running Sheaf server's `/api/tape?depth=60` (the same decoder and filters) and stores each row's Jupiter price and dividend multiplier from its own moment. The page shows these rows at once, under an "Earlier trades, not live" divider with the capture time, until eight rows have come from the server. Seed rows show their real block times, are never highlighted, and never feed the figures.
 
   ```bash
   node scripts/tape-seed.mjs                                 # against http://localhost:3900
@@ -81,7 +99,7 @@ Without a key, everything still works through the public mainnet RPC, and the pa
 
 A burst past the limit answers `429` with `Retry-After: 1`. The free tier is 5 requests a second **per key**, and every warm server instance shares that one key.
 
-- **Paced calls: 500 ms apart.** Every Solami call goes through one queue per server instance in `lib/solami.ts`, 500 ms apart. That is two a second, so two warm instances together stay under five. It was 240 ms (about 4.2 a second) until production showed why that was too much. Vercel kept three or more instances warm at once, and together they drew 429s on 7 of 67 calls on one instance. A tape poll sends its calls one after another, never in parallel. The `/api/market` read uses the same queue through a paced `fetch` handed to `@solana/web3.js`.
+- **Paced calls: 667 ms apart.** Every Solami call goes through one queue per server instance in `lib/solami.ts`, 667 ms apart: 1.5 a second, so three warm instances together (4.5 a second) stay under five. It was 240 ms (about 4.2 a second) until production showed Vercel keeping three or more instances warm at once; together they drew 429s on 7 of 67 calls on one instance. At 500 ms it was about 1 in 100, and three instances at 2 a second is 6, over the key's 5. Pacing is per instance, not global: a token bucket shared through storage would cost more round trips than the calls it guards, so the rate is set for the instance count observed. A fourth warm instance could still push the key past 5 for a moment, and the one patient retry absorbs that. A tape poll sends its calls one after another, never in parallel. The `/api/market` read uses the same queue through a paced `fetch` handed to `@solana/web3.js`.
 - **A smaller comparison.** The once-a-minute comparison is 3 measured pairs plus a warm-up, down from 5. Its calls are counted inside the comparison, not in the tape's totals.
 - **Shared caching.**
   - A poll answers every visitor for 3 s.
@@ -141,15 +159,15 @@ A real answer from a local dev server on Oct 9, 2026:
 
 ### What the comparison shows, and what production said
 
-The comparison sits in a disclosure under the trades ("How fresh is this?"). It leads with what the tape depends on:
+The comparison sits in a disclosure under the trades ("What Solami does for this tape, against the public RPC"). It leads with sustained throughput, then what the tape depends on:
+- **Mainnet reads Solami served**, summed across the instances that answered, over the time they cover, with the public endpoint's documented limit beside it (40 calls per method per 10 s per IP, shared with every app on that IP).
 - **Chain tip, same instant.** `slotLead`: the median of Solami's slot minus the public RPC's, within pairs sent together.
 - **Just-landed transactions served.** `freshTx`: when the newest signature a poll read landed in the last ~30 s, both upstreams are asked for it at once, and this counts how often each returned it rather than null. The signature comes from Solami's own `getSignaturesForAddress`, which favours Solami. Read it as "can the public RPC already serve what just landed", not as a neutral race.
 - **Block to this screen.** The median, over the last 15 live trades, of the time from the trade's block to the row reaching the browser. It includes the mint rotation (each mint is read every fifth poll), so it is the end-to-end figure, not the RPC's latency.
-- **Tape reads answered by Solami**, summed across the instances that answered.
 
 Raw round trip is measured the same careful way: same call, same instant, warm sockets, median. It is kept in the JSON and stated in a sentence under the cells, but it is not a headline cell, because **Solami does not win it from where Sheaf runs**. On Vercel (US East), the public RPC answered `getSlot` in a 13 to 15 ms median against Solami's 81 ms. From the dev machine it was 64 to 88 ms against 151 to 174 ms. That is geography: the public endpoint sits next to the server. Solami was one slot ahead in every run we saw. Just-landed transactions were a tie (2 of 2 each in production).
 
-The earlier claim in this doc, that Solami "rate-limited none of 100+ calls", held on one dev instance at 240 ms pacing. It did not hold in production, where several warm instances share the key: 7 of 67 calls on one instance answered 429 (the retry recovered them). That is what the 500 ms spacing addresses. What the public RPC cannot offer is the budget. Solana documents it as not meant for production apps, at 100 requests per 10 s per IP and 40 for any single method, shared with everyone on the same IP.
+The earlier claim in this doc, that Solami "rate-limited none of 100+ calls", held on one dev instance at 240 ms pacing. It did not hold in production, where several warm instances share the key: 7 of 67 calls on one instance answered 429 (the retry recovered them). That is what the slower spacing (now 667 ms) addresses. What the public RPC cannot offer is the budget. Solana documents it as not meant for production apps, at 100 requests per 10 s per IP and 40 for any single method, shared with everyone on the same IP.
 
 ```bash
 curl -s https://sheaf-index.vercel.app/api/market | jq .chain

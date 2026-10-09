@@ -1,11 +1,14 @@
-import { addToWaitlist, waitlistConfigured, waitlistCount } from "@/lib/waitlist-store";
-import { cleanContact, isBand, isRoute } from "@/lib/waitlist-options";
+import { AlreadyListed, addToWaitlist, waitlistConfigured, waitlistCounts } from "@/lib/waitlist-store";
+import { cleanContact, isBand, isHome, isRoute } from "@/lib/waitlist-options";
+import { originAllowed } from "@/lib/server-origin";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/waitlist: how many people are on the India waitlist (the count only).
- * POST /api/waitlist: { band, route, contact? } adds one answer.
+ * GET /api/waitlist: counts only: { open, count, withContact, byHome }. Never an entry.
+ * POST /api/waitlist: { band, route, home, contact? } adds one answer. Only from this
+ * site's own pages (exact origins, lib/server-origin.ts; a missing Origin is refused),
+ * and one answer per contact.
  *
  * Until the bucket and the federation are configured, GET answers { open: false }
  * and POST answers 503 "Waitlist is not open yet."; the page hides the count.
@@ -47,20 +50,17 @@ export async function GET(request: Request) {
   // A closed waitlist is an ordinary answer for the page, not an error, so the count simply stays hidden.
   if (!waitlistConfigured()) return Response.json({ open: false, message: CLOSED }, { headers: NO_STORE });
   try {
-    const count = await waitlistCount(oidcOf(request));
-    return Response.json({ open: true, count }, { headers: NO_STORE });
+    const counts = await waitlistCounts(oidcOf(request));
+    return Response.json({ open: true, ...counts }, { headers: NO_STORE });
   } catch {
     return Response.json({ open: false, message: CLOSED }, { headers: NO_STORE });
   }
 }
 
 export async function POST(request: Request) {
+  // Answers come from this site's own form: a browser always sends Origin on a POST, so none means a script.
+  if (!originAllowed(request)) return Response.json({ error: "Send this from the Sheaf site." }, { status: 403, headers: NO_STORE });
   if (!waitlistConfigured()) return Response.json({ error: CLOSED }, { status: 503, headers: NO_STORE });
-
-  // Answers come from this site's own form, not from other pages.
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (origin && host && new URL(origin).host !== host) return Response.json({ error: "Send this from the Sheaf site." }, { status: 403, headers: NO_STORE });
 
   let body: Record<string, unknown>;
   try {
@@ -76,6 +76,7 @@ export async function POST(request: Request) {
 
   if (!isBand(body.band)) return Response.json({ error: "Choose how much you would invest a month." }, { status: 400, headers: NO_STORE });
   if (!isRoute(body.route)) return Response.json({ error: "Choose how you invest in US stocks today." }, { status: 400, headers: NO_STORE });
+  if (!isHome(body.home)) return Response.json({ error: "Choose where you live." }, { status: 400, headers: NO_STORE });
   const contact = cleanContact(body.contact);
   if (contact == null) return Response.json({ error: "That isn't an email address or a Telegram handle. Leave it empty if you'd rather not say." }, { status: 400, headers: NO_STORE });
 
@@ -83,10 +84,11 @@ export async function POST(request: Request) {
 
   try {
     const oidc = oidcOf(request);
-    await addToWaitlist({ band: body.band, route: body.route, contact, day: new Date().toISOString().slice(0, 10) }, oidc);
-    const count = await waitlistCount(oidc).catch(() => null);
-    return Response.json({ ok: true, count }, { headers: NO_STORE });
-  } catch {
+    await addToWaitlist({ band: body.band, route: body.route, home: body.home, contact, day: new Date().toISOString().slice(0, 10) }, oidc);
+    const counts = await waitlistCounts(oidc).catch(() => null);
+    return Response.json({ ok: true, counts }, { headers: NO_STORE });
+  } catch (err) {
+    if (err instanceof AlreadyListed) return Response.json({ error: "That contact is already on the list. One answer each is enough." }, { status: 409, headers: NO_STORE });
     return Response.json({ error: "We couldn't save that just now. Try again in a minute." }, { status: 502, headers: NO_STORE });
   }
 }

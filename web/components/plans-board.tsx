@@ -17,6 +17,7 @@ import { useMarket } from "./market-provider";
 import { PlanSheaf } from "./plan-sheaf";
 import { planTerms } from "./plan-form";
 import { ConnectButton } from "./connect-button";
+import { KeeperPulse } from "./keeper-pulse";
 import { teamTag, teamWallet } from "@/lib/team-wallets";
 
 /**
@@ -65,11 +66,47 @@ function until(ts: number, now: number) {
 
 type Note = { plan: string; text: string; tone: "done" | "error" };
 
+/** A plan's fills as the ledger records them: one per filled order, and the latest fill's time. */
+type PlanFills = { orders: Set<string>; last: number };
+
+/**
+ * Fills per plan, from the program's own OrderFilled events (via the cached
+ * /api/ledger). The plan account's counter is not enough on its own: Re-center
+ * restarts the terms epoch, and the program then skips counting a fill of an
+ * order placed before it. The ledger sees every fill in its window.
+ */
+async function readPlanFills(): Promise<Map<string, PlanFills>> {
+  const res = await fetch("/api/ledger", { cache: "no-store" });
+  if (!res.ok) throw new Error(`ledger ${res.status}`);
+  const json = (await res.json()) as { entries?: { kind: string; plan?: string; order?: string; signature: string; time: number }[] };
+  const out = new Map<string, PlanFills>();
+  for (const e of json.entries ?? []) {
+    if (e.kind !== "filled" || !e.plan) continue;
+    const f = out.get(e.plan) ?? { orders: new Set<string>(), last: 0 };
+    f.orders.add(e.order ?? e.signature);
+    f.last = Math.max(f.last, e.time);
+    out.set(e.plan, f);
+  }
+  return out;
+}
+
+/**
+ * The plan with its true fill count: the larger of the account's counter and
+ * the ledger's, never more than the runs it has made. The ledger window is the
+ * program's last few hundred transactions, so older fills stay on the counter.
+ */
+function withLedgerFills(p: Plan, f: PlanFills | undefined): Plan {
+  if (!f) return p;
+  const ran = p.runsTotal - p.runsLeft;
+  return { ...p, fills: Math.min(ran, Math.max(p.fills, f.orders.size)), lastFillTs: Math.max(p.lastFillTs, f.last) };
+}
+
 function PlanCard({
   plan,
   basketName,
   basketSymbol,
   fairPrice,
+  feeBps,
   pending,
   expired,
   now,
@@ -86,6 +123,8 @@ function PlanCard({
   basketSymbol: string;
   /** Today's fair price of one share in dollars, when the market has been read. */
   fairPrice: number | null;
+  /** The basket's creator plus protocol fee: a plan's rates count the shares received, after both. */
+  feeBps: number;
   pending: Order | undefined;
   expired: Order | undefined;
   now: number;
@@ -101,8 +140,16 @@ function PlanCard({
   const due = !plan.legacy && plan.runsLeft > 0 && now >= plan.nextRunTs && !pending;
   // The reference is shares per dollar, times 1e9; as a price, one share costs 1e9 / ref dollars.
   const refPrice = plan.refSharesPerCashE9 > 0n ? 1e9 / Number(plan.refSharesPerCashE9) : null;
-  const drift = fairPrice != null && refPrice != null ? refPrice / fairPrice - 1 : null;
-  const offCenter = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && Math.abs(drift) > RECENTER_DRIFT;
+  // Today's price per share received, fees included: what the plan's reference and floor are measured against.
+  const paid = fairPrice != null ? fairPrice / (1 - feeBps / 10_000) : null;
+  const drift = paid != null && refPrice != null ? refPrice / paid - 1 : null;
+  // The floor is shares per dollar too: the most the plan will ever pay for a share is 1e9 / minRef.
+  const payAtMost = plan.minRef && plan.minRef > 0n ? 1e9 / Number(plan.minRef) : null;
+  // Today's price is above the most the plan will pay: each run's order still goes out, but its auction never
+  // reaches a count a filler can deliver, so it comes back unfilled. (A fall in price still fills; Re-center then
+  // only resets where the next auction starts.)
+  const stalled = !plan.legacy && plan.runsLeft > 0 && paid != null && payAtMost != null && paid > payAtMost;
+  const offCenter = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && (stalled || Math.abs(drift) > RECENTER_DRIFT);
   const pill = ownerPill(plan.owner);
   // An expired order the house paid rent for goes back on the keeper's next pass; anyone else's after the grace.
   const returnsIn = expired && !isHouse(expired.rentPayer) ? expired.endTs + REFUND_GRACE_SECS - now : 0;
@@ -125,13 +172,21 @@ function PlanCard({
                 {pill}
               </span>
             )}
+            {pill && plan.periodSecs < 86400 && (
+              <span
+                className="rounded-full border border-line px-2 py-0.5 text-[11px] leading-none text-ink-3"
+                title="Runs every few minutes so a visitor can watch it fill. A real plan runs weekly or monthly."
+              >
+                demo pace
+              </span>
+            )}
           </span>
           <span className="tnum text-sm text-ink-2">
             {money(fromCashRaw(plan.cashPerRun))} {every(plan.periodSecs)}
           </span>
         </div>
         <p className="tnum mt-1 text-sm text-ink-3">
-          {plan.fills} of {plan.runsTotal} filled from {plural(ran, "run")}
+          {count(plan.fills)} of {count(plan.runsTotal)} filled from {plural(ran, "run")}
           {plan.runsLeft === 0
             ? pending
               ? " · last run filling"
@@ -158,10 +213,17 @@ function PlanCard({
               : "otherwise the keeper returns them on its next pass."}
           </p>
         )}
-        {offCenter && refPrice != null && fairPrice != null && (
+        {stalled && fairPrice != null && (
+          <p className="mt-2 border-l-2 border-loss pl-3 text-sm text-ink-2">
+            <span className="text-ink">Paused: the price left this plan&apos;s bounds.</span> Today&apos;s price, {money(paid)} a share with fees, is{" "}
+            above the most it will pay ({money(payAtMost)}), so no filler can take its runs and each order comes back unfilled.{" "}
+            {mine ? "Re-center it to resume from today's price." : "Only its owner can re-center it."}
+          </p>
+        )}
+        {offCenter && !stalled && refPrice != null && fairPrice != null && (
           <p className="mt-2 text-sm text-ink-2">
             Its reference price, {money(refPrice)} a share, is {Math.abs(drift! * 100).toFixed(1)}% {drift! > 0 ? "above" : "below"} today&apos;s
-            fair price of {money(fairPrice)}. Re-center it so the next run starts from today&apos;s price.
+            price of {money(paid)} with fees. Re-center it so the next run starts from today&apos;s price.
           </p>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
@@ -199,8 +261,22 @@ function PlanCard({
   );
 }
 
-/** Plans from before the hardening release: they no longer run, so they sit folded away in one quiet row. */
-function LegacyPlans({
+/** A plan that ended without a single fill: every run's order came back unfilled, so its dollars went home. */
+const endedUnfilled = (p: Plan, open: boolean) => !p.legacy && p.runsLeft === 0 && p.fills === 0 && !open;
+
+/** Why a folded plan sits in the fold, in a few words. */
+function foldReason(p: Plan): string {
+  if (p.legacy) return "from before the hardening release, so it no longer runs";
+  const ran = p.runsTotal - p.runsLeft;
+  const each = fromCashRaw(p.cashPerRun);
+  return `ended with no fills${each < 5 ? ", below the $5 the house filler starts at" : ""}; ${money(each * ran)} went back to its owner`;
+}
+
+/**
+ * Plans that are over and have nothing to show: from before the hardening
+ * release, or ended without a fill. They sit folded away in one quiet row.
+ */
+function FoldedPlans({
   plans,
   mine,
   nameOf,
@@ -216,23 +292,28 @@ function LegacyPlans({
   notes: Note | null;
 }) {
   if (plans.length === 0) return null;
+  const allLegacy = plans.every((p) => p.legacy);
   return (
     <details className="group mt-4 rounded-[var(--radius-panel)] border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm text-ink-3 hover:text-ink-2 [&::-webkit-details-marker]:hidden">
-        <span>{plural(plans.length, "plan")} from an earlier version</span>
+        <span>{allLegacy ? `${plural(plans.length, "plan")} from an earlier version` : `${plural(plans.length, "earlier plan")} with nothing to show`}</span>
         <span aria-hidden className="text-xs transition-transform group-open:rotate-180">▾</span>
       </summary>
       <div className="border-t border-line px-4 pb-4 pt-3">
         <p className="text-xs leading-relaxed text-ink-3">
-          Opened before the program&apos;s hardening release, so {plans.length === 1 ? "it no longer runs" : "they no longer run"}.{" "}
-          {mine ? "Close one to cancel its allowance on your dollars." : "Only their owners can close them."}
+          {plans.length === 1 ? "It no longer runs" : "None of these runs any more"}.{" "}
+          {mine ? "Close one to cancel what is left of its allowance on your dollars." : "Only their owners can close them."}
         </p>
         <ul className="mt-3 divide-y divide-line">
           {plans.map((p) => (
             <li key={p.address} className="py-2.5 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <span className="tnum text-ink-2">
-                  {nameOf(p)} · {money(fromCashRaw(p.cashPerRun))} {every(p.periodSecs)} · {p.fills} of {p.runsTotal} filled
+                <span className="min-w-0 text-ink-2">
+                  <span className="tnum">
+                    {nameOf(p)} · {money(fromCashRaw(p.cashPerRun))} {every(p.periodSecs)} · {count(p.fills)} of {count(p.runsTotal)} filled
+                  </span>
+                  {ownerPill(p.owner) && <span className="ml-2 rounded-full bg-sunk px-2 py-0.5 text-[11px] leading-none text-ink-3">{ownerPill(p.owner)}</span>}
+                  <span className="block text-xs text-ink-3">{foldReason(p)}</span>
                 </span>
                 <span className="flex items-center gap-3">
                   {mine && (
@@ -272,7 +353,13 @@ export function PlansBoard() {
   // The cron runs rarely; while someone watches this page, it asks the keeper itself.
   useKeeperKick("/api/keeper");
 
+  const [filledBy, setFilledBy] = useState<Map<string, PlanFills>>(new Map());
+
   const load = useCallback(async () => {
+    // The ledger can take a while on a cold server, so it corrects the counts when it lands and never holds up the board.
+    void readPlanFills()
+      .then(setFilledBy)
+      .catch(() => {});
     const [p, o] = await Promise.all([fetchPlans(connection).catch(() => null), fetchOrders(connection).catch(() => null)]);
     // A failed read keeps what is already on screen rather than emptying the board.
     if (p) setPlans(p.sort((a, b) => b.createdAt - a.createdAt));
@@ -300,14 +387,15 @@ export function PlansBoard() {
   const pendingFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs >= now);
   const expiredFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs < now);
   const me = publicKey?.toBase58();
-  const visible = (plans ?? []).filter((p) => !HIDDEN_TEST_PLANS.has(p.address) || p.owner === me);
+  const visible = (plans ?? []).filter((p) => !HIDDEN_TEST_PLANS.has(p.address) || p.owner === me).map((p) => withLedgerFills(p, filledBy.get(p.address)));
   // The house's running demo first, so a sheaf visibly grows at the top; then running plans; finished ones last.
   const rank = (p: Plan) => (p.runsLeft > 0 ? (isHouse(p.owner) ? 0 : 1) : 2);
+  const folded = (p: Plan) => p.legacy || endedUnfilled(p, !!pendingFor(p) || !!expiredFor(p));
   const live = visible.filter((p) => !p.legacy).sort((a, b) => rank(a) - rank(b) || b.createdAt - a.createdAt);
-  const mine = live.filter((p) => p.owner === me);
-  const others = live.filter((p) => p.owner !== me);
-  const mineLegacy = visible.filter((p) => p.legacy && p.owner === me);
-  const othersLegacy = visible.filter((p) => p.legacy && p.owner !== me);
+  const mine = live.filter((p) => p.owner === me && !folded(p));
+  const others = live.filter((p) => p.owner !== me && !folded(p));
+  const mineLegacy = visible.filter((p) => p.owner === me && folded(p));
+  const othersLegacy = visible.filter((p) => p.owner !== me && folded(p));
   const due = live.filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
   // Every figure is split into the team's own plans and everyone else's, so nothing of ours reads as traction.
   const tally = (list: Plan[]) => ({
@@ -358,7 +446,8 @@ export function PlansBoard() {
     await act(p, () => new Transaction().add(cancelOrderIx({ caller: publicKey!, order: o })), "Returned. The dollars went back to the plan owner.", { action: "cancel" });
   }
   const recenter = (p: Plan, fair: number) => {
-    const terms = planTerms(fair);
+    const b = byBasket.get(p.basket);
+    const terms = planTerms(fair, b?.creatorFeeBps ?? 0, b?.protocolFeeBps ?? 0);
     return act(
       p,
       () =>
@@ -387,6 +476,7 @@ export function PlansBoard() {
         basketName={b?.name ?? shortAddress(p.basket)}
         basketSymbol={b?.symbol ?? ""}
         fairPrice={fairOf(p.basket)}
+        feeBps={(b?.creatorFeeBps ?? 0) + (b?.protocolFeeBps ?? 0)}
         pending={pendingFor(p)}
         expired={expiredFor(p)}
         now={now}
@@ -416,6 +506,7 @@ export function PlansBoard() {
 
   return (
     <div>
+      <KeeperPulse which="solana" className="mb-4" />
       <dl className="mb-14 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="bg-surface px-4 py-4 sm:px-5">
@@ -446,12 +537,12 @@ export function PlansBoard() {
                   Choose a basket
                 </Link>
               </div>
-              <LegacyPlans plans={mineLegacy} mine nameOf={nameOf} onClose={close} busy={busy} notes={note} />
+              <FoldedPlans plans={mineLegacy} mine nameOf={nameOf} onClose={close} busy={busy} notes={note} />
             </>
           ) : (
             <>
               <ul className="mt-6 space-y-4">{mine.map((p) => card(p, true))}</ul>
-              <LegacyPlans plans={mineLegacy} mine nameOf={nameOf} onClose={close} busy={busy} notes={note} />
+              <FoldedPlans plans={mineLegacy} mine nameOf={nameOf} onClose={close} busy={busy} notes={note} />
             </>
           )}
         </section>
@@ -479,7 +570,7 @@ export function PlansBoard() {
               , then the Monthly plan tab.
             </p>
           )}
-          {plans != null && <LegacyPlans plans={othersLegacy} mine={false} nameOf={nameOf} onClose={close} busy={busy} notes={note} />}
+          {plans != null && <FoldedPlans plans={othersLegacy} mine={false} nameOf={nameOf} onClose={close} busy={busy} notes={note} />}
         </section>
       </div>
     </div>

@@ -229,7 +229,7 @@ export function EvmBasket({
             <div className="text-left sm:text-right">
               <p className="text-xs text-ink-3">{mirror ? "One share, at the real stocks' price" : "One share"}</p>
               <p className="tnum display mt-1 text-title leading-none text-ink">{money(nav)}</p>
-              <p className="mt-1.5 text-xs text-ink-3">{pricedLive ? "Robinhood Stock Token quotes" : "Prices at deploy; live quotes unreachable"}</p>
+              <p className="mt-1.5 text-xs text-ink-3">{pricedLive ? "Priced from Robinhood's stock-token quotes" : "Priced at deploy; live quotes unreachable right now"}</p>
               <p className="tnum mt-1 text-xs text-ink-3">
                 HyperCore 24/7: {hyper.nav != null ? money(hyper.nav) : hyper.perps ? "a component has no perp" : "reading"}
               </p>
@@ -368,7 +368,7 @@ export function EvmBasket({
                 {supply === 0n
                   ? "No shares exist yet, so there is nothing to back."
                   : fullyBacked
-                    ? `Every one of the ${quantity(supplyNum, 4)} ${plural(supplyNum ?? 0, "share")} outstanding is fully backed.`
+                    ? `Every one of the ${quantity(supplyNum, 4)} ${plural(supplyNum ?? 0, "share")} outstanding is fully backed, by ${d.tokenSource === "real" ? "Robinhood's testnet stock tokens" : "labeled testnet mirror tokens"}.`
                     : "A vault is short. Do not create more shares."}
               </div>
               <div className="mt-5 min-w-0 overflow-x-auto border border-line">

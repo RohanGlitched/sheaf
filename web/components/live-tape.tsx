@@ -25,7 +25,7 @@ type Print = {
   refAt?: number | null;
 };
 /** A row from web/public/tape.seed.json: captured earlier, with the price of its own moment. */
-type SeedPrint = Print & { multiplier: number };
+type SeedPrint = Print & { multiplier?: number };
 type Seed = { capturedAt: number; source: string; note: string; prints: SeedPrint[] };
 
 type RaceSide = { medianMs: number | null; slot: number | null; answered: number; rateLimited: number };
@@ -98,6 +98,8 @@ function merge(proofs: Map<string, Proof>) {
   const sum = (f: (p: Proof) => number) => all.reduce((n, p) => n + f(p), 0);
   return {
     instances: all.length,
+    /** When the oldest instance that answered started (ms): the span the summed counters cover. */
+    since: Math.min(...all.map((p) => p.since)),
     race,
     fresh: {
       tried: sum((p) => p.compare.freshTx.tried),
@@ -144,10 +146,22 @@ export function LiveTape() {
 
   useEffect(() => {
     let live = true;
-    fetch("/tape.seed.json")
-      .then((r) => (r.ok ? (r.json() as Promise<Seed>) : null))
-      .then((s) => live && s?.prints?.length && setSeed(s))
-      .catch(() => {});
+    // The rolling seed a warm server keeps in storage first; the copy committed
+    // with the last deploy only if there is none.
+    const load = async (url: string) => {
+      try {
+        const r = await fetch(url);
+        if (r.status !== 200) return null;
+        const s = (await r.json()) as Seed;
+        return s?.prints?.length ? s : null;
+      } catch {
+        return null;
+      }
+    };
+    void (async () => {
+      const s = (await load("/api/tape/seed")) ?? (await load("/tape.seed.json"));
+      if (live && s) setSeed(s);
+    })();
 
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -213,7 +227,7 @@ export function LiveTape() {
 
   const price = (p: Print, seeded: boolean) => {
     const q = bySymbol(p.symbol);
-    const multiplier = seeded ? (p as SeedPrint).multiplier : (q?.multiplier ?? 1);
+    const multiplier = (seeded ? (p as SeedPrint).multiplier : null) ?? q?.multiplier ?? 1;
     // Jupiter's price from the moment the trade was read, never today's: a fill
     // is only set against it when that price is within two minutes of the trade.
     const ref = p.refPrice ?? null;
@@ -311,7 +325,18 @@ export function LiveTape() {
           <span className="text-ink-3">—</span>
         )}
       </span>
-      <span className="tnum text-right text-ink-2">{value != null ? money(value) : "—"}</span>
+      <span className="tnum text-right text-ink-2">
+        {p.usd != null ? (
+          money(value!)
+        ) : value != null ? (
+          // The quote leg was not decoded: an estimate from Jupiter's price, marked as one.
+          <span title="Estimated from Jupiter's price; the quote leg of this trade was not decoded">≈{money(value)}</span>
+        ) : (
+          <span className="text-xs text-ink-3" title="The quote leg of this trade was not decoded">
+            {ui < 0.01 ? ui.toFixed(4) : ui.toFixed(3)} {p.base}
+          </span>
+        )}
+      </span>
       <a
         href={`https://solscan.io/tx/${p.signature}`}
         target="_blank"
@@ -358,6 +383,16 @@ export function LiveTape() {
 
       <div className="order-first min-w-0 self-start lg:order-none">
         <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
+          {/* On phones the table comes before the section's heading, so it carries its own source line. */}
+          <p className="flex flex-wrap items-center gap-x-2 border-b border-line px-4 py-2.5 text-xs text-ink-3 sm:px-5 lg:hidden">
+            <span
+              className={`live-dot size-1.5 rounded-full ${reconnecting || tape?.stale ? "bg-loss" : "bg-gain"}`}
+              aria-hidden
+            />
+            <span>Solana mainnet</span>
+            <span>· read through {tape?.via === "public" ? "a public RPC" : "Solami"}</span>
+            <span className="tnum">· {tape ? `slot ${tape.slot.toLocaleString("en-US")}` : "connecting"}</span>
+          </p>
           <div className={`${grid} border-b border-line py-3 text-xs text-ink-3`}>
             <span>When</span>
             <span>Trade</span>
@@ -401,9 +436,18 @@ export function LiveTape() {
               <span aria-hidden className="text-ink-3 transition-transform group-open:rotate-90">
                 ›
               </span>
-              How fresh is this? Solami against the public RPC
+              What Solami does for this tape, against the public RPC
             </summary>
             <dl className="mt-3 grid grid-cols-1 gap-px border border-line bg-line sm:grid-cols-2">
+              {cell(
+                "Mainnet reads Solami served",
+                reads?.wanted
+                  ? `${reads.solami.toLocaleString("en-US")} of ${reads.wanted.toLocaleString("en-US")}`
+                  : "—",
+                stats && reads?.wanted
+                  ? `over ${Math.max(1, Math.round((now - stats.since) / 60_000))} min on ${stats.instances} server instance${stats.instances === 1 ? "" : "s"}, after one retry on a 429. The public endpoint allows 40 calls per method per 10 s per IP, shared with every app on that IP.`
+                  : undefined,
+              )}
               {cell(
                 "Chain tip, same instant",
                 lead == null
@@ -427,13 +471,6 @@ export function LiveTape() {
                   ? `median of ${screenLag.n} live trade${screenLag.n === 1 ? "" : "s"}, including the mint rotation`
                   : "from the trade's block time to this page",
               )}
-              {cell(
-                "Tape reads answered by Solami",
-                reads?.wanted ? `${reads.solami} of ${reads.wanted}` : "—",
-                stats
-                  ? `${stats.instances} server instance${stats.instances === 1 ? "" : "s"}, after one retry on a 429`
-                  : undefined,
-              )}
             </dl>
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
               {race?.solami.medianMs != null && race.public.medianMs != null
@@ -443,8 +480,9 @@ export function LiveTape() {
                 : "Raw round trip is measured too, once a minute, and appears here after the first run. "}
               What the tape needs is a key it can call every few seconds without being cut off, a fresh slot,
               and transactions served moments after they land; the public endpoint is documented as not meant
-              for production traffic. Calls go out one at a time, 500 ms apart, so two server instances
-              together stay under the free tier&apos;s five requests a second. Every figure is in{" "}
+              for production traffic. Calls go out one at a time, 667 ms apart (1.5 a second), so three
+              server instances together stay under the free tier&apos;s five requests a second. Every figure
+              is in{" "}
               <a href="/api/tape" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
                 /api/tape
               </a>{" "}

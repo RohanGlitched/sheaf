@@ -255,7 +255,7 @@ function saveKnown(known: Known) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One transaction's rows, from its logs. */
-function entriesOf(
+export function entriesOf(
   info: { signature: string; slot: number; blockTime?: number | null },
   logs: string[] | null | undefined,
   blockTime?: number | null,
@@ -395,6 +395,19 @@ export async function readLedgerBatched(
   };
 }
 
+/** How orders of one kind fared: placed, filled, returned, and how fast. */
+export type FillStats = {
+  /** Orders placed (a plan run places one). */
+  orders: number;
+  fills: number;
+  returned: number;
+  dollarsFilled: number;
+  /** Fills over every order that has finished, filled or returned. */
+  fillRate: number | null;
+  /** Median seconds from the order to its fill, over fills whose order is in view. */
+  medianSecsToFill: number | null;
+};
+
 export type LedgerStats = {
   /** Every event, and the distinct wallets behind them. */
   actions: number;
@@ -403,49 +416,95 @@ export type LedgerStats = {
   outsideWallets: number;
   outsideActions: number;
   baskets: number;
+  /** Baskets created by a wallet that is not ours. */
+  outsideBaskets: number;
   plans: number;
-  /** Dollar orders and plan runs. */
+  outsidePlans: number;
+  /** Dollar orders and plan runs together. */
   orders: number;
   fills: number;
   /** Fills delivered by a wallet other than ours. */
   outsideFills: number;
   dollarsFilled: number;
   returned: number;
-  /** Median seconds from an order (or plan run) to its fill, over fills whose order is in view. */
   medianSecsToFill: number | null;
-  /** Fills over every order that has finished, filled or returned. */
   fillRate: number | null;
+  /** The same, split by cause: one-off dollar orders and plan runs. */
+  byCause: { dollar: FillStats; plan: FillStats };
+  /** Only orders whose buyer is not ours, split the same way. */
+  outside: { dollar: FillStats; plan: FillStats };
+  /** Who delivered: the house filler, the second (reference-code) filler, and anyone else. */
+  fillsByFiller: { house: number; second: number; outside: number; otherOurs: number };
+  /** The oldest event in view, unix seconds. */
+  since: number | null;
 };
 
+const median = (xs: number[]) => {
+  if (xs.length === 0) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  const mid = v.length >> 1;
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+};
+
+function fillStats(entries: LedgerEntry[], placedAt: Map<string, number>): FillStats {
+  const fills = entries.filter((e) => e.kind === "filled");
+  const returned = entries.filter((e) => e.kind === "returned").length;
+  const waits = fills
+    .map((f) => (f.order && placedAt.has(f.order) ? f.time - placedAt.get(f.order)! : null))
+    .filter((w): w is number => w != null && w >= 0);
+  return {
+    orders: entries.filter((e) => e.kind === "ordered" || e.kind === "planRun").length,
+    fills: fills.length,
+    returned,
+    dollarsFilled: Math.round(fills.reduce((a, f) => a + (f.cash ?? 0), 0) * 100) / 100,
+    fillRate: fills.length + returned > 0 ? Math.round((fills.length / (fills.length + returned)) * 1000) / 1000 : null,
+    medianSecsToFill: median(waits),
+  };
+}
+
 /** The numbers behind a set of events. `isOurs` tells a team wallet from anyone else's. */
-export function ledgerStats(entries: LedgerEntry[], isOurs: (wallet: string) => boolean): LedgerStats {
+export function ledgerStats(
+  entries: LedgerEntry[],
+  isOurs: (wallet: string) => boolean,
+  fillers: { house?: string; second?: string } = {},
+): LedgerStats {
   const wallets = new Set(entries.map((e) => e.actor));
   let outsideWallets = 0;
   for (const w of wallets) if (!isOurs(w)) outsideWallets++;
   const placedAt = new Map<string, number>();
   for (const e of entries) if ((e.kind === "ordered" || e.kind === "planRun") && e.order) placedAt.set(e.order, e.time);
+  // An order's cause: a plan run carries its plan on every event, a one-off dollar order none.
+  const orderish = entries.filter((e) => e.kind === "ordered" || e.kind === "planRun" || e.kind === "filled" || e.kind === "returned");
+  const dollar = orderish.filter((e) => e.kind === "ordered" || (e.kind !== "planRun" && !e.plan));
+  const plan = orderish.filter((e) => e.kind === "planRun" || (e.kind !== "ordered" && !!e.plan));
+  const theirs = (xs: LedgerEntry[]) => xs.filter((e) => !isOurs(e.actor));
+  const all = fillStats(orderish, placedAt);
   const fills = entries.filter((e) => e.kind === "filled");
-  const returned = entries.filter((e) => e.kind === "returned").length;
-  const waits = fills
-    .map((f) => (f.order && placedAt.has(f.order) ? f.time - placedAt.get(f.order)! : null))
-    .filter((w): w is number => w != null && w >= 0)
-    .sort((a, b) => a - b);
-  const mid = waits.length >> 1;
-  const median = waits.length === 0 ? null : waits.length % 2 ? waits[mid] : (waits[mid - 1] + waits[mid]) / 2;
   return {
     actions: entries.length,
     wallets: wallets.size,
     outsideWallets,
     outsideActions: entries.filter((e) => !isOurs(e.actor)).length,
     baskets: entries.filter((e) => e.kind === "created").length,
+    outsideBaskets: entries.filter((e) => e.kind === "created" && !isOurs(e.actor)).length,
     plans: entries.filter((e) => e.kind === "planOpened").length,
-    orders: entries.filter((e) => e.kind === "ordered" || e.kind === "planRun").length,
-    fills: fills.length,
+    outsidePlans: entries.filter((e) => e.kind === "planOpened" && !isOurs(e.actor)).length,
+    orders: all.orders,
+    fills: all.fills,
     outsideFills: fills.filter((f) => f.filler != null && !isOurs(f.filler)).length,
-    dollarsFilled: Math.round(fills.reduce((a, f) => a + (f.cash ?? 0), 0) * 100) / 100,
-    returned,
-    medianSecsToFill: median,
-    fillRate: fills.length + returned > 0 ? Math.round((fills.length / (fills.length + returned)) * 1000) / 1000 : null,
+    dollarsFilled: all.dollarsFilled,
+    returned: all.returned,
+    medianSecsToFill: all.medianSecsToFill,
+    fillRate: all.fillRate,
+    byCause: { dollar: fillStats(dollar, placedAt), plan: fillStats(plan, placedAt) },
+    outside: { dollar: fillStats(theirs(dollar), placedAt), plan: fillStats(theirs(plan), placedAt) },
+    fillsByFiller: {
+      house: fills.filter((f) => f.filler != null && f.filler === fillers.house).length,
+      second: fills.filter((f) => f.filler != null && f.filler === fillers.second).length,
+      outside: fills.filter((f) => f.filler != null && !isOurs(f.filler) && f.filler !== fillers.second).length,
+      otherOurs: fills.filter((f) => f.filler != null && isOurs(f.filler) && f.filler !== fillers.house && f.filler !== fillers.second).length,
+    },
+    since: entries.reduce<number | null>((a, e) => (e.time > 0 && (a == null || e.time < a) ? e.time : a), null),
   };
 }
 

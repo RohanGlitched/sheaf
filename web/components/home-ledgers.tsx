@@ -3,8 +3,13 @@ import { MAX_CREATOR_FEE_BPS, SHEAF_PROGRAM_ID, explorerAddress } from "@/lib/co
 import { TREASURY } from "@/lib/dbc";
 import { shortAddress } from "@/lib/format";
 
-/** Money is made where backed shares are made. These two come first. */
+/** Money is made where backed shares are made. These three come first. */
 const SHARE_FEES = [
+  {
+    share: "0.10%",
+    title: "of every creation, to Sheaf",
+    body: "The protocol fee, written into each basket when it is created and never changed after. Live on devnet for baskets created from October 9; the four house baskets came first and carry 0%, for good. Paid in new shares, like the creator's.",
+  },
   {
     share: `up to ${MAX_CREATOR_FEE_BPS / 100}%`,
     title: "of every creation, to the basket's creator",
@@ -13,7 +18,7 @@ const SHARE_FEES = [
   {
     share: "the spread",
     title: "on every dollar order, to the filler who delivers",
-    body: "A dollar order is an auction on share count that falls toward the buyer's floor. The filler keeps the gap between what the auction pays and what the stocks cost. Sheaf runs the house filler; anyone can run another and compete for it.",
+    body: "A dollar order is an auction on share count that falls toward the buyer's floor, inside the band the buyer signs. The filler keeps the gap between what the auction pays and what the stocks cost. Sheaf's house filler waits for 0.15%; anyone can run another filler and take less.",
   },
 ];
 
@@ -35,10 +40,7 @@ export function Revenue() {
           protocol fee, fixed for each basket when it is created, the creator&rsquo;s fee on every
           creation, and the spread a filler earns delivering the stocks for a dollar order or a monthly
           plan. Sheaf&rsquo;s house filler waits for a 0.15% margin, so any filler willing to take less
-          fills first.{" "}
-          <Link href="/business" className="text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
-            How Sheaf makes money
-          </Link>
+          fills first.
         </p>
         <p className="mt-4 text-sm leading-relaxed text-ink-3">
           Launch markets add a second, smaller line. Their fees go to the treasury{" "}
@@ -49,10 +51,10 @@ export function Revenue() {
         </p>
       </div>
       <div>
-        <ol className="grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2">
+        <ol className="grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3">
           {SHARE_FEES.map((r) => (
-            <li key={r.title} className="bg-surface p-6 sm:p-7">
-              <p className="tnum display text-4xl text-bind sm:text-5xl">{r.share}</p>
+            <li key={r.title} className="bg-surface p-6">
+              <p className="tnum display text-3xl text-bind sm:text-4xl">{r.share}</p>
               <p className="mt-3 text-sm text-ink">{r.title}</p>
               <p className="mt-2 text-sm leading-relaxed text-ink-2">{r.body}</p>
             </li>
@@ -102,7 +104,7 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
     cannot: "Own anything afterwards; the launch token is immutable and the migrated liquidity is locked.",
   },
   {
-    what: "The house key (B8dL…U1L)",
+    what: "The house key (B8dL…9U1L)",
     who: "Sheaf's server",
     can: "Mint devnet mirror tokens for a visitor, fill dollar orders and plan runs like any other filler, and create shares in the baskets it seeded, which earns those baskets' creator fee. On devnet it is also the stand-in issuer of the mirrors, so the program accepts issuer powers from it; today's mirrors carry no delegate or pause, so that power is unused.",
     cannot: "Edit a recipe, fill outside an order's auction, or touch anything on mainnet. A mainnet build leaves it out: there, only Backed's and PreStocks' own keys are trusted issuers.",
@@ -110,8 +112,8 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
   {
     what: "The treasury key",
     who: "Sheaf",
-    can: "Claim the partner fees from launch markets.",
-    cannot: "Change a fee, a curve or a basket.",
+    can: "Receive the 0.10% protocol fee's shares when anyone claims them, and claim the partner fees from launch markets.",
+    cannot: "Change a fee, a curve or a basket: a basket's fees are fixed when it is created.",
   },
   {
     what: "The program's upgrade authority",
@@ -129,7 +131,7 @@ export function Keys() {
         <div className="max-w-[46ch]">
           <h2 className="display text-title text-ink">Who holds which key.</h2>
           <p className="mt-4 text-base leading-relaxed text-ink-2">
-            The whole trust model, in one table. The program never prices anything and nobody can edit a recipe, so there is very little a key could do
+            The whole trust model, in one table. The program reads no price and nobody can edit a recipe, so there is very little a key could do
             even if it wanted to.
           </p>
         </div>

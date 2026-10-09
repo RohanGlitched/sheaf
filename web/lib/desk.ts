@@ -81,6 +81,15 @@ export function planAddress(basket: PublicKey, owner: PublicKey, planId: bigint)
   return PublicKey.findProgramAddressSync([Buffer.from("plan"), basket.toBuffer(), owner.toBuffer(), le64(planId)], PROGRAM_ID)[0];
 }
 
+/** A holder's sell order: `["sell", basket, seller, nonce]`. */
+export function sellOrderAddress(basket: PublicKey, seller: PublicKey, nonce: bigint): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("sell"), basket.toBuffer(), seller.toBuffer(), le64(nonce)], PROGRAM_ID)[0];
+}
+
+/** A sell order's escrow is its own associated (Token-2022) account for the share mint. */
+export const sellEscrowAddress = (sellOrder: PublicKey, shareMint: PublicKey) =>
+  tokenAccount(shareMint, sellOrder, TOKEN_2022_PROGRAM_ID);
+
 /** Each order's escrow is the order's own associated token account for the cash mint. */
 export const escrowAddress = (order: PublicKey, cashMint: PublicKey, cashProgram: PublicKey) =>
   tokenAccount(cashMint, order, cashProgram);
@@ -132,6 +141,30 @@ export type Plan = {
   maxRef: bigint | null;
   /** A plan opened before the hardening release: it can only be closed, with close_legacy_plan. */
   legacy: boolean;
+  /**
+   * How far a fill may move the reference, in bps: after every fill the
+   * bounds become `ref × (1 ± step)`. 600 for plans opened since trailing
+   * bounds existed; 0 (the owner's bounds, fixed) for older plans.
+   */
+  trailStepBps: number;
+};
+
+export type SellOrder = {
+  address: string;
+  basket: string;
+  seller: string;
+  rentPayer: string;
+  cashMint: string;
+  cashTokenProgram: string;
+  nonce: bigint;
+  /** Shares escrowed. */
+  shares: bigint;
+  /** Cash the seller must receive at startTs, decaying linearly to endCash (the seller's floor) at endTs. */
+  startCash: bigint;
+  endCash: bigint;
+  startTs: number;
+  endTs: number;
+  createdAt: number;
 };
 
 class Reader {
@@ -224,13 +257,37 @@ export function decodePlan(address: PublicKey, data: Uint8Array): Plan | null {
     ...(data.length >= 296
       ? (() => {
           r.u8(); // bump
-          return { minRef: r.u64(), maxRef: r.u64(), legacy: false };
+          const minRef = r.u64();
+          const maxRef = r.u64();
+          // The trailing step sits in an 8-byte tail after the struct (byte 296).
+          const trailStepBps = data.length >= 298 ? r.u16() : 0;
+          return { minRef, maxRef, legacy: false, trailStepBps };
         })()
-      : { minRef: null, maxRef: null, legacy: true }),
+      : { minRef: null, maxRef: null, legacy: true, trailStepBps: 0 }),
   };
 }
 
-async function allOf<T>(connection: Connection, name: "Order" | "Plan", decode: (a: PublicKey, d: Uint8Array) => T | null, extra: { memcmp: { offset: number; bytes: string } }[] = []) {
+export function decodeSellOrder(address: PublicKey, data: Uint8Array): SellOrder | null {
+  if (!hasDisc(data, "SellOrder")) return null;
+  const r = new Reader(data);
+  return {
+    address: address.toBase58(),
+    basket: r.key(),
+    seller: r.key(),
+    rentPayer: r.key(),
+    cashMint: r.key(),
+    cashTokenProgram: r.key(),
+    nonce: r.u64(),
+    shares: r.u64(),
+    startCash: r.u64(),
+    endCash: r.u64(),
+    startTs: r.i64(),
+    endTs: r.i64(),
+    createdAt: r.i64(),
+  };
+}
+
+async function allOf<T>(connection: Connection, name: "Order" | "Plan" | "SellOrder", decode: (a: PublicKey, d: Uint8Array) => T | null, extra: { memcmp: { offset: number; bytes: string } }[] = []) {
   const disc = ACCOUNT_DISC.get(name)!;
   const bs58 = (await import("bs58")).default;
   const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
@@ -241,6 +298,13 @@ async function allOf<T>(connection: Connection, name: "Order" | "Plan", decode: 
 
 export const fetchOrders = (connection: Connection, basket?: string) =>
   allOf(connection, "Order", decodeOrder, basket ? [{ memcmp: { offset: 8, bytes: basket } }] : []);
+
+/** Open sell orders, optionally for one basket (offset 8) or one seller (offset 40). */
+export const fetchSellOrders = (connection: Connection, filter: { basket?: string; seller?: string } = {}) =>
+  allOf(connection, "SellOrder", decodeSellOrder, [
+    ...(filter.basket ? [{ memcmp: { offset: 8, bytes: filter.basket } }] : []),
+    ...(filter.seller ? [{ memcmp: { offset: 40, bytes: filter.seller } }] : []),
+  ]);
 
 export const fetchPlans = (connection: Connection, owner?: string) =>
   allOf(connection, "Plan", decodePlan, owner ? [{ memcmp: { offset: 8, bytes: owner } }] : []);
@@ -255,6 +319,27 @@ export function requiredShares(o: Pick<Order, "startShares" | "endShares" | "sta
   const elapsed = BigInt(now - o.startTs);
   const drop = ((o.startShares - o.endShares) * elapsed) / span;
   return o.startShares - drop;
+}
+
+/** Cash the seller must receive if the sell order is filled at `now`, exactly as the program computes it. */
+export const requiredCash = (o: Pick<SellOrder, "startCash" | "endCash" | "startTs" | "endTs">, now: number): bigint =>
+  requiredShares({ startShares: o.startCash, endShares: o.endCash, startTs: o.startTs, endTs: o.endTs }, now);
+
+/**
+ * A plan after a fill at `rate`, as the program's `apply_plan_fill` records
+ * it: the rate is clamped into the bounds and becomes the reference; with a
+ * trailing step the bounds then move to `rate × (1 ± step)` (floored, the
+ * floor at least 1). Fixed-bound plans keep their bounds.
+ */
+export function planAfterFill(plan: Pick<Plan, "minRef" | "maxRef" | "trailStepBps">, rate: bigint) {
+  const lo = plan.minRef ?? 0n;
+  const hi = plan.maxRef ?? rate;
+  const ref = rate < lo ? lo : rate > hi ? hi : rate;
+  if (!plan.trailStepBps) return { ref, minRef: lo, maxRef: hi };
+  const step = BigInt(plan.trailStepBps);
+  const minRef = (ref * (10_000n - step)) / 10_000n;
+  const maxRef = (ref * (10_000n + step)) / 10_000n;
+  return { ref, minRef: minRef > 0n ? minRef : 1n, maxRef: maxRef > ref ? maxRef : ref };
 }
 
 /** The plan's next order bounds, as run_plan sets them. */
@@ -522,6 +607,113 @@ export function closeLegacyPlanIx(p: { owner: PublicKey; plan: Plan }) {
       plan: new PublicKey(p.plan.address),
       owner_cash_account: new PublicKey(p.plan.cashAccount),
       cash_token_program: new PublicKey(p.plan.cashTokenProgram),
+    },
+    {},
+  );
+}
+
+// ---------------------------------------------------------------- sell desk
+
+/** Escrow `shares` and post a Dutch auction for cash: the seller receives startCash, decaying to endCash (their floor). */
+export function placeSellOrderIx(p: {
+  seller: PublicKey;
+  basket: Basket;
+  cashMint: PublicKey;
+  cashProgram?: PublicKey;
+  nonce: bigint;
+  shares: bigint;
+  startCash: bigint;
+  endCash: bigint;
+  startTs: number;
+  endTs: number;
+  /** Defaults to the seller's canonical share account. */
+  sellerShareAccount?: PublicKey;
+}) {
+  const cashProgram = p.cashProgram ?? TOKEN_2022_PROGRAM_ID;
+  const basket = new PublicKey(p.basket.address);
+  const shareMint = new PublicKey(p.basket.shareMint);
+  const sellOrder = sellOrderAddress(basket, p.seller, p.nonce);
+  return {
+    sellOrder,
+    ix: instruction(
+      "place_sell_order",
+      {
+        seller: p.seller,
+        basket,
+        sell_order: sellOrder,
+        share_mint: shareMint,
+        seller_share_account: p.sellerShareAccount ?? tokenAccount(shareMint, p.seller, TOKEN_2022_PROGRAM_ID),
+        escrow: sellEscrowAddress(sellOrder, shareMint),
+        cash_mint: p.cashMint,
+        share_token_program: TOKEN_2022_PROGRAM_ID,
+        cash_token_program: cashProgram,
+        associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
+        system_program: SystemProgram.programId,
+      },
+      {
+        nonce: p.nonce,
+        shares: p.shares,
+        start_cash: p.startCash,
+        end_cash: p.endCash,
+        start_ts: p.startTs,
+        end_ts: p.endTs,
+      },
+    ),
+  };
+}
+
+/**
+ * Fill a sell order: the filler pays the seller's canonical cash account (the
+ * instruction creates it if missing, at the filler's expense) and receives the
+ * shares in `fillerShareAccount` (default: the filler's canonical one, which
+ * must exist). Append a redeem_shares to take the components in kind.
+ */
+export function fillSellOrderIx(p: { filler: PublicKey; sellOrder: SellOrder; basket: Basket; fillerShareAccount?: PublicKey }) {
+  const order = new PublicKey(p.sellOrder.address);
+  const cashMint = new PublicKey(p.sellOrder.cashMint);
+  const cashProgram = new PublicKey(p.sellOrder.cashTokenProgram);
+  const shareMint = new PublicKey(p.basket.shareMint);
+  const seller = new PublicKey(p.sellOrder.seller);
+  return instruction(
+    "fill_sell_order",
+    {
+      filler: p.filler,
+      sell_order: order,
+      basket: new PublicKey(p.basket.address),
+      share_mint: shareMint,
+      escrow: sellEscrowAddress(order, shareMint),
+      filler_share_account: p.fillerShareAccount ?? tokenAccount(shareMint, p.filler, TOKEN_2022_PROGRAM_ID),
+      seller,
+      seller_cash_account: tokenAccount(cashMint, seller, cashProgram),
+      cash_mint: cashMint,
+      filler_cash_account: tokenAccount(cashMint, p.filler, cashProgram),
+      rent_payer: new PublicKey(p.sellOrder.rentPayer),
+      share_token_program: TOKEN_2022_PROGRAM_ID,
+      cash_token_program: cashProgram,
+      associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
+      system_program: SystemProgram.programId,
+    },
+    {},
+  );
+}
+
+/** Return a sell order's shares: the seller at any time, anyone after endTs (then only to the seller's canonical share account). */
+export function cancelSellOrderIx(p: { caller: PublicKey; sellOrder: SellOrder; basket: Basket; sellerShareAccount?: PublicKey }) {
+  const order = new PublicKey(p.sellOrder.address);
+  const shareMint = new PublicKey(p.basket.shareMint);
+  const seller = new PublicKey(p.sellOrder.seller);
+  return instruction(
+    "cancel_sell_order",
+    {
+      caller: p.caller,
+      sell_order: order,
+      basket: new PublicKey(p.basket.address),
+      share_mint: shareMint,
+      escrow: sellEscrowAddress(order, shareMint),
+      seller,
+      seller_share_account: p.sellerShareAccount ?? tokenAccount(shareMint, seller, TOKEN_2022_PROGRAM_ID),
+      rent_payer: new PublicKey(p.sellOrder.rentPayer),
+      share_token_program: TOKEN_2022_PROGRAM_ID,
     },
     {},
   );

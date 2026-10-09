@@ -66,13 +66,17 @@ const MAX_HOUSE_PLAN_ORDERS = 12;
 const MAX_UNPROVEN_PLAN_ORDERS = 8;
 /** Plan orders that expire unfilled in a row before the house stops running the plan. */
 const MAX_PLAN_STRIKES = 2;
-/** Refunds get their own small budget so a pile of expired orders never crowds out fills. */
-const REFUND_BUDGET = 3;
+/** Refund attempts per run, successful or not, so unrefundable orders never crowd out the rest. */
+const REFUND_ATTEMPTS = 6;
 /** A buyer's own expired order is theirs to return; the house steps in after this. */
 const REFUND_GRACE_SECS = 10 * 60;
-/** Orders priced per run, newest first, and per buyer, so no one wallet fills the list. */
-const MAX_PRICED = 20;
-const MAX_PRICED_PER_BUYER = 3;
+/** Someone else's expired order under this is left to its buyer. */
+const MIN_REFUND_CASH = 1_000_000n;
+/** A sanity cap on orders priced per run; pricing is closed form, so it is generous. */
+const MAX_PRICED = 2_000;
+/** Fills attempted per run, soonest first, and per buyer, so no one wallet takes the run. */
+const MAX_JOBS = 20;
+const MAX_JOBS_PER_BUYER = 3;
 /** An order further than this from the house's price is left for the next run. */
 const MAX_WAIT_SECS = 30;
 
@@ -246,10 +250,10 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   const keeperKey = keeper.publicKey.toBase58();
   const connection = new Connection(WRITE_RPC, "confirmed");
   let budget = opts.maxActions ?? 6;
-  let refundBudget = REFUND_BUDGET;
-  // Leave room inside the route's 60s for the refunds and plans after the fills.
+  // Fixed slices of the route's 60 s: fills, then refunds, then plans, which always get their turn.
   const fillDeadline = started + 35_000;
-  const hardDeadline = started + 50_000;
+  const refundDeadline = started + 40_000;
+  const hardDeadline = started + 52_000;
 
   // The keeper spends the house key's SOL on rent it gets back later. Below this
   // floor it only refunds, so nobody can drain it by flooding the program.
@@ -274,41 +278,41 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     firstSecondAtOrBelow(order, maxShares(Number(order.cashAmount) / 1e6, basket, nav));
 
   // 1. Live orders worth filling, first, since they are what a buyer is waiting on.
-  // Newest first, a few per buyer, and only those the house would fill within the
-  // next half minute; later ones are left for the next run (plans keep a long
-  // enough auction for the schedule to catch them). Dollar orders under $5 are
-  // left to other fillers: a fill costs the house rent for the creator's share
-  // account at most, never the buyer's.
+  // Pricing is a few multiplications an order, so every live order is priced (up
+  // to a sanity cap); only then are the ones the house would fill within the next
+  // half minute kept, soonest first and a few per buyer, so a stream of fresh
+  // orders that will never be fair cannot push a real one out of the queue.
+  // Dollar orders under $5 are left to other fillers: a fill costs the house rent
+  // for the creator's share account at most, never the buyer's.
   const live = lowOnSol
     ? []
     : all
         .filter((o) => o.endTs >= now + 2 && o.cashAmount >= HOUSE_MIN_CASH && known.has(o.basket))
-        .sort((x, y) => y.createdAt - x.createdAt);
-  const perBuyer = new Map<string, number>();
-  const candidates = live.filter((o) => {
-    const n = perBuyer.get(o.buyer) ?? 0;
-    perBuyer.set(o.buyer, n + 1);
-    return n < MAX_PRICED_PER_BUYER;
-  }).slice(0, MAX_PRICED);
-  if (live.length > candidates.length) report.skipped.push(`${live.length - candidates.length} more open orders left for later runs`);
-
-  const jobs: { order: Order; basket: Basket; nav: number; cash: number; at: number }[] = [];
-  for (const order of candidates) {
+        .sort((x, y) => y.createdAt - x.createdAt)
+        .slice(0, MAX_PRICED);
+  let neverFair = 0;
+  let later = 0;
+  const priced: { order: Order; basket: Basket; nav: number; cash: number; at: number }[] = [];
+  for (const order of live) {
     const basket = byAddress.get(order.basket)!;
     const nav = await navOf(basket);
     if (nav == null) continue;
     const at = houseFillAt(order, basket, nav);
-    if (at == null) {
-      report.skipped.push(`${order.address.slice(0, 6)}: never fair at today's prices`);
-      continue;
-    }
-    if (at - now > MAX_WAIT_SECS) {
-      report.skipped.push(`${order.address.slice(0, 6)}: house price in ${at - now}s`);
-      continue;
-    }
-    jobs.push({ order, basket, nav, cash: Number(order.cashAmount) / 1e6, at });
+    if (at == null) neverFair++;
+    else if (at - now > MAX_WAIT_SECS) later++;
+    else priced.push({ order, basket, nav, cash: Number(order.cashAmount) / 1e6, at });
   }
-  jobs.sort((x, y) => x.at - y.at);
+  if (neverFair) report.skipped.push(`${neverFair} open orders never fair at today's prices`);
+  if (later) report.skipped.push(`${later} open orders reach the house's price more than ${MAX_WAIT_SECS}s from now`);
+  priced.sort((x, y) => x.at - y.at);
+  const perBuyer = new Map<string, number>();
+  const jobs = priced
+    .filter((j) => {
+      const n = perBuyer.get(j.order.buyer) ?? 0;
+      perBuyer.set(j.order.buyer, n + 1);
+      return n < MAX_JOBS_PER_BUYER;
+    })
+    .slice(0, MAX_JOBS);
   for (const job of jobs) {
     if (budget <= 0) break;
     const wait = (job.at - clock()) * 1000;
@@ -341,25 +345,46 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   // 2. Orders whose auction has ended unfilled: return the dollars. Anyone may do
   // this once the auction is over; the buyer gets the cash, the payer the rent.
   // The house refunds its own plan orders at once; a buyer's own order is left to
-  // their Return button for ten minutes before the house does it for them. A plan
-  // order that expires unfilled is a strike against its plan.
-  const expired = all
-    .filter((o) => o.endTs < now && (o.rentPayer === keeperKey || o.endTs < now - REFUND_GRACE_SECS))
-    .sort((x, y) => Number(y.rentPayer === keeperKey) - Number(x.rentPayer === keeperKey) || x.endTs - y.endTs);
+  // their Return button for ten minutes before the house does it for them, and
+  // one under $1 is left to them for good. A plan order that expires unfilled is
+  // a strike against its plan, refunded or not.
+  //
+  // The program refunds a third party's call only into the buyer's canonical
+  // dollar account, so an order whose buyer has none can only be cancelled by the
+  // buyer. Those are found in one read and never attempted. Attempts, not
+  // successes, are capped, and refunds stop in time to leave the plans their slice.
   const plans = lowOnSol ? [] : await fetchPlans(connection);
   const planByAddress = new Map(plans.map((p) => [p.address, p]));
+  const strike = (order: Order) => {
+    const plan = order.plan ? planByAddress.get(order.plan) : undefined;
+    if (plan) strikes.set(plan.address, { count: strikesFor(plan) + 1, fills: plan.fills, ref: plan.refSharesPerCashE9 });
+  };
+  const expiredAll = all
+    .filter((o) => o.endTs < now && (o.rentPayer === keeperKey || (o.endTs < now - REFUND_GRACE_SECS && o.cashAmount >= MIN_REFUND_CASH)))
+    .sort((x, y) => Number(y.rentPayer === keeperKey) - Number(x.rentPayer === keeperKey) || x.endTs - y.endTs)
+    .slice(0, 100);
+  const cashAtas = expiredAll.map((o) => tokenAccount(new PublicKey(o.cashMint), new PublicKey(o.buyer), new PublicKey(o.cashTokenProgram)));
+  const cashInfos = cashAtas.length ? await connection.getMultipleAccountsInfo(cashAtas).catch(() => cashAtas.map(() => null)) : [];
+  const expired = expiredAll.filter((o, i) => {
+    if (cashInfos[i]) return true;
+    strike(o);
+    return false;
+  });
+  if (expiredAll.length > expired.length) {
+    report.skipped.push(`${expiredAll.length - expired.length} expired orders whose buyer has no dollar account; only the buyer can cancel them`);
+  }
+  let attempts = 0;
   for (const order of expired) {
-    if (refundBudget <= 0 || Date.now() > hardDeadline) break;
+    if (attempts >= REFUND_ATTEMPTS || Date.now() > refundDeadline) break;
+    attempts++;
     try {
       await send(connection, [cancelOrderIx({ caller: keeper.publicKey, order })]);
       report.refunded.push(order.address);
       openOrders.delete(order.address);
-      refundBudget--;
-      const plan = order.plan ? planByAddress.get(order.plan) : undefined;
-      if (plan) strikes.set(plan.address, { count: strikesFor(plan) + 1, fills: plan.fills, ref: plan.refSharesPerCashE9 });
     } catch (err) {
       report.errors.push(`refund ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
     }
+    strike(order);
   }
 
   // 3. Plans that are due. Only plans the house would sensibly run: Sheaf's test
@@ -369,8 +394,12 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   // or refunded first), one plan per owner per call, none after two runs in a row
   // expired unfilled (until the owner re-centres it), and a cap on house-paid plan
   // orders open at once, with some of it kept for plans that have filled before.
+  // The owner must hold the basket's share account (or the fill could never land)
+  // and the plan must draw from the owner's canonical dollar account (or a refund
+  // could never land), both checked in one read before the run.
   // Anyone else's plan can still be run by anyone; the house just won't pay for it.
-  const houseOpen = everyOrder.filter((o) => o.plan != null && o.rentPayer === keeperKey && openOrders.has(o.address));
+  // An expired order is waiting for its refund, not using the cap.
+  const houseOpen = everyOrder.filter((o) => o.plan != null && o.rentPayer === keeperKey && openOrders.has(o.address) && o.endTs >= now);
   let housePlanOrders = 0;
   let unproven = 0;
   for (const o of houseOpen) {
@@ -396,6 +425,17 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       continue;
     }
     const basket = byAddress.get(plan.basket)!;
+    const owner = new PublicKey(plan.owner);
+    const cashAta = tokenAccount(new PublicKey(plan.cashMint), owner, new PublicKey(plan.cashTokenProgram));
+    if (plan.cashAccount !== cashAta.toBase58()) {
+      report.skipped.push(`plan ${plan.address.slice(0, 6)}: draws from a dollar account that is not the owner's own, so a refund could never land`);
+      continue;
+    }
+    const [shareInfo] = await connection.getMultipleAccountsInfo([tokenAccount(new PublicKey(basket.shareMint), owner, TOKEN_2022_PROGRAM_ID)]).catch(() => [null]);
+    if (!shareInfo) {
+      report.skipped.push(`plan ${plan.address.slice(0, 6)}: the owner has no ${basket.symbol} share account for the fill to land in`);
+      continue;
+    }
     const nav = await navOf(basket);
     const auction = planAuction(plan);
     if (nav == null || auction.end <= 0n || auction.end > maxShares(Number(plan.cashPerRun) / 1e6, basket, nav)) {

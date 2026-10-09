@@ -1,4 +1,4 @@
-import { serverRpcUrl, SHEAF_PROGRAM_ID } from "@/lib/config";
+import { PUBLIC_WRITE_RPC, serverRpcUrl, SHEAF_PROGRAM_ID } from "@/lib/config";
 import { clientIp } from "@/lib/faucet-server";
 import { originAllowed } from "@/lib/server-origin";
 
@@ -8,6 +8,8 @@ import { originAllowed } from "@/lib/server-origin";
  * Forwards JSON-RPC to the server's endpoint (Helius when a key is set) so the
  * key stays here. Only the read and send methods the app uses are allowed, and a
  * batch is capped, so the proxy cannot be turned into a general-purpose RPC.
+ * When that endpoint fails (429, 5xx or no answer), reads fall back to the public
+ * devnet RPC; the x-sheaf-rpc response header says which one answered.
  */
 
 /**
@@ -99,15 +101,30 @@ export async function POST(req: Request) {
       { status: 403 },
     );
   }
-  const res = await fetch(serverRpcUrl(), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(25_000),
-  }).catch(() => null);
-  if (!res) {
-    return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Upstream RPC unreachable" } }, { status: 502 });
+  const forward = (url: string, timeoutMs: number) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    }).catch(() => null);
+  const primary = serverRpcUrl();
+  let res = await forward(primary, 20_000);
+  let via = primary === PUBLIC_WRITE_RPC ? "public" : "primary";
+  // When the paid endpoint is out of quota, down or slow, reads go to the public
+  // devnet RPC instead, and the response says so. A send is never retried
+  // elsewhere: it may already have landed.
+  const failed = !res || res.status === 429 || res.status >= 500;
+  if (failed && via === "primary" && !calls.some((c) => c.method === "sendTransaction")) {
+    const fallback = await forward(PUBLIC_WRITE_RPC, 20_000);
+    if (fallback) {
+      res = fallback;
+      via = "public-fallback";
+    }
   }
-  return new Response(res.body, { status: res.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  if (!res) {
+    return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Upstream RPC unreachable" } }, { status: 502, headers: { "x-sheaf-rpc": via } });
+  }
+  return new Response(res.body, { status: res.status, headers: { "content-type": "application/json", "cache-control": "no-store", "x-sheaf-rpc": via } });
 }

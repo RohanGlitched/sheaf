@@ -22,6 +22,8 @@ export const HIDDEN_BASKETS: ReadonlySet<string> = new Set([
   "AVqEMiiaDGZEo2ZSq3Bvni1mMNczaJ1p49cwsnqFqsgg",
   // QAZG1N, "QA judge QAZG1N", created by QA wallet HSHma7…
   "6WRU3zPJm9o6qJnZVzxNwyXn2HrBiqM9YokjR9ioDLju",
+  // QA4LC8, "QA judge QA4LC8", created by QA wallet AWwhyV…
+  "FzHUmTWLhvxpbdvWqeict9ZeQqcqeJryGSHNjNoQEUwK",
 ]);
 
 /** True for a basket our tests made: listed above, or created by one of our test wallets. */

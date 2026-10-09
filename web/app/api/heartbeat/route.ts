@@ -1,25 +1,29 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { SHEAF_PROGRAM_ID, serverRpcUrl } from "@/lib/config";
 import { faucetKeypair } from "@/lib/faucet-server";
+import { rememberOidc } from "@/lib/gcs-store";
+import { faucetHasOwnKey, faucetPayerKeypair, filler2Keypair } from "@/lib/server-keys";
 import { lastBeats } from "@/lib/server-heartbeat";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/heartbeat → { keeperLastRunAt, evmKeeperLastRunAt, houseSol, deploySol, ... }
+ * GET /api/heartbeat → { keeperLastRunAt, evmKeeperLastRunAt, houseSol, deploySol, low, ... }
  *
  * Whether the keepers are alive and the keys can pay, for a scheduler's alert and
- * a "keeper last ran" line on the pages. Times are ISO strings or null.
+ * the "Keeper ran 40 s ago" line on the pages. Times are ISO strings or null.
  *
- *  - keeperLastRunAt: the later of this instance's last finished run and the
- *    house key's newest transaction on devnet (another instance may have run it).
- *  - evmKeeperLastRunAt: this instance's last full EVM sweep, if it served one.
- *  - houseSol: the house key (faucet, keeper, mint authority).
+ *  - keeperLastRunAt / evmKeeperLastRunAt: each keeper's last finished run, kept in
+ *    the project's bucket so every instance agrees. The Solana keeper falls back to
+ *    the house key's newest devnet transaction when the bucket has nothing.
+ *  - houseSol: the house key (mint authority, keeper, house filler).
+ *  - faucetSol / filler2Sol: the faucet's and the second filler's own keys, when set.
  *  - deploySol: the program's upgrade authority, read from its program-data account.
+ *  - low: true when the house is under 4 SOL or the upgrade authority under 1 SOL.
  */
 
-/** Below this the house key stops paying for new plans and token accounts soon; alert on it. */
-const HOUSE_ALERT_SOL = 4;
+const HOUSE_LOW_SOL = 4;
+const DEPLOY_LOW_SOL = 1;
 const CACHE_MS = 15_000;
 let cached: { at: number; body: Record<string, unknown> } | null = null;
 
@@ -36,32 +40,46 @@ async function upgradeAuthority(connection: Connection): Promise<PublicKey | nul
   return authority ? new PublicKey(authority) : null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  rememberOidc(request);
   if (cached && Date.now() - cached.at < CACHE_MS) return Response.json(cached.body, { headers: { "cache-control": "no-store" } });
-  const beats = lastBeats();
-  const house = faucetKeypair()?.publicKey ?? null;
   const connection = new Connection(serverRpcUrl(), "confirmed");
+  const house = faucetKeypair()?.publicKey ?? null;
+  const faucet = faucetHasOwnKey() ? faucetPayerKeypair()!.publicKey : null;
+  const filler2 = filler2Keypair()?.publicKey ?? null;
+  const sol = (key: PublicKey | null) => (key ? connection.getBalance(key).then((l) => l / 1e9).catch(() => null) : Promise.resolve(null));
 
-  const [houseLamports, lastHouseTx, deploy] = await Promise.all([
-    house ? connection.getBalance(house).catch(() => null) : Promise.resolve(null),
+  const [beats, houseSol, faucetSol, filler2Sol, lastHouseTx, deploy] = await Promise.all([
+    lastBeats().catch(() => ({}) as Awaited<ReturnType<typeof lastBeats>>),
+    sol(house),
+    sol(faucet),
+    sol(filler2),
     house ? connection.getSignaturesForAddress(house, { limit: 1 }).then((s) => s[0]?.blockTime ?? null).catch(() => null) : Promise.resolve(null),
     upgradeAuthority(connection)
-      .then(async (key) => (key ? { key: key.toBase58(), lamports: await connection.getBalance(key) } : null))
+      .then(async (key) => (key ? { key: key.toBase58(), sol: await connection.getBalance(key).then((l) => l / 1e9) } : null))
       .catch(() => null),
   ]);
-  const keeperAt = Math.max(beats.keeper ?? 0, (lastHouseTx ?? 0) * 1000) || null;
-  const houseSol = houseLamports != null ? houseLamports / 1e9 : null;
+  const keeperBeat = beats.keeper?.at ?? null;
+  const keeperAt = keeperBeat ?? (lastHouseTx ? lastHouseTx * 1000 : null);
+  const houseLow = houseSol != null && houseSol < HOUSE_LOW_SOL;
+  const deployLow = deploy != null && deploy.sol < DEPLOY_LOW_SOL;
 
   const body = {
     keeperLastRunAt: iso(keeperAt),
-    keeperLastRunSource: beats.keeper && beats.keeper >= (lastHouseTx ?? 0) * 1000 ? "this instance" : lastHouseTx ? "house key's newest devnet transaction" : null,
-    evmKeeperLastRunAt: iso(beats.evmKeeper),
-    evmKeeperLastResults: beats.evmKeeperResults,
+    keeperLastRunSource: keeperBeat ? "keeper run" : lastHouseTx ? "house key's newest devnet transaction" : null,
+    evmKeeperLastRunAt: iso(beats.evmKeeper?.at),
+    evmKeeperLast: beats.evmKeeper?.detail ?? null,
     houseSol,
     houseKey: house?.toBase58() ?? null,
-    houseLow: houseSol != null && houseSol < HOUSE_ALERT_SOL,
-    deploySol: deploy ? deploy.lamports / 1e9 : null,
+    houseLow,
+    faucetSol,
+    faucetKey: faucet?.toBase58() ?? null,
+    filler2Sol,
+    filler2Key: filler2?.toBase58() ?? null,
+    deploySol: deploy?.sol ?? null,
     deployKey: deploy?.key ?? null,
+    deployLow,
+    low: houseLow || deployLow,
     asOf: new Date().toISOString(),
   };
   cached = { at: Date.now(), body };

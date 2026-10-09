@@ -10,7 +10,7 @@ type Rule = { name: string; body: string; sources: Source[] };
 const RULES: Rule[] = [
   {
     name: "LRS limit",
-    body: "A resident may send up to $2,50,000 abroad each financial year under the Liberalised Remittance Scheme. That one limit covers everything together: travel, study, gifts and buying foreign shares.",
+    body: "A resident may send up to $250,000 abroad each financial year under the Liberalised Remittance Scheme. That one limit covers everything together: travel, study, gifts and buying foreign shares.",
     sources: [{ label: "RBI, LRS FAQ", href: "https://www.rbi.org.in/Scripts/FAQView.aspx?Id=115" }],
   },
   {
@@ -33,8 +33,11 @@ const RULES: Rule[] = [
   },
   {
     name: "NRIs",
-    body: "LRS is a scheme for residents. Non-resident Indians invest under the rules of the country they live in, so they are the clearer first group, through a regulated partner that already does KYC.",
-    sources: [{ label: "RBI, LRS FAQ", href: "https://www.rbi.org.in/Scripts/FAQView.aspx?Id=115" }],
+    body: "LRS is a scheme for residents. Non-resident Indians invest under the rules of the country they live in, so where xStocks are sold (not the US, UK, Canada or Australia) they are the clearer first users, through a regulated partner that already does KYC.",
+    sources: [
+      { label: "RBI, LRS FAQ", href: "https://www.rbi.org.in/Scripts/FAQView.aspx?Id=115" },
+      { label: "Kraken, xStocks availability", href: "https://support.kraken.com/gb/articles/xstocks-availability" },
+    ],
   },
 ];
 

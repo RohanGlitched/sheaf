@@ -2,7 +2,7 @@
 
 <img src=".github/readme/cover.png" alt="Sheaf: bind any eight stocks into one share. A basket drawn as a sheaf of stalks tied by one blue band." width="100%">
 
-**Index funds of tokenized stocks.** Bind up to eight tokenized stocks into one share, backed in kind by an onchain vault and redeemable for those stocks at any time.
+**Index funds of tokenized stocks.** Bind up to eight tokenized stocks into one share, backed in kind by an onchain vault and redeemable for those stocks at any time. Each basket is a fixed recipe, like a unit investment trust: no manager and no rebalancing; a new mix is a new basket.
 
 [**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
 
@@ -12,7 +12,7 @@
 
 ---
 
-Tokenized stocks now trade around the clock on Solana and several EVM chains, but you still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens and rebalancing by hand, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. No oracle prices anything, and no share can exist without the stocks behind it. On top of that core: dollar orders filled by competing fillers in a Dutch auction, monthly plans anyone can run when due, a Meteora launch market per basket, a Panta prediction market per basket, and a live mainnet tape through Solami.
+Tokenized stocks now trade around the clock on Solana and several EVM chains, but you still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens one by one and tracking them yourself, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. The program reads no price, and no share can exist without the stocks behind it. On top of that core: dollar orders filled by competing fillers in a Dutch auction, monthly plans anyone can run when due, a Meteora launch market per basket, a Panta prediction market per basket, and a live mainnet tape through Solami.
 
 ## Live
 
@@ -24,7 +24,7 @@ Tokenized stocks now trade around the clock on Solana and several EVM chains, bu
 | Proof | [/ledger](https://sheaf-index.vercel.app/ledger) (every program event, decoded in your browser) · [/chains](https://sheaf-index.vercel.app/chains) (each EVM vault read from its own chain) |
 | Program | [`GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz`](https://explorer.solana.com/address/GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz?cluster=devnet) on Solana devnet |
 
-Try it in two minutes: open a basket, choose **With dollars**, press **Get 1,000 test dollars**, then place a $100 order. A filler delivers the stocks within about a minute and the shares land in your wallet. Then choose **Monthly** and start a plan on a 5-minute period to watch it run.
+Try it in two minutes: open a basket, choose **With dollars**, press **Get 1,000 test dollars**, then place a $100 order. A filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Then choose **Monthly** and start a plan on a 5-minute period to watch it run.
 
 ## How it works
 
@@ -53,7 +53,7 @@ Every instruction, account, seed, event and error is in [docs/program.md](docs/p
 What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
-- **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events, in the browser. There is no database.
+- **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
 - **Tests.** `tests/sheaf.ts` and `tests/mainnet-clone.ts` hold 59 integration tests (`anchor test`) and `lib.rs` 10 unit tests (`cargo test -p sheaf --lib`): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 100 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
 - **EVM vaults.** The same vault, recipe and dollar desk as Solidity contracts, deployed and source-verified on five testnets:
@@ -73,7 +73,7 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 | Sponsor | What Sheaf does with it | Doc |
 |---|---|---|
 | **Meteora** | Each basket can open a Dynamic Bonding Curve priced from its own NAV (opens at 0.5× NAV, graduates at 5× NAV into a DAMM v2 pool with all LP permanently locked). Launch addresses derive from the basket, so discovery needs no indexer, and a pool only counts if the basket's creator opened it. One launch has been taken through its whole life on devnet. | [docs/meteora.md](docs/meteora.md) |
-| **Panta** | Each basket carries a market, "Will this basket beat SPY this week?", resolved from the basket's vault value, which Sheaf publishes as JSON at `/api/nav/<basket>`. Discovery, quotes, create, trade, positions and claims all run through Panta's API, against its sandbox (`pk_test_` key). | [docs/panta.md](docs/panta.md) |
+| **Panta** | Each basket whose holdings are all listed carries a market, "Will this basket beat SPY this week?". It resolves from the basket's recipe valued at two Friday US closes (adjusted closes × each mint's multiplier) against SPY's adjusted close, published with every input at `/api/nav/<basket>?at=<close>`. Baskets holding pre-IPO companies get no market. Discovery, quotes, create, trade, positions and claims run through Panta's API against its sandbox (`pk_test_` key), where the wallet signs a stand-in transaction that is never broadcast. | [docs/panta.md](docs/panta.md) |
 | **Solami** | Mainnet reads go through Solami's RPC: every xStock's dividend multiplier (which sets NAV) and a live tape of tokenized-stock trades, decoded every few seconds. | [docs/solami.md](docs/solami.md) |
 
 ## Chains
@@ -156,17 +156,17 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 
 ## Trust model
 
-- **No oracle.** Creation and redemption are in kind. Dollar orders are auctions on share count; a plan's reference is its own last fill.
+- **The program reads no price.** Creation and redemption are in kind, and backing is checked by the program itself. Dollar orders are auctions on share count bounded by the buyer's own terms; a plan's reference is its own last fill. Prices shown on the site, the house filler's quotes and Panta resolution come from Jupiter and listed closes, off chain.
 - **No editable recipe.** No admin key, no rebalance authority, no fee switch: every fee is fixed per basket at creation. The share mint's authority is the basket PDA.
 - **The program is upgradeable on devnet.** Its upgrade authority is a single deploy key. Before it holds real tokens it moves to a multisig after an audit. The multisig is kept, not burned, so new issuers (Ondo, Robinhood, Dinari) can be added to `KNOWN_ISSUERS`; an upgrade can change any code, so the multisig, a public timelock and a verifiable build are the safeguards.
 - **Devnet, with mirror mints.** The program is unaudited, so it does not take custody of real stocks. Prices, dividend multipliers and the tape come from mainnet; vaults hold devnet mirrors. The mirrors match the real mints' decimals, metadata, `ScaledUiAmount` dividend multiplier and (for PreStocks) transfer fee. They do not carry the issuer powers the real mints have.
 - **Issuer powers.** Real xStocks and PreStocks carry a freeze authority, a permanent delegate and a pause authority held by their issuer. Sheaf accepts those powers only when Backed or PreStocks hold them (`KNOWN_ISSUERS` in `lib.rs`) and refuses them under anyone else, including the basket creator. This is tested against byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock; the devnet mirrors themselves carry only metadata, ScaledUiAmount and transfer-fee extensions. An issuer that pauses or freezes one component blocks redemption of the whole basket until it lifts it.
-- **The EVM contracts** have no owner, no pause, no upgrade path and no oracle; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labelled mirrors worth nothing.
-- **Fill competition.** Today the house keeper is the only regular filler. A filler with no competition can wait for the bottom of every auction; a plan's floor is the owner's own `min_ref`.
+- **The EVM contracts** have no owner, no pause and no upgrade path, and read no price; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labeled mirrors worth nothing.
+- **Fill competition.** Today the house keeper and a second filler running the published reference code (both ours) do the filling. A filler with no competition can wait for the bottom of every auction; a plan's floor is the owner's own `min_ref`.
 
 ## History and disclosure
 
-Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window opened; the first commits are that day's. It was renamed Sheaf on Oct 8. Tessera was also entered in Stocklana. Everything in this repo after Sep 14 was built during the Crypto World's Fair window: the new program with dollar orders and monthly plans and its hardening release, the EVM vaults on five chains, the Panta and Solami integrations, the Meteora lifecycle, and the redesign.
+Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window opened. The first commit that day (28,698 lines in 85 files) imported the Tessera codebase as it stood; treat everything in it as pre-existing. It was renamed Sheaf on Oct 8. Tessera was also entered in Stocklana, and the EVM vault contracts (`evm/contracts/Basket.sol`, `CreationDesk.sol`) were also entered in Arbitrum Open House (Robinhood Chain), submitted Oct 4. Everything in this repo after Sep 14 was built during the Crypto World's Fair window: the new program with dollar orders and monthly plans and its hardening release, the EVM vaults on five chains, the Panta and Solami integrations, the Meteora lifecycle, and the redesign.
 
 ## Repository
 

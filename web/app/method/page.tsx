@@ -22,7 +22,7 @@ import preset from "@/lib/meteora-preset.json";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Six steps from a list of companies to a token you can hold, buy with dollars, buy every month, trade before it exists and bet on, each linked to the transaction, account or data that proves it.",
+    "Six steps from a list of companies to a token you can hold, buy with dollars and buy every month, plus the two markets beside it, each linked to the transaction, account or data that proves it.",
 };
 
 export const revalidate = 300;
@@ -55,7 +55,7 @@ const STAGES = [
   { id: "create", title: "Create shares in kind" },
   { id: "dollars", title: "Or buy with dollars" },
   { id: "plans", title: "Then every month" },
-  { id: "market", title: "Trade it before it exists" },
+  { id: "market", title: "Open a launch market" },
   { id: "predict", title: "Bet on it" },
 ];
 
@@ -89,12 +89,12 @@ const RISKS = [
 
 const GUARANTEES = [
   {
-    title: "No oracle",
-    body: "Shares are created and redeemed against tokens, never against a price, so there is no feed to go stale or be pushed.",
+    title: "The program reads no price",
+    body: "Backing is checked by the program itself: shares are created and redeemed against tokens, never against a price. Prices on this site, the house filler's quotes and Panta's resolution come from Jupiter and listed closes, outside the program.",
   },
   {
     title: "No edit button",
-    body: "The recipe is written once. There is no manager, no rebalance authority and no instruction that changes what a share holds.",
+    body: "The recipe is written once: a fixed basket, like a unit investment trust. There is no manager, no rebalancing and no instruction that changes what a share holds. To change a recipe, publish a new basket.",
   },
   {
     title: "Rounding favors holders",
@@ -102,7 +102,7 @@ const GUARANTEES = [
   },
   {
     title: "The fee never touches the vault",
-    body: `The creator earns up to ${MAX_CREATOR_FEE_BPS / 100}% of each creation in new shares. The vault always receives the full recipe.`,
+    body: `Sheaf's 0.10% and the creator's fee, up to ${MAX_CREATOR_FEE_BPS / 100}%, are paid in new shares on each creation. The vault always receives the full recipe.`,
   },
   {
     title: "Anyone can create and redeem",
@@ -117,8 +117,8 @@ const GUARANTEES = [
     body: "Every basket shows what its recipe would have done over the past year against SPY, from the listed shares' own closes, with the deepest fall beside the return.",
   },
   {
-    title: "Dollars never meet a price feed",
-    body: "A dollar order is an auction on share count. The buyer sets the floor, fillers decide when to fill, and the vault still receives the real stocks.",
+    title: "A dollar order is an auction",
+    body: "The program never prices it. The buyer sets the floor, fillers decide when to fill from their own quotes (Sheaf's filler uses Jupiter), and the vault still receives the real stocks.",
   },
   {
     title: "A plan can do one thing",
@@ -126,7 +126,7 @@ const GUARANTEES = [
   },
   {
     title: "Everything is in the log",
-    body: "The program emits an event for every creation, redemption, order, fill and plan run. The ledger decodes them from the chain in your browser, so there is no database to trust.",
+    body: "The program emits an event for every creation, redemption, order, fill and plan run. The site decodes them on its server, at most 30 seconds old, and your browser decodes them itself if that fails. Anyone can run the same decoder against a public RPC.",
   },
   {
     title: "The same rules on every chain",
@@ -146,7 +146,7 @@ const COMPARE_COLUMNS = [
   "Backing",
   "Who can publish a basket",
   "Redeem in kind",
-  "Buy with dollars, no oracle",
+  "How a dollar buy is priced",
   "Recurring plans",
   "Chains",
 ];
@@ -159,7 +159,7 @@ const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[]
       "In kind: the exact stocks, in the basket's onchain vault",
       "Anyone",
       "Yes, by anyone, at any time",
-      "Yes: fillers bid in an auction on share count",
+      "Fillers bid in an auction on share count; the program reads no price",
       "Yes, monthly plans",
       "Solana, plus five EVM testnets",
     ],
@@ -190,7 +190,7 @@ const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[]
       "In kind: a vault token over the tokens it holds",
       "Anyone; a creator and up to ten managers, who can rebalance",
       "Yes, burn for the underlying tokens",
-      "No: vault value and keeper auctions start from oracle prices",
+      "Vault value and keeper auctions start from oracle prices",
       "Not stated",
       "Solana",
     ],
@@ -297,8 +297,8 @@ function PlanVisual() {
 
 function PredictVisual() {
   const rows: [string, string][] = [
-    ["Question", "Will The Big Five (BIG5) beat SPY this week?"],
-    ["Yes if", "one share, valued from its vault at the close, rose more than SPY"],
+    ["Question", "Will the Big Five (BIG5) beat SPY this week?"],
+    ["Yes if", "one share's recipe value rose more than SPY between two Friday closes"],
     ["Settles from", "/api/nav/FFGg…EfJ, every input listed"],
     ["Market", "Panta, a USDC bonding curve on Solana (sandbox today)"],
   ];
@@ -457,8 +457,8 @@ export default async function MethodPage() {
         <h1 className="display text-hero leading-[0.95] text-ink">How it works</h1>
         <p className="mt-6 text-lg leading-[1.65] text-ink-2">
           Six steps, the same six as on the home page, take a list of companies
-          to a token you can hold, buy with dollars, buy every month, trade before
-          it exists and bet on. The first five have already happened on{" "}
+          to a token you can hold, buy with dollars and buy every month; the last
+          two are markets that sit beside it. The first five have already happened on{" "}
           {WRITE_CLUSTER} and link to the transaction or account that proves
           them; the sixth runs against Panta&rsquo;s sandbox. The running example is{" "}
           <Link
@@ -472,8 +472,9 @@ export default async function MethodPage() {
         <p className="display mt-8 border-l-2 border-bind pl-5 text-xl leading-snug text-ink sm:text-2xl">
           The one thing Sheaf does differently: every share is backed by the exact stocks its recipe
           names, held in the basket&rsquo;s own onchain vault, and anyone can redeem it for them at any
-          time. The program reads no price oracle, whether a share is created, redeemed or bought with
-          dollars.
+          time. The program reads no price: it checks backing itself, whether a share is created,
+          redeemed or bought with dollars. Prices on the site, the house filler&rsquo;s quotes and
+          Panta&rsquo;s resolution come from Jupiter and listed closes.
         </p>
         <p className="mt-3 text-sm text-ink-3">
           <a href="#compare" className="underline decoration-line-strong underline-offset-4 hover:text-ink-2">
@@ -514,8 +515,9 @@ export default async function MethodPage() {
         >
           <p>
             Pick up to {MAX_COMPONENTS} tokenized equities: xStocks such as Apple
-            and NVIDIA, or PreStocks SPVs over OpenAI, Anthropic and SpaceX. Set a
-            weight for each.
+            and NVIDIA, or PreStocks, which give indirect exposure to OpenAI,
+            Anthropic and SpaceX through special-purpose vehicles. Set a weight for
+            each.
           </p>
           <p>
             Sheaf turns the weights into an exact number of raw token units per
@@ -577,7 +579,7 @@ export default async function MethodPage() {
           <p>
             Anyone can fill it by delivering the stocks the recipe names at the current count. The vault
             receives them exactly as in a creation, the buyer receives the shares, and the filler takes the
-            dollars. Fillers compete on timing, so the price is the market&apos;s and no oracle is read. If
+            dollars. Fillers compete on timing, so the price is set by whoever fills first; the program reads none. If
             nobody fills in time, the order can be canceled and the dollars go back to the buyer.
           </p>
         </Stage>
@@ -596,23 +598,22 @@ export default async function MethodPage() {
           <p>
             When a run is due anyone may send it, and the person who does is repaid the rent when the order
             closes. Each fill resets the plan&apos;s reference to the price the market actually cleared at, so
-            next month starts from where this month landed, without an oracle.
+            next month starts from where this month landed, without the program reading a price.
           </p>
         </Stage>
         <Stage
           n={5}
           id="market"
-          title="Trade it before it exists"
+          title="Open a launch market"
           on="Launch market"
           proof={{ label: "The pool on Explorer", href: explorerAddress(LAUNCH_EXAMPLE_POOL) }}
           visual={<BasketLaunch basket={LAUNCH_EXAMPLE} navUsd={null} />}
         >
           <p>
-            A new basket has no holders yet, and nobody wants to be first to
-            assemble every component. So a bonding curve can open in front of it,
-            and people can buy in before the first share exists. The launch token
-            is its own market: it is not redeemable for the stocks, and only a
-            basket share is backed.
+            A basket&rsquo;s creator can open a bonding curve beside it: a separate
+            launch token, priced from the basket&rsquo;s value, that people can trade
+            as a bet on the basket. It is not a share. It is not redeemable for the
+            stocks, and only a basket share is backed.
           </p>
           <p>
             The curve is set from the basket&rsquo;s own value per share (its
@@ -631,10 +632,10 @@ export default async function MethodPage() {
             keep it.
           </p>
           <p>
-            The shape is ours. Four segments, weighted so the opening price rises
-            slowly: the first fifth of the SOL raised buys about a third of the
-            supply, not half of it, so early buyers are not racing each other. A
-            basket is not a meme. The whole curve is published as a{" "}
+            The shape is ours. Four segments, weighted evenly enough that the price
+            climbs with every buy: the first fifth of the SOL raised buys about a
+            third of the supply, not half of it, so no early wallet can corner the
+            token. A basket is not a meme. The whole curve is published as a{" "}
             <a href={PRESET_URL} target="_blank" rel="noreferrer" className="text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
               reusable preset
             </a>{" "}
@@ -646,7 +647,7 @@ export default async function MethodPage() {
             earns 40% and Meteora keeps 20%. The pool&rsquo;s address is derived from the
             basket&rsquo;s, so anyone can find it without an indexer, and a pool
             only counts as the basket&rsquo;s launch if the basket&rsquo;s creator
-            opened it. When the curve fills, anyone can move it into the permanent
+            opened it, on the published terms, at half the basket&rsquo;s NAV. When the curve fills, anyone can move it into the permanent
             pool from the same page, and the same card keeps buying and selling
             there instead of on the curve.
           </p>
@@ -661,10 +662,12 @@ export default async function MethodPage() {
           visual={<PredictVisual />}
         >
           <p>
-            Every basket carries one question: will it beat SPY this week? A
-            share&rsquo;s value is its recipe at public prices, and the vault
-            behind it is an account anyone can read, so the answer can be worked
-            out from the chain with nobody&rsquo;s say-so.
+            Every basket carries one question: will it beat SPY this week? It
+            settles from a published number at two Friday US closes: the
+            recipe&rsquo;s units times each holding&rsquo;s adjusted close from
+            Yahoo times its mint&rsquo;s dividend multiplier, against SPY&rsquo;s
+            adjusted close. Every input is listed, so anyone can recompute it from
+            public accounts and two public price sources.
           </p>
           <p>
             Panta runs the market, a USDC bonding curve on Solana. Sheaf publishes
@@ -721,7 +724,7 @@ export default async function MethodPage() {
             Others already let you hold many assets in one place, and several are live on mainnet
             where Sheaf is not yet. None of the ones below, as far as their own docs say, pairs a
             token backed in kind with baskets anyone can publish, redemption by anyone, and dollar
-            buying with no oracle.
+            buying where the program reads no price.
           </p>
         </div>
         {/* A phone gets one card per product; six columns of sentences will not fit. */}
@@ -837,13 +840,14 @@ export default async function MethodPage() {
             {[
               ["Components per basket", `1 to ${MAX_COMPONENTS}`],
               ["Share decimals", String(SHARE_DECIMALS)],
+              ["Protocol fee", "0.10% of each creation, in shares (baskets created from Oct 9)"],
               ["Creator fee ceiling", `${MAX_CREATOR_FEE_BPS / 100}%`],
               ["Deposits", "round up"],
               ["Redemptions", "round down"],
-              ["Oracles used", "none"],
+              ["Prices the program reads", "none"],
               ["Recipe after creation", "immutable"],
               ["Creator's income", `up to ${MAX_CREATOR_FEE_BPS / 100}% of each creation, in shares`],
-              ["Sheaf's income", "the house filler's spread, then launch-market fees"],
+              ["Sheaf's income", "the 0.10% protocol fee, then the house filler's 0.15% margin, then launch-market fees"],
               ["Launch market", "Meteora bonding curve"],
             ].map(([term, value]) => (
               <div key={term} className="flex items-baseline justify-between gap-4 px-4 py-3">

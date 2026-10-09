@@ -124,6 +124,125 @@
       "args": []
     },
     {
+      "name": "cancel_sell_order",
+      "docs": [
+        "Cancel a sell order and return the shares. The seller may cancel at",
+        "any time; after `end_ts` anyone may, and then the shares go only to",
+        "the seller's canonical share account."
+      ],
+      "discriminator": [
+        35,
+        49,
+        106,
+        38,
+        91,
+        127,
+        157,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "signer": true
+        },
+        {
+          "name": "sell_order",
+          "writable": true
+        },
+        {
+          "name": "basket",
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "share_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "sell_order"
+              },
+              {
+                "kind": "account",
+                "path": "share_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "seller",
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "seller_share_account",
+          "docs": [
+            "A share account the seller owns; for anyone but the seller, their",
+            "canonical one (checked in the handler)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "share_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_protocol_fee",
       "docs": [
         "Mint a basket's accrued protocol fee to the treasury's share account and",
@@ -610,6 +729,212 @@
       "args": []
     },
     {
+      "name": "fill_sell_order",
+      "docs": [
+        "Fill a sell order: the filler pays the seller the auction's current",
+        "cash (into the seller's canonical cash account, created here if need",
+        "be, grossed up for any transfer fee so the seller nets it) and takes the",
+        "escrowed shares. Permissionless. The filler may redeem the shares in",
+        "kind with `redeem_shares` in the same transaction."
+      ],
+      "discriminator": [
+        251,
+        169,
+        25,
+        71,
+        13,
+        120,
+        20,
+        126
+      ],
+      "accounts": [
+        {
+          "name": "filler",
+          "docs": [
+            "Pays the seller, and the rent of the seller's cash account if it is new."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "sell_order",
+          "writable": true
+        },
+        {
+          "name": "basket",
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "share_mint"
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "sell_order"
+              },
+              {
+                "kind": "account",
+                "path": "share_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "filler_share_account",
+          "docs": [
+            "Where the filler wants the shares. The filler signs, so it is theirs to pick."
+          ],
+          "writable": true
+        },
+        {
+          "name": "seller",
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "seller_cash_account",
+          "docs": [
+            "The seller is paid only into their canonical cash account, which the",
+            "filler creates if it does not exist yet."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "seller"
+              },
+              {
+                "kind": "account",
+                "path": "cash_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "cash_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "cash_mint",
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "filler_cash_account",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "sell_order"
+          ]
+        },
+        {
+          "name": "share_token_program"
+        },
+        {
+          "name": "cash_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "mint_shares",
       "docs": [
         "Deposit the recipe in kind and receive `shares` share tokens.",
@@ -946,6 +1271,176 @@
       ]
     },
     {
+      "name": "place_sell_order",
+      "docs": [
+        "Escrow `shares` and post a Dutch auction for dollars: the cash the",
+        "seller must **receive** is `start_cash` until `start_ts`, decays",
+        "linearly to `end_cash` at `end_ts`, and the order cannot be filled",
+        "after `end_ts`. The seller's worst case is `end_cash`, their floor.",
+        "No protocol fee: leaving a basket is free."
+      ],
+      "discriminator": [
+        254,
+        177,
+        180,
+        104,
+        171,
+        194,
+        79,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "seller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "basket"
+        },
+        {
+          "name": "sell_order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "basket"
+              },
+              {
+                "kind": "account",
+                "path": "seller"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "share_mint"
+        },
+        {
+          "name": "seller_share_account",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The sell order's own share account. `init_if_needed`, so someone",
+            "creating it first cannot block the order; measured by balance delta."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "sell_order"
+              },
+              {
+                "kind": "account",
+                "path": "share_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "cash_mint"
+        },
+        {
+          "name": "share_token_program"
+        },
+        {
+          "name": "cash_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "shares",
+          "type": "u64"
+        },
+        {
+          "name": "start_cash",
+          "type": "u64"
+        },
+        {
+          "name": "end_cash",
+          "type": "u64"
+        },
+        {
+          "name": "start_ts",
+          "type": "i64"
+        },
+        {
+          "name": "end_ts",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "redeem_shares",
       "docs": [
         "Burn `shares` and take the underlying components back out, pro rata.",
@@ -1232,6 +1727,19 @@
         162,
         2
       ]
+    },
+    {
+      "name": "SellOrder",
+      "discriminator": [
+        125,
+        28,
+        219,
+        150,
+        25,
+        64,
+        250,
+        236
+      ]
     }
   ],
   "events": [
@@ -1340,6 +1848,19 @@
       ]
     },
     {
+      "name": "PlanTrail",
+      "discriminator": [
+        104,
+        58,
+        64,
+        91,
+        217,
+        234,
+        63,
+        207
+      ]
+    },
+    {
       "name": "PlanUpdated",
       "discriminator": [
         49,
@@ -1376,6 +1897,45 @@
         230,
         194,
         184
+      ]
+    },
+    {
+      "name": "SellOrderCancelled",
+      "discriminator": [
+        182,
+        0,
+        198,
+        165,
+        128,
+        233,
+        74,
+        99
+      ]
+    },
+    {
+      "name": "SellOrderFilled",
+      "discriminator": [
+        119,
+        36,
+        160,
+        142,
+        108,
+        196,
+        88,
+        104
+      ]
+    },
+    {
+      "name": "SellOrderPlaced",
+      "discriminator": [
+        102,
+        129,
+        44,
+        158,
+        235,
+        219,
+        216,
+        128
       ]
     },
     {
@@ -1675,6 +2235,16 @@
       "code": 6053,
       "name": "RefundNotToBuyerAta",
       "msg": "A third party's refund must go to the buyer's associated cash account"
+    },
+    {
+      "code": 6054,
+      "name": "RefundNotToSellerAta",
+      "msg": "A third party's return must go to the seller's associated share account"
+    },
+    {
+      "code": 6055,
+      "name": "SellerPaidShort",
+      "msg": "The seller would receive less cash than the auction asks"
     }
   ],
   "types": [
@@ -2396,6 +2966,25 @@
       }
     },
     {
+      "name": "PlanTrail",
+      "docs": [
+        "A plan's trailing step, set when it is opened."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "plan",
+            "type": "pubkey"
+          },
+          {
+            "name": "step_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "PlanUpdated",
       "type": {
         "kind": "struct",
@@ -2473,6 +3062,221 @@
           {
             "name": "shares",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellOrder",
+      "docs": [
+        "A holder's offer to sell shares for cash, escrowed in the sell order's",
+        "own share account (its associated token account for the share mint)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "docs": [
+              "Receives the cash (in their canonical cash account) or the shares back."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Paid the order's and escrow's rent; gets both back when it closes."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "shares",
+            "docs": [
+              "Shares escrowed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_cash",
+            "docs": [
+              "Cash the seller must receive at `start_ts`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "end_cash",
+            "docs": [
+              "Cash the seller must receive at `end_ts`: the seller's floor."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellOrderCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sell_order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares_returned",
+            "type": "u64"
+          },
+          {
+            "name": "expired",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellOrderFilled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sell_order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "filler",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "docs": [
+              "Shares the filler took."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cash",
+            "docs": [
+              "Cash the seller received (the auction's count at `filled_at`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cash_paid",
+            "docs": [
+              "Cash the filler sent, grossed up for any transfer fee."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Raw cash per whole share, floored, saturating."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "filled_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellOrderPlaced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sell_order",
+            "type": "pubkey"
+          },
+          {
+            "name": "basket",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "shares",
+            "type": "u64"
+          },
+          {
+            "name": "start_cash",
+            "type": "u64"
+          },
+          {
+            "name": "end_cash",
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
           }
         ]
       }

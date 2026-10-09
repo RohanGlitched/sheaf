@@ -12,7 +12,14 @@ import { Anatomy } from "@/components/home-anatomy";
 import { Dividends, Premiums } from "@/components/home-market-facts";
 import { Keys, Revenue } from "@/components/home-ledgers";
 
-/** The story in the order it happens to a basket, and the order the page tells it in. */
+/** The hero basket: five listed megacaps, so the first basket a visitor opens has a history and dividends. */
+const BIG_FIVE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+
+/**
+ * The story in the order it happens to a basket. The first four are the share
+ * itself: made in kind, bought with dollars, bought every month. The last two
+ * are markets that sit beside it.
+ */
 const LIFE = [
   {
     n: "1",
@@ -26,7 +33,7 @@ const LIFE = [
     title: "Create shares in kind",
     on: "Onchain vault",
     href: "#anatomy",
-    body: "A share is created by depositing exactly what the recipe names and redeemed by taking exactly that back. No oracle prices it, so there is no price to push and no way to create an unbacked share.",
+    body: "A share is created by depositing exactly what the recipe names and redeemed by taking exactly that back. The program reads no price: it checks backing itself, so there is no way to create an unbacked share.",
   },
   {
     n: "3",
@@ -44,17 +51,17 @@ const LIFE = [
   },
   {
     n: "5",
-    title: "Trade it before it exists",
-    on: "Launch market",
-    href: "/basket/FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8#launch",
-    body: "A new basket can open a Meteora bonding curve priced from its own value, so people can buy in before anyone assembles the first share. Bitcoin, by proxy has one open on the current curve. The launch token is its own market, separate from the backed share.",
+    title: "Open a launch market",
+    on: "Beside the share",
+    href: "#launch",
+    body: "A basket's creator can open a Meteora bonding curve beside it: a separate launch token, priced from the basket's value. It is a bet on the basket, not a share, and it cannot be redeemed for the stocks.",
   },
   {
     n: "6",
     title: "Bet on it",
-    on: "Prediction market",
+    on: "Beside the share",
     href: "#predict",
-    body: "Ask whether a basket beats SPY this week. Its value is read from the vault, so the market settles without trusting anyone's price. Panta runs the market on Solana.",
+    body: "Ask whether a basket beats SPY this week. It settles from a published number at two Friday closes, with every input listed so anyone can recompute it. Panta runs the market on Solana, in its sandbox today.",
   },
 ];
 
@@ -62,6 +69,8 @@ export default function Home() {
   return (
     <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
       {/* ------------------------------------------------------------- hero */}
+      {/* One person, one promise: a share that is always backed by the stocks in
+          its vault and redeemable for them, bought in kind, with dollars or every month. */}
       <section className="grid gap-12 pt-14 pb-16 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-14 lg:pt-20">
         <div className="max-w-[34rem] self-center">
           <Link
@@ -75,46 +84,40 @@ export default function Home() {
             Bind up to eight stocks into one share.
           </h1>
           <p className="rise mt-7 max-w-[44ch] text-lg leading-relaxed text-ink-2" style={{ "--i": 2 } as React.CSSProperties}>
-            Your own index fund, made of tokenized stocks. Pick up to eight
-            companies and set the weights. Every share is backed by the real
-            stocks in an onchain vault, and redeeming one hands you the stocks
-            back.
+            One share holds a fixed recipe of tokenized stocks, kept in its own
+            onchain vault. It is always backed by those stocks, and anyone can
+            redeem it for them. Buy it in kind, with dollars, or a little every
+            month.
           </p>
           <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
             <ComposeCta>Create a basket</ComposeCta>
             <Link
-              href="/explore"
+              href={`/basket/${BIG_FIVE}`}
               className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-5 py-3 text-sm text-ink transition-colors hover:border-ink-3"
             >
-              Browse baskets
+              Open the Big Five
             </Link>
           </div>
           <p className="rise mt-8 max-w-[52ch] text-sm leading-relaxed text-ink-3" style={{ "--i": 4 } as React.CSSProperties}>
-            No oracle prices a share. It is created by depositing the exact stocks
-            its recipe names and redeemed by withdrawing them, so the vault can
-            only ever hold more than the shares claim.
+            A fixed basket, like a unit investment trust: no manager and no
+            rebalancing. To change a recipe, publish a new basket. The program
+            reads no price; it checks backing itself, so the vault can only ever
+            hold at least what the shares claim.
           </p>
         </div>
 
         <div className="self-center">
           <HomeSheaf />
+          <p className="mt-3 text-center text-xs text-ink-3">
+            Backed today by devnet mirror tokens; on mainnet, by the real xStocks and PreStocks.
+          </p>
         </div>
       </section>
 
-      {/* ------------------------------------------------------------ stats */}
-      <section className="border-y border-line py-px">
-        <HomeStats />
-      </section>
-
-      {/* ------------------------------------------------------------ tape */}
-      <section className="py-20">
-        <LiveTape />
-      </section>
-
       {/* ------------------------------------------------------- lifecycle */}
-      <section className="py-20">
+      <section className="border-t border-line py-20">
         <h2 className="display text-title max-w-[26ch] text-ink">
-          From a recipe to a market of its own, and none of it asks you to trust us.
+          One backed share, three ways in, and none of it asks you to trust us.
         </h2>
         <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {LIFE.map((step) => (
@@ -157,17 +160,47 @@ export default function Home() {
         <Anatomy />
       </section>
 
+      {/* -------------------------------------------------------- baskets */}
+      <section className="border-t border-line py-20">
+        <FeaturedBaskets />
+      </section>
+
       {/* ----------------------------------------------------------- plans */}
       <section id="plans" className="scroll-mt-24 border-t border-line py-20">
         <HomePlans />
       </section>
 
-      {/* ---------------------------------------------------------- launch */}
-      <section id="launch" className="scroll-mt-24 border-t border-line py-20">
+      {/* --------------------------------------------------------- revenue */}
+      <section className="border-t border-line py-20">
+        <Revenue />
+        <p className="mt-10">
+          <Link href="/business" className="text-sm text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
+            How Sheaf makes money →
+          </Link>
+        </p>
+      </section>
+
+      {/* ------------------------------------------------------------ keys */}
+      <section className="border-t border-line py-20">
+        <Keys />
+      </section>
+
+      {/* ------------------------------------------------ beside the share */}
+      <section className="border-t border-line pt-20">
+        <div className="max-w-[56ch]">
+          <h2 className="display text-title text-ink">Beside the share.</h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
+            Two markets can sit next to a basket without touching its vault: a launch token to
+            bet on it, and a weekly question against SPY. Neither is a share, and neither can be
+            redeemed for the stocks.
+          </p>
+        </div>
+      </section>
+
+      <section id="launch" className="scroll-mt-24 py-20">
         <LaunchMarket />
       </section>
 
-      {/* ------------------------------------------------------ prediction */}
       <section id="predict" className="scroll-mt-24 border-t border-line py-20">
         <HomePredict />
       </section>
@@ -184,14 +217,22 @@ export default function Home() {
             Why the numbers hold up.
           </h2>
           <p className="mt-5 text-base leading-relaxed text-ink-2">
-            Three things about tokenized stocks that a basket has to get right:
-            the gap between a token and its listed share, dividends that arrive as
-            a multiplier, and a market that never closes.
+            What a basket is made of, read live: the tokens trading on Solana right now, the gap
+            between a token and its listed share, dividends that arrive as a multiplier, and a
+            market that never closes.
           </p>
         </div>
 
-        {/* premiums */}
+        <div className="mt-12 border-y border-line py-px">
+          <HomeStats />
+        </div>
+
         <div className="py-16">
+          <LiveTape />
+        </div>
+
+        {/* premiums */}
+        <div className="border-t border-line py-16">
           <div className="max-w-[46ch]">
             <h3 className="display text-2xl text-ink sm:text-3xl">Two prices for one company.</h3>
             <p className="mt-4 text-base leading-relaxed text-ink-2">
@@ -243,21 +284,6 @@ export default function Home() {
             <MarketClock />
           </div>
         </div>
-      </section>
-
-      {/* --------------------------------------------------------- revenue */}
-      <section className="border-t border-line py-20">
-        <Revenue />
-      </section>
-
-      {/* ------------------------------------------------------------ keys */}
-      <section className="border-t border-line py-20">
-        <Keys />
-      </section>
-
-      {/* -------------------------------------------------------- baskets */}
-      <section className="border-t border-line py-20">
-        <FeaturedBaskets />
       </section>
     </div>
   );

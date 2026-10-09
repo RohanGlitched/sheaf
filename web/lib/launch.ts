@@ -9,7 +9,6 @@ import {
   launchName,
   launchSymbol,
 } from "./dbc";
-import { SITE_URL } from "./config";
 import preset from "./meteora-preset.json";
 
 /**
@@ -58,34 +57,37 @@ export async function solUsd(): Promise<number> {
 }
 
 /**
- * The token URI a launch is minted with. The token is immutable, so the NAV,
- * SOL price, time and preset it opened on become a permanent on-chain record
- * that anyone can check "opened at half of NAV" against.
+ * Where every launch token's metadata lives. Fixed to the production host, not
+ * SITE_URL: the token is immutable, so a preview or renamed domain baked in at
+ * open would be wrong forever (BIG5A, FRNTRA and PROXYA carry the retired
+ * sheaf.vercel.app for exactly that reason).
  */
-export function launchUri(basket: string, navSol: number, solUsd: number | null, at = new Date()): string {
-  const query = new URLSearchParams({
-    nav: navSol.toPrecision(6),
-    ...(solUsd != null && { sol: solUsd.toFixed(2) }),
-    t: String(Math.floor(at.getTime() / 1000)),
-    preset: preset.id,
-  });
-  return `${SITE_URL}/api/launch/${basket}?${query}`;
+export const LAUNCH_METADATA_SITE = "https://sheaf-index.vercel.app";
+
+/**
+ * The token URI a launch is minted with. It is kept short on purpose: the
+ * config, pool and metadata go in one legacy transaction, and a 32-character
+ * name with a longer URI does not fit in 1,232 bytes
+ * (`scripts/meteora-launch-size.mjs` checks it). Provenance (NAV at open, SOL
+ * price, open time, preset) is not written here; the metadata route derives it
+ * from the pool's own accounts and checks it against independent prices.
+ */
+export function launchUri(basket: string): string {
+  return `${LAUNCH_METADATA_SITE}/api/launch/${basket}`;
 }
 
 /**
  * The one transaction that opens a basket's launch: a DBC config sized off the
  * basket's NAV and the pool on it. Partially signed by the derived config and
  * mint keys of the first free slot; the creator's wallet pays and signs last.
- * Pass the SOL price the NAV was converted at, so the token records it.
  */
 export async function buildLaunch(params: {
   connection: Connection;
   creator: PublicKey;
   basket: { address: string; name: string; symbol: string };
   navSol: number;
-  solUsd?: number | null;
 }): Promise<Transaction> {
-  const { connection, creator, basket, navSol, solUsd = null } = params;
+  const { connection, creator, basket, navSol } = params;
   const {
     DynamicBondingCurveClient,
     buildCurveWithCustomSqrtPrices,
@@ -198,7 +200,7 @@ export async function buildLaunch(params: {
     preCreatePoolParam: {
       name: launchName(basket.name),
       symbol: launchSymbol(basket.symbol),
-      uri: launchUri(basket.address, navSol, solUsd),
+      uri: launchUri(basket.address),
       poolCreator: creator,
       baseMint: mint.publicKey,
     },

@@ -33,6 +33,11 @@ const LIMIT = Number(flag("limit", "1000"));
 
 const teamSource = fs.readFileSync(path.join(ROOT, "web/lib/team-wallets.ts"), "utf8");
 const TEAM = new Set([...teamSource.matchAll(/address:\s*"([^"]+)"/g)].map((m) => m[1]));
+// The fixed-seed test wallets every script signs with, if the generated list is there.
+const generated = path.join(ROOT, "web/lib/test-wallets.generated.ts");
+if (fs.existsSync(generated)) {
+  for (const m of fs.readFileSync(generated, "utf8").matchAll(/"([1-9A-HJ-NP-Za-km-z]{32,44})"/g)) TEAM.add(m[1]);
+}
 
 const configSource = fs.readFileSync(path.join(ROOT, "web/lib/config.ts"), "utf8");
 const PROGRAM = process.env.NEXT_PUBLIC_SHEAF_PROGRAM_ID ?? configSource.match(/SHEAF_PROGRAM_ID =[\s\S]*?"([1-9A-HJ-NP-Za-km-z]{32,44})"/)?.[1];

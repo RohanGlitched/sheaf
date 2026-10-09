@@ -62,14 +62,18 @@ type BuyKey = (typeof BUY)[number];
 
 const cents = (p: string | null | undefined) => (p == null ? "—" : `${Math.round(Number(p) * 100)}¢`);
 const day = (unix: number) => new Date(unix * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+/** A US close, dated in New York (16:00 there is already the next day in Asia). */
+const nyDay = (unix: number) =>
+  new Date(unix * 1000).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/New_York" });
 const mono = (s: ReactNode) => <span className="font-mono text-[11px]">{s}</span>;
 
 /**
  * "Will this basket beat SPY this week?" as a Panta prediction market, driven
  * through Panta's whole write lifecycle.
  *
- * Sheaf writes the question and a resolution rule anyone can check (the vault's
- * value, served as JSON at /api/nav/<basket>, against SPY's close), then runs
+ * Sheaf writes the question and a resolution rule anyone can check (the recipe's
+ * listed value at two Friday US closes, served as JSON at
+ * /api/nav/<basket>?at=<close>, against SPY's adjusted close), then runs
  * each step of opening the market and buying a side against Panta's API and
  * shows what Panta answered. The wallet is asked to sign and nothing is ever
  * sent: with a pk_test_ key Panta answers from its sandbox, and the server
@@ -92,6 +96,19 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
   const [amount, setAmount] = useState("20");
   const [busy, setBusy] = useState<string | null>(null);
   const [fail, setFail] = useState<{ at: string; msg: string; skippable?: boolean } | null>(null);
+  // Whether a market can be offered at all: the rule reads navPerShare.listed at
+  // two closes, which a basket holding a pre-IPO company does not have.
+  const [offer, setOffer] = useState<{ offered: boolean; reason?: string } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    pantaGet<{ resolution?: { offered?: boolean; reason?: string } }>(`/api/nav/${basket}`).then((r) => {
+      if (live && r.ok) setOffer({ offered: r.data.resolution?.offered !== false, reason: r.data.resolution?.reason });
+    });
+    return () => {
+      live = false;
+    };
+  }, [basket]);
 
   useEffect(() => {
     let live = true;
@@ -460,8 +477,9 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
         <p className="text-sm text-bind">Prediction market</p>
         <h2 className="display mt-2 text-title max-w-[18ch] text-ink">{question}</h2>
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
-          A basket&apos;s recipe and vault are public accounts, so a bet on it settles from a number
-          anyone can recompute, using public closes and prices. Sheaf writes the question and the rule.
+          A basket&apos;s recipe is a public account, so a bet on it settles from a published number at two
+          Friday US closes, with every input listed so anyone can recompute it. Sheaf writes the question
+          and the rule.
           Panta runs the market on Solana, priced on a bonding curve and paid in USDC.
         </p>
         <PoweredByPanta className="mt-6" />
@@ -470,8 +488,9 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
             Running against Panta&apos;s sandbox (a <code>pk_test_</code> key). Every step on the right is a
             real call to Panta&apos;s API and shows what came back; anything marked{" "}
             <span className="uppercase tracking-wide">sandbox fixture</span> is Panta&apos;s canned test
-            answer, not a figure for this basket. Your wallet is asked to sign, and nothing is ever sent:
-            no transaction reaches mainnet and no USDC moves.
+            answer, not a figure for this basket. The sandbox returns no real transaction to sign, so
+            your wallet signs a stand-in (a memo on a fresh devnet blockhash), and that signed stand-in is
+            never broadcast: no transaction reaches any cluster and no USDC moves.
           </p>
         )}
         {mode === "live" && (
@@ -494,6 +513,20 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
         </div>
       </div>
 
+      {offer?.offered === false ? (
+        <div className="self-start rounded-[var(--radius-panel)] border border-line bg-surface p-6">
+          <p className="text-xs text-ink-3">No market on {symbol}</p>
+          <p className="mt-2 max-w-[56ch] text-sm leading-relaxed text-ink-2">
+            The question resolves from <code className="text-xs">navPerShare.listed</code> at two Friday US
+            closes, and {symbol} holds companies that are not listed yet, so that number does not exist for
+            it. Sheaf offers a Panta market only on baskets whose every holding has a listed close.
+          </p>
+          {offer.reason && <p className="mt-3 max-w-[56ch] text-xs leading-relaxed text-ink-3">{offer.reason}</p>}
+          <Link href="/predict" className="mt-4 inline-block text-sm text-ink underline decoration-line-strong underline-offset-4">
+            Baskets with a market →
+          </Link>
+        </div>
+      ) : (
       <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
         <div className="border-b border-line p-6">
           <p className="text-xs text-ink-3">The question</p>
@@ -506,7 +539,9 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
           </p>
           {c.quote?.draft && (
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
-              Runs {day(c.quote.draft.startTime)} to {day(c.quote.draft.endTime)} · category{" "}
+              Trading opens {day(c.quote.draft.startTime)} · measures the Friday closes{" "}
+              {nyDay(c.quote.draft.endTime - 7 * 86_400)} to {nyDay(c.quote.draft.endTime)}, so none of the week is
+              known when it opens · category{" "}
               {c.quote.draft.category}
               {c.quote.categoryPreferred === false && " (the sandbox has no finance category; live, it files under finance)"}
               {" · "}
@@ -639,6 +674,7 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
           </a>
         </div>
       </div>
+      )}
     </div>
   );
 }

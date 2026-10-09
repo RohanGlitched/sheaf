@@ -18,6 +18,19 @@ import {
   verifyBuy,
 } from "@/lib/panta-server";
 import { clientIp, throttle, type Budget } from "@/lib/panta-throttle";
+import { fetchBasketAt } from "@/lib/sheaf";
+import { stockForWriteMint } from "@/lib/mirror";
+import { HISTORY_SYMBOLS } from "@/lib/history";
+
+/** Holdings with no listed price history (pre-IPO), or null when there is no basket at the address. */
+async function unlistedHoldings(address: string): Promise<string[] | null> {
+  const basket = await fetchBasketAt(address).catch(() => null);
+  if (!basket) return null;
+  return basket.components
+    .map((c) => stockForWriteMint(c.mint)?.base ?? null)
+    .filter((base) => !base || !HISTORY_SYMBOLS.includes(base))
+    .map((base) => base ?? "an unknown token");
+}
 
 /**
  * GET  /api/panta -> { mode, markets, category, trades }  (GET /markets/, /categories/, /markets/{id}/trades/)
@@ -120,6 +133,15 @@ export async function POST(req: Request) {
         const name = String(body.name ?? "").slice(0, 40).trim();
         const symbol = String(body.symbol ?? "").slice(0, 10).trim();
         if (!name || !symbol) throw new BadRequest("Name the basket.");
+        // The rule resolves from navPerShare.listed at two closes; a basket with a
+        // pre-IPO holding has no listed history, so no market is drafted for it.
+        const unlisted = await unlistedHoldings(basket);
+        if (unlisted == null) throw new BadRequest("Unknown basket.");
+        if (unlisted.length) {
+          throw new BadRequest(
+            `No market is offered on this basket: ${unlisted.join(", ")} ha${unlisted.length === 1 ? "s" : "ve"} no listed price history (pre-IPO), so the value the rule reads at a close does not exist.`,
+          );
+        }
         out = await quoteBasketMarket({ wallet: wallet!, basket, name, symbol });
         break;
       }

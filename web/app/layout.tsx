@@ -5,6 +5,7 @@ import { DevnetNotice } from "@/components/devnet-notice";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { WalletProvider } from "@/components/wallet-provider";
+import { VoicesRefKeeper } from "@/components/voices-ref-keeper";
 import { MarketProvider } from "@/components/market-provider";
 import { SITE_URL } from "@/lib/config";
 
@@ -36,7 +37,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Sheaf",
     description:
-      "Index funds of tokenized stocks: one share, backed by the real stocks, redeemable any time.",
+      "Fixed baskets of tokenized stocks: one share, backed by the stocks in its vault, redeemable for them any time.",
     type: "website",
   },
   twitter: { card: "summary_large_image" },
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-page">
         <WalletProvider>
+          <VoicesRefKeeper />
           <MarketProvider>
             <SiteHeader />
             <DevnetNotice />

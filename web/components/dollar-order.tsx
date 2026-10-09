@@ -6,13 +6,13 @@ import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-t
 import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
-import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, type Order } from "@/lib/desk";
+import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, netSharesFor, type Order } from "@/lib/desk";
 import { eventsInLogs } from "@/lib/ledger";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
-import { money } from "@/lib/format";
+import { money, timeAgo } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 
 const AUCTION_SECS = 90;
@@ -22,6 +22,45 @@ const BAND_BPS = 200;
  * order would only wait out its auction and come back, so the form starts there.
  */
 export const MIN_ORDER_DOLLARS = 5;
+
+/** What a filler pays on mainnet routes to buy this basket's stocks, one way, in basis points, by order size in dollars. */
+export type RouteCost = { basket: string; bps: Record<string, number>; at: number };
+
+/**
+ * The measured one-way route cost for a basket (GET /api/route-cost), or null
+ * while it loads or when the route is unavailable. Null never blocks anything.
+ */
+export function useRouteCost(basket: string): RouteCost | null {
+  const [cost, setCost] = useState<RouteCost | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/route-cost?basket=${encodeURIComponent(basket)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: RouteCost | null) => {
+        if (live && j && j.bps && typeof j.bps === "object") setCost(j);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [basket]);
+  return cost;
+}
+
+/** The route cost for an order of `dollars`: the measured size nearest to it, or null if none was measured. */
+export function routeBpsFor(cost: RouteCost | null, dollars: number): number | null {
+  if (!cost) return null;
+  const sizes = Object.keys(cost.bps)
+    .map(Number)
+    .filter((s) => Number.isFinite(s) && Number.isFinite(cost.bps[String(s)]));
+  if (sizes.length === 0) return null;
+  const target = Number.isFinite(dollars) && dollars > 0 ? dollars : 100;
+  const nearest = sizes.reduce((a, b) => (Math.abs(Math.log(b / target)) < Math.abs(Math.log(a / target)) ? b : a));
+  return cost.bps[String(nearest)];
+}
+
+/** True when no filler could buy the stocks inside the auction's band today, so a dollar order or plan run could not fill. */
+export const routeOutsideBand = (bps: number | null, bandBps = 200) => bps != null && bps > bandBps;
 
 type Stage =
   | { kind: "idle" }
@@ -55,15 +94,23 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   const tooSmall = Number.isFinite(amount) && amount > 0 && amount < MIN_ORDER_DOLLARS;
   const valid = Number.isFinite(amount) && amount >= MIN_ORDER_DOLLARS;
   const fair = valid && navPerShare ? amount / navPerShare : null;
+  const creatorFeeBps = basket.creatorFeeBps;
+  const protocolFeeBps = basket.protocolFeeBps ?? 0;
+  // The order names the shares the buyer receives. The filler delivers the stocks for the gross count and the
+  // basket's creator and protocol fees come out of it, so the auction runs ±2% around the fair count net of both.
   const bounds = useMemo(() => {
     if (!fair) return null;
-    const raw = BigInt(Math.floor(fair * 1e6));
+    const gross = BigInt(Math.floor(fair * 1e6));
     return {
-      start: (raw * BigInt(10_000 + BAND_BPS)) / 10_000n,
-      end: (raw * BigInt(10_000 - BAND_BPS)) / 10_000n,
+      start: netSharesFor((gross * BigInt(10_000 + BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
+      end: netSharesFor((gross * BigInt(10_000 - BAND_BPS)) / 10_000n, creatorFeeBps, protocolFeeBps),
     };
-  }, [fair]);
+  }, [fair, creatorFeeBps, protocolFeeBps]);
+  const feeBps = creatorFeeBps + protocolFeeBps;
   const short = cash.balance != null && valid && cash.balance < toCashRaw(amount);
+  const routeCost = useRouteCost(basket.address);
+  const routeBps = routeBpsFor(routeCost, amount);
+  const blocked = routeOutsideBand(routeBps, BAND_BPS);
 
   // While an order is open, tick the clock and watch the order account: when the
   // account disappears, a filler has taken it.
@@ -153,7 +200,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   }
 
   async function place() {
-    if (!publicKey || !bounds || !valid) return;
+    if (!publicKey || !bounds || !valid || blocked) return;
     setError(null);
     setStage({ kind: "signing" });
     try {
@@ -273,10 +320,27 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
                 <span className="tnum text-ink">{(Number(bounds.start) / 1e6).toFixed(4)}</span> {basket.symbol}.
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
-                The offer starts 2% above the fair count at {money(navPerShare)} a share and falls to 2% below over ninety seconds.
+                The offer starts 2% above the fair count at {money(navPerShare)} a share and falls to 2% below over ninety seconds
+                {feeBps > 0
+                  ? `, after the basket's fees (${(creatorFeeBps / 100).toFixed(2)}% to its creator${protocolFeeBps > 0 ? `, ${(protocolFeeBps / 100).toFixed(2)}% to Sheaf` : ""})`
+                  : ""}
+                .
                 The first filler to deliver takes your dollars; if nobody does, the order can be refunded in full.
               </p>
+              {routeBps != null && (
+                <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
+                  On mainnet routes, buying these stocks costs a filler about {(routeBps / 100).toFixed(2)}% one way
+                  {routeCost?.at ? `, measured ${timeAgo(routeCost.at > 1e12 ? routeCost.at / 1000 : routeCost.at)}` : ""}.
+                </p>
+              )}
             </div>
+          )}
+
+          {blocked && (
+            <p className="mt-4 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
+              On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
+              {((routeBps ?? 0) / 100).toFixed(2)}% one way. Create shares in kind instead, from the Create in kind tab.
+            </p>
           )}
 
           {!connected ? (
@@ -287,12 +351,14 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
             <button
               type="button"
               onClick={place}
-              disabled={!bounds || short || stage.kind === "signing"}
+              disabled={!bounds || short || blocked || stage.kind === "signing"}
               className="mt-6 w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:bg-sunk disabled:text-ink-3"
             >
               {stage.kind === "signing"
                 ? "Approve in your wallet…"
-                : tooSmall
+                : blocked
+                  ? "Dollar orders are off for this basket"
+                  : tooSmall
                   ? `Enter at least ${money(MIN_ORDER_DOLLARS)}`
                   : short
                     ? "Not enough test dollars"

@@ -176,7 +176,7 @@ export function EvmDeskBook({
                       ) : o.status === "Open" ? (
                         <span className={expired ? "text-loss" : "text-ink"}>{expired ? "Expired" : `Open, expires ${timeAgo(o.expiry)}`}</span>
                       ) : (
-                        <span className="text-ink-3">{o.status}</span>
+                        <span className="text-ink-3">{o.status === "Cancelled" ? "Canceled" : o.status}</span>
                       )}
                     </td>
                     <td className="px-3 py-3 text-right sm:px-4">

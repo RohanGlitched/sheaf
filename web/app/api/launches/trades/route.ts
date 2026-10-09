@@ -1,36 +1,63 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { WRITE_RPC } from "@/lib/config";
-import { DBC_PROGRAM } from "@/lib/dbc";
+import { openLaunches } from "@/lib/dbc";
+import { clientIp, rateLimiter } from "@/lib/evm-server";
+import { fetchBaskets } from "@/lib/sheaf";
+import { isSiteOrigin } from "@/lib/server-origin";
 import { TRADE_WINDOW, readTrades } from "../read-trades";
 
 export const dynamic = "force-dynamic";
 
+/** 20 lookups a minute per IP; each one reads up to 100 transactions per market. */
+const perIp = rateLimiter(60_000, 20);
+
+/** The official launch pools, refreshed once a minute: the only pools this route will read. */
+let official: { at: number; pools: Map<string, string> } | null = null;
+async function officialPools(connection: Connection): Promise<Map<string, string>> {
+  if (official && Date.now() - official.at < 60_000) return official.pools;
+  const found = await openLaunches(connection, await fetchBaskets(connection));
+  const pools = new Map([...found.values()].map((info) => [info.pool, info.baseMint]));
+  official = { at: Date.now(), pools };
+  return pools;
+}
+
 /**
  * GET /api/launches/trades?pool=<DBC pool>
  *
- * The recent swaps on one launch, on its curve and (once graduated) its DAMM v2
- * pool, newest first. Sheaf's own wallets carry `team` ("house", "test
- * wallet", ...): those trades are ours and never count as traction; `traders`
- * counts only wallets outside the team.
+ * The recent swaps on one official launch, on its curve and (once graduated)
+ * its DAMM v2 pool, newest first. Sheaf's own wallets carry `team` ("house",
+ * "test wallet", ...): those trades are ours and never count as traction;
+ * `traders` counts only wallets outside the team.
+ *
+ * Only the pools of official launches are read, so the work behind this route
+ * is bounded by the number of launches, whatever address is asked for. Calls
+ * from another site's pages are refused, and each IP gets 20 a minute.
  */
 export async function GET(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin && !isSiteOrigin(origin)) return Response.json({ error: "Not allowed." }, { status: 403 });
+  const ip = clientIp(req);
+  const limit = perIp.check(ip);
+  if (!limit.ok) {
+    return Response.json({ error: "Too many requests." }, { status: 429, headers: { "retry-after": String(limit.retryInSec) } });
+  }
+  perIp.hit(ip);
+
   const address = new URL(req.url).searchParams.get("pool") ?? "";
-  let pool: PublicKey;
+  let pool: string;
   try {
-    pool = new PublicKey(address);
+    pool = new PublicKey(address).toBase58();
   } catch {
-    return Response.json({ error: "Pass ?pool=<a Meteora DBC pool address>." }, { status: 400 });
+    return Response.json({ error: "Pass ?pool=<an official launch's pool address>." }, { status: 400 });
   }
   const connection = new Connection(WRITE_RPC, "confirmed");
-  const account = await connection.getAccountInfo(pool);
-  if (!account || !account.owner.equals(DBC_PROGRAM) || account.data.length < 376) {
-    return Response.json({ error: "No Meteora DBC pool at that address." }, { status: 404 });
-  }
-  const baseMint = new PublicKey(account.data.subarray(136, 168)).toBase58();
-  const migrated = account.data[305] === 1;
-  const result = await readTrades(connection, { pool: pool.toBase58(), baseMint, migrated });
+  const baseMint = (await officialPools(connection)).get(pool);
+  if (!baseMint) return Response.json({ error: "Not an official Sheaf launch pool." }, { status: 404 });
+  const account = await connection.getAccountInfo(new PublicKey(pool));
+  const migrated = account?.data[305] === 1;
+  const result = await readTrades(connection, { pool, baseMint, migrated });
   return Response.json(
-    { pool: pool.toBase58(), baseMint, graduated: migrated, window: TRADE_WINDOW, ...result },
+    { pool, baseMint, graduated: migrated, window: TRADE_WINDOW, ...result },
     { headers: { "cache-control": "public, s-maxage=30, stale-while-revalidate=120" } },
   );
 }

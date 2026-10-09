@@ -1,5 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { readTape } from "@/lib/tape-server";
+import { rememberOidc } from "@/lib/gcs-store";
+import { maybeSaveSeed } from "@/lib/tape-store";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +22,18 @@ export const dynamic = "force-dynamic";
  * finished, otherwise an empty tape marked `warming` while it finishes in
  * `after()`.
  *
+ * After answering, a tape with 20 or more live rows refreshes the rolling
+ * "earlier trades" seed in GCS (lib/tape-store.ts, served by /api/tape/seed).
+ *
  * `?depth=60` returns up to 60 prints instead of 30 (used by scripts/tape-seed.mjs).
  */
 export async function GET(req: NextRequest) {
   const depth = Math.min(60, Math.max(1, Number(req.nextUrl.searchParams.get("depth")) || 30));
+  rememberOidc(req);
   try {
     const tape = await readTape((task) => after(task));
+    // With 20+ live rows, refresh the rolling seed in GCS (throttled to every 10 min per instance).
+    after(() => maybeSaveSeed(tape));
     return NextResponse.json(
       { ...tape, prints: tape.prints.slice(0, depth) },
       {

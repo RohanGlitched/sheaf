@@ -47,7 +47,6 @@ export async function POST(req: Request) {
       creator: keeper.publicKey,
       basket: { address: basket.address, name: basket.name, symbol: basket.symbol },
       navSol: nav / sol,
-      solUsd: sol,
     });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Could not build the launch." }, { status: 409 });

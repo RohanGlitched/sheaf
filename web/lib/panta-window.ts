@@ -3,9 +3,10 @@
  *
  * Tokens trade around the clock, but SPY's close-to-close change only exists at
  * US closes, so both sides of the comparison are read at the same two closes:
- * the regular-session close (16:00 New York time) on the Friday before the
- * market ends, and on the Friday it ends. When a Friday is a market holiday,
- * the close used is the last one at or before it.
+ * the regular-session close (16:00 New York time) on the first Friday at or
+ * after trading opens, and on the Friday a week later, when the market ends.
+ * Nothing of the measured week is known when trading opens. When a Friday is a
+ * market holiday, the close used is the last one at or before it.
  *
  * Shared by the market draft (lib/panta-server.ts), the NAV route's `?at=`
  * reader and the /predict page, so the rule, the window and the numbers can
@@ -80,17 +81,18 @@ export type MarketWindow = {
 };
 
 /**
- * The window for a market opened at `now`: it ends at the first Friday close at
- * least a day after trading opens, and measures from the Friday close a week
- * before that. Part of the week can have passed when trading opens; the page
- * and the rule say so.
+ * The window for a market opened at `now`. The measured week starts at the
+ * first Friday close at or after trading opens, and ends at the Friday close a
+ * week later, so nothing of the week is known when the first share is bought:
+ * a market opened on a Thursday waits for Friday's close, and one opened on a
+ * Saturday waits six days. Trading runs from `opens` until the week ends.
  */
 export function marketWindow(now = Math.floor(Date.now() / 1000)): MarketWindow {
   const opens = now + 2 * 3600;
-  const toClose = fridayCloseOnOrAfter(opens + 24 * 3600);
-  // Noon a week earlier is safely on the previous Friday whatever daylight saving did.
-  const before = nyParts(toClose - 7 * 86_400 - 4 * 3600);
-  const fromClose = nyToUnix(before.y, before.m, before.d, CLOSE_HOUR_NY);
+  const fromClose = fridayCloseOnOrAfter(opens);
+  // Noon a week later is safely on the next Friday whatever daylight saving did.
+  const after = nyParts(fromClose + 7 * 86_400 - 4 * 3600);
+  const toClose = nyToUnix(after.y, after.m, after.d, CLOSE_HOUR_NY);
   return { opens, fromClose, toClose, resolves: toClose + CLOSE_SETTLE_S + 59 * 60 };
 }
 
@@ -129,12 +131,17 @@ export const fmtClose = (unix: number) =>
   })}, 16:00 New York (${new Date(unix * 1000).toISOString().replace(".000Z", "Z")})`;
 
 /** The resolution rule, word for word as it is sent to Panta and shown on the page. */
-export function resolutionRule(symbol: string, navUrl: string, w: Pick<MarketWindow, "fromClose" | "toClose">) {
+export function resolutionRule(
+  symbol: string,
+  navUrl: string,
+  w: Pick<MarketWindow, "fromClose" | "toClose" | "resolves">,
+) {
   return (
     `YES if ${symbol}'s navPerShare.listed from ${navUrl}?at=${w.toClose} divided by navPerShare.listed from ${navUrl}?at=${w.fromClose} ` +
     `is greater than spy.adjClose divided the same way (the same two URLs). ` +
     `Those times are the US regular-session closes on ${fmtClose(w.fromClose)} and ${fmtClose(w.toClose)}; ` +
     `if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. ` +
+    `Both URLs are read at or after the resolution time, ${new Date(w.resolves * 1000).toISOString().replace(".000Z", "Z")}, so both closes use the same data. ` +
     `NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.`
   );
 }

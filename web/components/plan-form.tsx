@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
-import { openPlanIx } from "@/lib/desk";
+import { openPlanIx, netSharesFor } from "@/lib/desk";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
 import { money } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 import { PlanSheaf } from "./plan-sheaf";
+import { useRouteCost, routeBpsFor, routeOutsideBand } from "./dollar-order";
+import { useInrRate } from "./india-fx";
+import { fxNote, rupees } from "@/lib/fx";
 
 /**
  * Each run's auction: half an hour, so a scheduled keeper always gets a turn
@@ -35,10 +38,15 @@ export const PLAN_BOUND_BPS = 3 * PLAN_BAND_BPS;
 const BOUND_ABOVE = Math.round((10_000 / (10_000 - PLAN_BOUND_BPS) - 1) * 1000) / 10;
 const BOUND_BELOW = Math.round((1 - 10_000 / (10_000 + PLAN_BOUND_BPS)) * 1000) / 10;
 
-/** A plan's reference rate and the bounds it may never leave, from a share's fair price in dollars. */
-export function planTerms(navPerShare: number) {
-  // Raw share units per raw cash unit, times 1e9: (1e6 / nav) shares per 1e6 cash.
-  const ref = BigInt(Math.floor(1e9 / navPerShare));
+/**
+ * A plan's reference rate and the bounds it may never leave, from a share's fair
+ * price in dollars. The rate is net of the basket's creator and protocol fees:
+ * the shares the owner actually receives per dollar, which is also what every
+ * fill moves the reference to.
+ */
+export function planTerms(navPerShare: number, creatorFeeBps = 0, protocolFeeBps = 0) {
+  // Raw share units per raw cash unit, times 1e9: (1e6 / nav) shares per 1e6 cash, less the fees on them.
+  const ref = netSharesFor(BigInt(Math.floor(1e9 / navPerShare)), creatorFeeBps, protocolFeeBps);
   return {
     ref,
     minRef: (ref * BigInt(10_000 - PLAN_BOUND_BPS)) / 10_000n,
@@ -55,44 +63,11 @@ export function planTerms(navPerShare: number) {
  * once it is due, places the same dollar order as the tab beside this one, and
  * every fill moves the plan's reference price to where the market cleared.
  */
-/** Today's rupees per dollar, shared by every component that asks, so the page reads it once. */
-let inrRead: Promise<number | null> | null = null;
-function readInrRate(): Promise<number | null> {
-  inrRead ??= fetch("https://open.er-api.com/v6/latest/USD")
-    .then((r) => r.json())
-    .then((j) => (typeof j?.rates?.INR === "number" && j.rates.INR > 0 ? (j.rates.INR as number) : null))
-    .catch(() => null)
-    .then((rate) => {
-      // A failed read may be retried by the next component that mounts.
-      if (rate == null) inrRead = null;
-      return rate;
-    });
-  return inrRead;
-}
-
-/**
- * Today's rupee rate, for showing a plan in the currency an Indian saver thinks in.
- * `failed` turns true when the rate could not be read, so a form can fall back to dollars.
- */
-export function useInrRate(): { rate: number | null; failed: boolean } {
-  const [state, setState] = useState<{ rate: number | null; failed: boolean }>({ rate: null, failed: false });
-  useEffect(() => {
-    let live = true;
-    void readInrRate().then((rate) => live && setState({ rate, failed: rate == null }));
-    return () => {
-      live = false;
-    };
-  }, []);
-  return state;
-}
-
-/** ₹ in the Indian grouping: ₹1,00,000. */
-export const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-
 /** The keeper fills only orders of $5 or more (lib/keeper-server.ts), so a plan's run must be at least this. */
 export const PLAN_MIN_USD = 5;
 
-const INR_CHIPS = [500, 1_000, 5_000] as const;
+/** Rupee chips: the smallest is ₹500, raised to the $5 floor if the rupee weakens past ₹100 to the dollar. */
+const chipsFor = (minInr: number) => [Math.max(500, Math.ceil(minInr / 100) * 100), 1_000, 5_000].filter((v, i, a) => a.indexOf(v) === i);
 
 export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navPerShare: number | null; onDone: () => void }) {
   const { connection } = useConnection();
@@ -100,7 +75,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
   const cash = useCash();
   // Rupees first; dollars when the visitor asks for them or today's rate can't be read.
   const [unit, setUnit] = useState<"inr" | "usd">("inr");
-  const [perRunInr, setPerRunInr] = useState("500");
+  const [perRunInr, setPerRunInr] = useState("1000");
   const [perRunUsd, setPerRunUsd] = useState("10");
   const [runs, setRuns] = useState(12);
   const [cadence, setCadence] = useState<(typeof CADENCE)[number]["key"]>("month");
@@ -108,26 +83,38 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
 
-  const { rate: inr, failed: inrFailed } = useInrRate();
-  const inRupees = unit === "inr" && !inrFailed;
-  // The plan itself runs in test dollars, to the cent; rupees are converted at today's rate and rounded down.
-  const amount = inRupees ? (inr ? Math.floor((Number(perRunInr) / inr) * 100 + 1e-6) / 100 : NaN) : Number(perRunUsd);
-  const amountInr = inRupees ? Number(perRunInr) : inr ? amount * inr : null;
+  // One site-wide rate (lib/fx.ts): live when it can be read, otherwise a dated fallback, so rupees always work.
+  const { fx } = useInrRate();
+  const inr = fx.rate;
+  const inRupees = unit === "inr";
+  // The plan itself runs in test dollars, to the cent; rupees are converted at the rate and rounded down.
+  const amount = inRupees ? Math.floor((Number(perRunInr) / inr) * 100 + 1e-6) / 100 : Number(perRunUsd);
+  const amountInr: number | null = inRupees ? Number(perRunInr) : amount * inr;
   const entered = inRupees ? perRunInr !== "" : perRunUsd !== "";
   const belowMin = entered && Number.isFinite(amount) && amount < PLAN_MIN_USD;
   const valid = Number.isFinite(amount) && amount >= PLAN_MIN_USD && runs >= 1 && navPerShare != null;
   const c = CADENCE.find((x) => x.key === cadence)!;
   const total = valid ? amount * runs : 0;
-  const minInr = inr ? Math.ceil((PLAN_MIN_USD * inr) / 10) * 10 : null;
+  const minInr = Math.ceil((PLAN_MIN_USD * inr) / 10) * 10;
+  const chips = chipsFor(minInr);
   const per = c.unit === "month" ? "a month" : c.unit === "week" ? "a week" : "every 5 minutes";
+  // What one run buys after the basket's fees, and whether a filler could buy the stocks inside the band today.
+  const netPerRun =
+    valid && navPerShare
+      ? Number(netSharesFor(BigInt(Math.floor((amount / navPerShare) * 1e6)), basket.creatorFeeBps, basket.protocolFeeBps ?? 0)) / 1e6
+      : null;
+  const routeCost = useRouteCost(basket.address);
+  const routeBps = routeBpsFor(routeCost, amount);
+  const blocked = routeOutsideBand(routeBps, PLAN_BAND_BPS);
+  const feeBps = basket.creatorFeeBps + (basket.protocolFeeBps ?? 0);
   const label = amountInr != null && Number.isFinite(amountInr) ? `${rupees(amountInr)} (${money(amount)})` : money(amount);
 
   async function start() {
-    if (!publicKey || !valid || !navPerShare) return;
+    if (!publicKey || !valid || !navPerShare || blocked) return;
     setBusy(true);
     setError(null);
     try {
-      const terms = planTerms(navPerShare);
+      const terms = planTerms(navPerShare, basket.creatorFeeBps, basket.protocolFeeBps ?? 0);
       const { plan, ix } = openPlanIx({
         owner: publicKey,
         basket: new PublicKey(basket.address),
@@ -198,7 +185,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
 
       {inRupees && (
         <div className="mt-5 grid grid-cols-3 gap-2" role="group" aria-label="Rupees per run">
-          {INR_CHIPS.map((r) => {
+          {chips.map((r) => {
             const on = perRunInr === String(r);
             return (
               <button
@@ -240,25 +227,19 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       <p className="tnum mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-ink-3">
         <span>
           {inRupees
-            ? inr == null
-              ? "Reading today's rupee rate…"
-              : `${Number.isFinite(amount) ? money(amount) : "—"} in test dollars a run, at ₹${inr.toFixed(2)} to the dollar today`
-            : inr
-              ? `About ${rupees(amount * inr)} a run at today's rate`
-              : inrFailed
-                ? "Today's rupee rate couldn't be read, so this plan is entered in dollars."
-                : ""}
+            ? `${Number.isFinite(amount) ? money(amount) : "—"} in test dollars a run, at ${fxNote(fx)}`
+            : Number.isFinite(amount)
+              ? `About ${rupees(amount * inr)} a run, at ${fxNote(fx)}`
+              : ""}
         </span>
-        {!inrFailed && (
-          <button type="button" onClick={() => setUnit(inRupees ? "usd" : "inr")} className="text-bind underline decoration-bind/40 underline-offset-4">
-            {inRupees ? "Enter dollars instead" : "Enter rupees instead"}
-          </button>
-        )}
+        <button type="button" onClick={() => setUnit(inRupees ? "usd" : "inr")} className="text-bind underline decoration-bind/40 underline-offset-4">
+          {inRupees ? "Enter dollars instead" : "Enter rupees instead"}
+        </button>
       </p>
       {belowMin && (
         <p className="mt-2 border-l-2 border-loss pl-3 text-sm text-loss" role="status">
-          Plans start at ${PLAN_MIN_USD} a run{minInr ? ` (about ${rupees(minInr)} today)` : ""}. The keeper only fills orders of $
-          {PLAN_MIN_USD} or more, so a smaller run would sit unfilled.
+          Plans start at ${PLAN_MIN_USD} a run (about {rupees(minInr)}). The keeper only fills orders of ${PLAN_MIN_USD} or more,
+          so a smaller run would sit unfilled.
         </p>
       )}
 
@@ -283,13 +264,26 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       {valid && (
         <p className="tnum mt-4 text-sm text-ink-2">
           {label} {per}, {runs} {runs === 1 ? "time" : "times"}: {amountInr != null && Number.isFinite(amountInr) ? `${rupees(amountInr * runs)} (${money(total)})` : money(total)} in all. About{" "}
-          {(amount / navPerShare!).toFixed(4)} {basket.symbol} a run at today&apos;s price.
+          {(netPerRun ?? amount / navPerShare!).toFixed(4)} {basket.symbol} a run at today&apos;s price
+          {feeBps > 0 ? `, after ${(feeBps / 100).toFixed(2)}% in fees` : ""}.
+        </p>
+      )}
+      {valid && routeBps != null && (
+        <p className="tnum mt-2 text-xs leading-relaxed text-ink-3">
+          On mainnet routes, buying these stocks costs a filler about {(routeBps / 100).toFixed(2)}% one way.
+        </p>
+      )}
+      {blocked && (
+        <p className="mt-3 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
+          On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
+          {((routeBps ?? 0) / 100).toFixed(2)}% one way, so every run would come back unfilled. Create shares in kind instead,
+          from the Create in kind tab.
         </p>
       )}
       {navPerShare != null && (
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
           This plan never pays more than {BOUND_ABOVE}% above or {BOUND_BELOW}% below today&apos;s fair price of{" "}
-          {money(navPerShare)} a share, however the market moves. If the price leaves that range, re-centre the plan from your
+          {money(navPerShare)} a share, however the market moves. If the price leaves that range, re-center the plan from your
           plans page.
         </p>
       )}
@@ -303,10 +297,10 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
           <button
             type="button"
             onClick={start}
-            disabled={!valid || busy}
+            disabled={!valid || busy || blocked}
             className="mt-6 w-full rounded-[var(--radius-control)] bg-bind px-5 py-3.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:cursor-not-allowed disabled:bg-sunk disabled:text-ink-3"
           >
-            {busy ? "Approve in your wallet…" : valid ? `Start a ${label} plan` : "Start a plan"}
+            {busy ? "Approve in your wallet…" : blocked ? "Plans are off for this basket" : valid ? `Start a ${label} plan` : "Start a plan"}
           </button>
           <p className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-ink-3">
             <span className="tnum">{cash.balance == null ? "" : `You hold ${money(fromCashRaw(cash.balance))} in test dollars`}</span>

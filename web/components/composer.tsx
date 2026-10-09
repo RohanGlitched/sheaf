@@ -28,6 +28,9 @@ const MINT_TO_SYMBOL = new Map(COMPOSABLE.map((s) => [s.mint, s.symbol]));
 
 const DEFAULT_SHARE_PRICE = 100;
 
+/** Sheaf's own fee on shares created, written into every new basket by the program (PROTOCOL_FEE_BPS) and fixed for it. */
+const PROTOCOL_FEE_BPS = 10;
+
 type Preset = { id: string; label: string; hint: string; symbols: string[] };
 
 /**
@@ -59,7 +62,7 @@ const PRESETS: Preset[] = [
   {
     id: "frontier",
     label: "Frontier Labs",
-    hint: "Pre-IPO SPVs from PreStocks: Anthropic, OpenAI, SpaceX, Anduril",
+    hint: "Private companies, through PreStocks tokens: Anthropic, OpenAI, SpaceX, Anduril",
     symbols: ["ANTHROPIC", "OPENAI", "SPACEX", "ANDURIL"],
   },
 ];
@@ -448,8 +451,7 @@ export function Composer() {
       <div className="flex flex-col">
         <h1 className="display text-title text-ink">Create a basket</h1>
         <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
-          Pick a tile to put that company in the basket, or pick it from the
-          table, then set the weights. Up to {MAX_COMPONENTS} components, and every one of them is
+          Pick a company to put it in the basket, then set the weights. Up to {MAX_COMPONENTS} components, and every one of them is
           a token already trading on Solana: public companies as xStocks, and
           pre-IPO companies as PreStocks, composed the same way.
         </p>
@@ -480,7 +482,16 @@ export function Composer() {
           )}
         </div>
 
-        <div className="mt-7 flex min-h-[440px] flex-1 flex-col">
+        {/* On a phone the market picture is a field of unlabeled squares, so a
+            plain list of names to tick stands in for it below `sm`. */}
+        <div className="mt-7 sm:hidden">
+          {loading && !snapshot ? (
+            <MosaicSkeleton height={320} label="Reading mainnet prices" />
+          ) : (
+            <PickList quotes={composable} picked={new Set(picks.map((p) => p.symbol))} onToggle={toggleSymbol} />
+          )}
+        </div>
+        <div className="mt-7 hidden min-h-[440px] flex-1 flex-col sm:flex">
           {loading && !snapshot ? (
             <MosaicSkeleton height={440} label="Reading mainnet prices" />
           ) : (
@@ -565,11 +576,18 @@ export function Composer() {
                 style={sliderStyle("var(--color-bind)", feeBps, 0, MAX_CREATOR_FEE_BPS)}
               />
             </div>
-            <p className="text-xs leading-relaxed text-ink-3">
-              Taken in shares, not out of the vault, so it can never eat into
-              what a holder can redeem. The program caps it at{" "}
-              {percent(MAX_CREATOR_FEE_BPS / 100)}.
-            </p>
+            <div className="text-xs leading-relaxed text-ink-3">
+              <p>
+                Taken in shares, not out of the vault, so it can never eat into
+                what a holder can redeem. The program caps it at{" "}
+                {percent(MAX_CREATOR_FEE_BPS / 100)}.
+              </p>
+              <p className="mt-2 text-ink-2">
+                Sheaf takes {percent(PROTOCOL_FEE_BPS / 100)} of shares created,
+                fixed for this basket. So a share created costs{" "}
+                {percent((feeBps + PROTOCOL_FEE_BPS) / 100)} in fees all told.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -759,7 +777,7 @@ export function Composer() {
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
               It creates the share mint, names it, hands its authority to the
               basket, and writes the recipe. Nothing is minted yet. A Solana
-              transaction holds 1,232 bytes, so the largest baskets ask for a
+              transaction has a size limit, so the largest baskets ask for a
               second signature.
             </p>
           </div>
@@ -787,11 +805,64 @@ export function Composer() {
               onClick={() => panel.current?.scrollIntoView({ block: "start" })}
               className="shrink-0 border border-bind/60 bg-bind/10 px-4 py-2 text-sm text-ink transition-colors hover:bg-bind/20 rounded-[var(--radius-control)]"
             >
-              Set weights
+              Review
             </button>
           </div>
           {error && <p className="px-5 pb-3 text-xs text-loss">{error}</p>}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The market as a list to tick, for narrow screens: name, company, price and the day's move, largest first. */
+function PickList({ quotes, picked, onToggle }: { quotes: Quote[]; picked: Set<string>; onToggle: (symbol: string) => void }) {
+  const [all, setAll] = useState(false);
+  const sorted = [...quotes].sort((a, b) => (b.onChainMcap ?? b.liquidity ?? 0) - (a.onChainMcap ?? a.liquidity ?? 0));
+  // Picked names always show, so a pick never disappears behind "Show all".
+  const shown = all ? sorted : sorted.filter((q, i) => i < 12 || picked.has(q.symbol));
+  return (
+    <div>
+      <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
+        {shown.map((q) => {
+          const on = picked.has(q.symbol);
+          return (
+            <li key={q.symbol}>
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                onClick={() => onToggle(q.symbol)}
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left ${on ? "bg-bind/[0.06]" : ""}`}
+              >
+                <span
+                  aria-hidden
+                  className={`grid size-5 shrink-0 place-items-center rounded-[6px] border text-[11px] ${on ? "border-bind bg-bind text-white" : "border-line-strong text-transparent"}`}
+                >
+                  ✓
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-ink">{q.base}</span>
+                  <span className="block truncate text-xs text-ink-3">
+                    {q.company}
+                    {PRESTOCK_SYMBOLS.has(q.symbol) ? " · PreStocks" : ""}
+                  </span>
+                </span>
+                <span className="tnum shrink-0 text-right text-sm text-ink">
+                  {money(q.price)}
+                  <span className={`block text-xs ${(q.change24h ?? 0) > 0 ? "text-gain" : (q.change24h ?? 0) < 0 ? "text-loss" : "text-ink-3"}`}>
+                    {signedPercent(q.change24h)}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {sorted.length > 12 && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-3 text-sm text-bind underline decoration-bind/40 underline-offset-4">
+          {all ? "Show fewer" : `Show all ${sorted.length}`}
+        </button>
       )}
     </div>
   );
