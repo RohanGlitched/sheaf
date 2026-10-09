@@ -89,7 +89,7 @@ export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: bool
         {refs.length === 0 ? (
           <p className="rounded-[var(--radius-panel)] border border-dashed border-line-strong/70 px-6 py-10 text-sm leading-relaxed text-ink-2">
             {open
-              ? "No invite link has been opened yet. Make one on the right, post it somewhere, and each channel shows up here with its opens and signatures."
+              ? "Make an invite link on the right and post it somewhere; each channel shows up here with its opens and signatures."
               : "Channels show up here once signing opens."}
           </p>
         ) : (
@@ -120,7 +120,7 @@ export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: bool
           </table>
         )}
         <p className="mt-3 max-w-[70ch] text-xs leading-relaxed text-ink-3">
-          An open is counted once per address per code per hour, and link previews from chat apps aren&rsquo;t counted. Only people who aren&rsquo;t us count as signed.
+          An open is counted once per address per code per hour, and link previews from chat apps aren&rsquo;t counted. Team wallets never count as signed.
         </p>
       </div>
       <InviteMaker />

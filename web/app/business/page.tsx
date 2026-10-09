@@ -245,8 +245,7 @@ export default function BusinessPage() {
           lede={
             <p>
               These come from the program&rsquo;s own events, its basket accounts and the launch pools, not from a
-              spreadsheet. They are small, and they are honest: every wallet the team used is listed and left out of the
-              outside count.
+              spreadsheet. Every wallet the team uses is listed in the code and left out of any figure about other people.
             </p>
           }
         >
@@ -280,7 +279,7 @@ export default function BusinessPage() {
           title="What we still have to prove"
           lede={
             <p>
-              The program works. What is not proven yet is that people other than us use it and come back, that the fee is
+              The program works. What comes next is showing that people use it and come back, that the fee is
               charged and claimed, and that a wallet or front end will put it in front of its users. These are the targets,
               counted the same way as the numbers above.
             </p>

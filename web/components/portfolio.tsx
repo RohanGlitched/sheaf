@@ -296,7 +296,7 @@ export function Portfolio() {
               {baskets
                 ? `each of the ${count(baskets.filter((b) => !isTestBasket(b)).length)} baskets`
                 : "every basket"}{" "}
-              on this program (our own test baskets left out), unwrapped to the companies underneath and added up.
+              on this program (demo baskets left out), unwrapped to the companies underneath and added up.
               Your own version of this reads your balances instead.
             </p>
             <div className="mt-7">

@@ -6,7 +6,7 @@ import { fetchPlans, type Plan } from "@/lib/desk";
 import { fromCashRaw } from "@/lib/use-cash";
 import { isTeamWallet } from "@/lib/team-wallets";
 import { count, money } from "@/lib/format";
-import { fxNote, rupees, type Fx } from "@/lib/fx";
+import { fxNote, rupees } from "@/lib/fx";
 import type { WaitlistCounts } from "@/lib/waitlist-options";
 import { useInrRate } from "./india-fx";
 
@@ -31,7 +31,7 @@ const monthly = (p: Plan) => (p.periodSecs >= DAY_SECS ? (fromCashRaw(p.cashPerR
 const isDemoPace = (p: Plan) => p.periodSecs < DAY_SECS;
 
 type Split = {
-  /** Plans opened by wallets that aren't ours. */
+  /** Plans opened by wallets outside the team. */
   outside: { plans: number; monthly: number; demoPace: number; toGo: number };
   /** Our own running plans: the house demo and any team test plan. Shown apart, never added to the headline. */
   ours: { plans: number; demoPace: number; perRun: number[] };
@@ -52,9 +52,7 @@ function split(plans: Plan[]): Split {
   };
 }
 
-const both = (usd: number, fx: Fx) => `${rupees(usd * fx.rate)} (${money(usd)})`;
-
-/** The India numbers Sheaf can show today, read live: visitors' plans and the waitlist. Our own plans sit apart. */
+/** The India numbers, read live: visitors' plans and the waitlist, each shown once it is above zero. Team plans never count. */
 export function IndiaTraction() {
   const { connection } = useConnection();
   const { fx } = useInrRate();
@@ -89,55 +87,43 @@ export function IndiaTraction() {
     };
   }, []);
 
+  // Each figure appears once it is above zero; until then the section stands on its own without empty tiles.
   const o = s?.outside;
-  const tiles: { k: string; v: string; s: string }[] = [
-    {
-      k: "Visitors' plans running",
-      v: o ? count(o.plans) : "—",
-      s: o ? (o.plans === 0 ? "No wallet outside the team has opened a plan yet." : "Opened by wallets that aren't ours") : "Reading plans from devnet…",
-    },
-    {
-      k: "Committed a month by visitors",
-      v: o ? rupees(o.monthly * fx.rate) : "—",
-      s: o
-        ? `${money(o.monthly)} in test dollars, monthly and weekly plans${o.demoPace ? `; ${count(o.demoPace)} demo-pace ${o.demoPace === 1 ? "plan isn't" : "plans aren't"} counted as monthly` : ""}`
-        : "",
-    },
-    {
-      k: "Still to go in from visitors' plans",
-      v: o ? rupees(o.toGo * fx.rate) : "—",
-      s: o ? `${money(o.toGo)} in test dollars over their remaining runs` : "",
-    },
-  ];
-  if (waitlist) {
-    const abroad = waitlist.byHome.nri;
-    tiles.push({
-      k: "On the India waitlist",
-      v: count(waitlist.count),
-      s: `${count(waitlist.withContact)} left a contact · ${count(abroad)} ${abroad === 1 ? "is an NRI" : "are NRIs"} outside the US, UK, Canada and Australia`,
-    });
+  const tiles: { k: string; v: string; s: string }[] = [];
+  if (o && o.plans > 0) {
+    tiles.push({ k: "Visitors' plans running", v: count(o.plans), s: "Opened by wallets outside the team" });
+    if (o.monthly > 0) {
+      tiles.push({
+        k: "Committed a month by visitors",
+        v: rupees(o.monthly * fx.rate),
+        s: `${money(o.monthly)} in test dollars, monthly and weekly plans${o.demoPace ? `; ${count(o.demoPace)} demo-pace ${o.demoPace === 1 ? "plan isn't" : "plans aren't"} counted as monthly` : ""}`,
+      });
+    }
+    if (o.toGo > 0) {
+      tiles.push({ k: "Still to go in from visitors' plans", v: rupees(o.toGo * fx.rate), s: `${money(o.toGo)} in test dollars over their remaining runs` });
+    }
   }
+  if (waitlist && waitlist.count >= 1) {
+    const abroad = waitlist.byHome.nri;
+    const parts = [
+      waitlist.withContact > 0 ? `${count(waitlist.withContact)} left a contact` : null,
+      abroad > 0 ? `${count(abroad)} ${abroad === 1 ? "is an NRI" : "are NRIs"} outside the US, UK, Canada and Australia` : null,
+    ].filter(Boolean);
+    tiles.push({ k: "On the India waitlist", v: count(waitlist.count), s: parts.join(" · ") });
+  }
+  if (tiles.length === 0) return null;
 
   return (
     <div>
-      <dl className={`grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2 ${tiles.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+      <dl className={`grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-2 ${tiles.length === 4 ? "lg:grid-cols-4" : tiles.length === 3 ? "lg:grid-cols-3" : ""}`}>
         {tiles.map((x) => (
           <div key={x.k} className="bg-surface p-5 sm:p-6">
             <dt className="text-xs text-ink-3">{x.k}</dt>
             <dd className="display tnum mt-2 text-3xl text-ink">{x.v}</dd>
-            <dd className="tnum mt-2 text-xs leading-relaxed text-ink-3">{x.s}</dd>
+            {x.s && <dd className="tnum mt-2 text-xs leading-relaxed text-ink-3">{x.s}</dd>}
           </div>
         ))}
       </dl>
-      {s && s.ours.plans > 0 && (
-        <p className="tnum mt-3 rounded-[var(--radius-control)] border border-dashed border-line-strong px-4 py-3 text-xs leading-relaxed text-ink-3">
-          <span className="text-ink-2">Ours (demo pace), not counted above:</span>{" "}
-          {`${count(s.ours.plans)} ${s.ours.plans === 1 ? "plan" : "plans"} run by the team, ${s.ours.perRun.map((u) => both(u, fx)).join(", ")} a run`}
-          {s.ours.demoPace > 0
-            ? `, ${s.ours.demoPace === s.ours.plans ? "" : `${count(s.ours.demoPace)} of them `}every few minutes so you can watch runs land. A demo pace isn't a monthly commitment, so it has no monthly figure.`
-            : "."}
-        </p>
-      )}
       <p className="mt-3 max-w-[80ch] text-xs leading-relaxed text-ink-3">
         Read live from the Sheaf program on devnet, in test dollars. Monthly and weekly plans count at their real rate. Rupees at{" "}
         {fxNote(fx)}.

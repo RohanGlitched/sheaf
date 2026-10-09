@@ -158,7 +158,7 @@ export function Explorer() {
           <p className="mt-4 max-w-[54ch] text-base leading-relaxed text-ink-2">
             Read straight from the program. Nothing here is listed,
             approved, or promoted. If somebody created it, it is on this page;
-            the few our own QA runs made are behind the switch below.
+            demo baskets are behind the switch below.
           </p>
         </div>
         {baskets && baskets.length > 0 && (
@@ -168,7 +168,7 @@ export function Explorer() {
               <dd className="display mt-1 text-xl text-ink">
                 {count(split.shown.length)}
               </dd>
-              {testCount > 0 && <dd className="mt-0.5 text-xs text-ink-3">+{count(testCount)} of our tests</dd>}
+              {testCount > 0 && <dd className="mt-0.5 text-xs text-ink-3">+{count(testCount)} demo</dd>}
             </div>
             <div>
               <dt className="text-xs text-ink-3">Held in vaults</dt>
@@ -187,7 +187,7 @@ export function Explorer() {
             <div>
               <dt className="text-xs text-ink-3">
                 <Link href="/ledger" className="underline decoration-line-strong underline-offset-4 hover:text-ink-2">
-                  Wallets that aren&rsquo;t ours
+                  Wallets outside the team
                 </Link>
               </dt>
               <dd className="display mt-1 text-xl text-ink">
@@ -220,7 +220,7 @@ export function Explorer() {
                   onChange={(event) => setShowTests(event.target.checked)}
                   className="accent-[var(--color-bind)]"
                 />
-                Show test baskets ({count(testCount)})
+                Show demo baskets ({count(testCount)})
               </label>
             )}
             {SORTS.map((option) => (

@@ -480,9 +480,8 @@ type Trade = {
 };
 
 /**
- * The launch's recent swaps, from `/api/launches/trades`. Sheaf's own wallets
- * are tagged ("house buy", "test wallet sell"), and only wallets outside the
- * team are counted as traders.
+ * The launch's recent swaps, from `/api/launches/trades`. Only wallets outside
+ * the team are counted as traders, and that count shows once it is above zero.
  */
 function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null }) {
   const [data, setData] = useState<{ trades: Trade[]; traders: number } | null>(null);
@@ -504,16 +503,11 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
         {data.trades.slice(0, 6).map((t) => (
           <li key={t.signature} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2 text-sm">
             <span className="text-ink-2">
-              {t.team ? (
-                <span className="mr-1.5 inline-block rounded-[var(--radius-control)] border border-line-strong px-1.5 py-px text-xs text-ink">
-                  {t.team} {t.side}
-                </span>
-              ) : (
-                <span className="mr-1.5 font-mono text-xs text-ink">
-                  {shortAddress(t.wallet)} {t.side}
-                </span>
-              )}
+              <span className="mr-1.5 font-mono text-xs text-ink">
+                {shortAddress(t.wallet)} {t.side}
+              </span>
               <span className="text-xs text-ink-3">{t.market === "damm" ? "on DAMM v2" : "on the curve"}</span>
+              {t.team === "house" && <span className="ml-1.5 text-xs text-ink-3">(Sheaf&rsquo;s own buy)</span>}
             </span>
             <a
               href={explorerTx(t.signature)}
@@ -526,11 +520,11 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs leading-relaxed text-ink-3">
-        {data.traders === 0
-          ? "No wallet outside the Sheaf team has traded this launch yet. Every trade here is ours: house buys from Sheaf's own key and wallets from our own tests, and none of it counts as traction."
-          : `${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it. Trades tagged house or test wallet are ours and are not counted.`}
-      </p>
+      {data.traders > 0 && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">
+          {`${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it.`}
+        </p>
+      )}
     </div>
   );
 }

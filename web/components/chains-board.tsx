@@ -80,7 +80,7 @@ function SolanaCard() {
         dividend multiplier. Every plan, order and fill is decoded on the ledger.
       </p>
       <p className="mt-4 text-xs text-ink-3">
-        {shown ? `${shown.length} ${plural(shown.length, "basket")}, our own test baskets left out` : "Reading the program…"} · paid in test dollars
+        {shown ? `${shown.length} ${plural(shown.length, "basket")}, demo baskets left out` : "Reading the program…"} · paid in test dollars
       </p>
       <ul className="-mx-2 mt-2 grid sm:grid-cols-2">
         {(shown ?? []).slice(0, 4).map((b) => (

@@ -17,15 +17,7 @@ import {
 } from "@/lib/evm";
 import { quantity, shortAddress, timeAgo } from "@/lib/format";
 import { useKeeperKick } from "@/lib/use-keeper-kick";
-import { teamTag, teamWallet } from "@/lib/team-wallets";
 import type { EvmWallet } from "./evm-wallet";
-
-/** The tag beside a buyer the team runs: the house filler, or one of our test wallets. Null for anyone else. */
-function buyerPill(address: string): string | null {
-  const w = teamWallet(address);
-  if (!w || teamTag(address) == null) return null;
-  return w.role === "house" ? "house" : w.role === "test" ? "our test" : "Sheaf";
-}
 
 const th = "px-3 py-3 font-normal sm:px-4";
 const td = "px-3 py-3 sm:px-4";
@@ -139,11 +131,6 @@ export function EvmDeskBook({
       <a href={`${d.explorer}/address/${address}`} target="_blank" rel="noreferrer" className="hover:underline">
         {me && address.toLowerCase() === me ? "you" : shortAddress(address, 6, 4)}
       </a>
-      {buyerPill(address) && (
-        <span className="ml-2 whitespace-nowrap rounded-full bg-sunk px-2 py-0.5 text-[11px] leading-none text-ink-3" title="A wallet the Sheaf team runs; not counted as an outside buyer">
-          {buyerPill(address)}
-        </span>
-      )}
     </td>
   );
 
@@ -188,11 +175,9 @@ export function EvmDeskBook({
     </thead>
   );
 
-  const idCell = (id: number, buyer: string) => (
+  const idCell = (id: number) => (
     <td className={`tnum ${td} text-ink-2`}>
       #{id}
-      {/* On phones the buyer column is hidden, so the team tag rides with the order number. */}
-      {buyerPill(buyer) && <span className="mt-0.5 block text-[11px] text-ink-3 sm:hidden">{buyerPill(buyer)}</span>}
     </td>
   );
 
@@ -249,7 +234,7 @@ export function EvmDeskBook({
                     const range = `${quantity(fromRaw(o.startShares), 4)} → ${quantity(fromRaw(o.endShares), 4)}`;
                     return (
                       <tr key={o.id} className={rowClass(o.basket)}>
-                        {idCell(o.id, o.buyer)}
+                        {idCell(o.id)}
                         <td className={td}>{symbolOf(o.basket)}</td>
                         <td className={`tnum ${td} text-right`}>
                           {o.status === "Filled" ? (
@@ -307,7 +292,7 @@ export function EvmDeskBook({
                 const expired = now > 0 && o.expiry < now;
                 return (
                   <tr key={o.id} className={rowClass(o.basket)}>
-                    {idCell(o.id, o.buyer)}
+                    {idCell(o.id)}
                     <td className={td}>{symbolOf(o.basket)}</td>
                     <td className={`tnum ${td} text-right`}>{quantity(fromRaw(o.shares), 4)}</td>
                     <td className={`tnum ${td} text-right`}>

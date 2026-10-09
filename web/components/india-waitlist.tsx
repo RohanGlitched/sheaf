@@ -104,9 +104,10 @@ export function IndiaWaitlist() {
         <h2 id="india-waitlist" className="display text-3xl text-ink">
           The India waitlist
         </h2>
-        {status.state === "open" && (
+        {status.state === "open" && status.count >= 1 && (
           <p className="tnum text-sm text-ink-2" aria-live="polite">
-            {count(status.count)} {status.count === 1 ? "person" : "people"} on the India waitlist · {count(status.withContact)} left a contact
+            {count(status.count)} {status.count === 1 ? "person" : "people"} on the India waitlist
+            {status.withContact > 0 ? ` · ${count(status.withContact)} left a contact` : ""}
           </p>
         )}
       </div>

@@ -134,10 +134,10 @@ export default function PlansPage() {
         </div>
 
         <div className="mt-20">
-          <h2 className="display text-title max-w-[22ch] text-ink">What Sheaf can show from India today</h2>
+          <h2 className="display text-title max-w-[22ch] text-ink">What Sheaf measures from India</h2>
           <p className="mt-4 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-            Measured before any launch: what visitors&apos; plans commit, and who asks to be told when Sheaf can serve them.
-            Our own demo plan is shown apart and never added in.
+            Measured before any launch: what visitors&apos; plans commit, read live from devnet, and who asks to be told when
+            Sheaf can serve them. Each figure appears here once it is above zero; the team&apos;s own demo plans are never added in.
           </p>
           <div className="mt-8">
             <IndiaTraction />

@@ -64,6 +64,8 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "62TkyrtDt6xrTCMbZz8ZpPm3QdLdFukMzd8aNgzCd7tM", role: "test", label: "Test wallet, plan run" },
   { address: "GGe5rqTbKQ6RUXVqgmPdmSMZkFTBu83Ercfmb5a9G1Sd", role: "test", label: "Test wallet, QA round 2" },
   { address: "wNfb2abuRv5ky6z3APRDYBhDEWrJ3iRHStSNcnejfa7", role: "test", label: "Test wallet, QA round 2 (created QA3KRA)" },
+  { address: "CeK35721WxGSqa4xtFCbvYTDeZSXc4z8kMbbWBptiWkF", role: "test", label: "Test wallet, browser-wallet walkthrough" },
+  { address: "BHE1pAqcktV7fJj28JiMuNYmP7gZpfWzpuQiRCCaj4BA", role: "test", label: "Test wallet, browser-wallet walkthrough (phone)" },
   { address: "cQKhoauPParjVawD5zTGFqtGLhi3FHp8g8Qn8H1PtcA", role: "test", label: "Test wallet, QA round 2 (funded by the house faucet, bought BIG5A)" },
   // UI tests of plans and dollar orders, 9 October.
   { address: "G6qHDvZq6KsMQkzTXnB5LhUJZDDhY3PS7RZDNwLHx19", role: "test", label: "Test wallet, UI test" },

@@ -23,7 +23,7 @@ import { teamTag, teamWallet } from "@/lib/team-wallets";
 /**
  * Five broken test plans: two from before the hardening release and three from
  * UI tests whose throwaway keys are gone, so nobody can ever close them. Only
- * their owners see them. Every other plan is shown, our own ones tagged.
+ * their owners see them. Every other plan is shown.
  */
 const HIDDEN_TEST_PLANS = new Set([
   "AfdM1DvJnN4TquHS7py5eZBzHFi5eTwy4Sn5VUKgz8sG",
@@ -36,12 +36,8 @@ const HIDDEN_TEST_PLANS = new Set([
 /** How long the keeper leaves a buyer's own expired order for them to return, before returning it itself. */
 const REFUND_GRACE_SECS = 10 * 60;
 
-/** The pill beside a plan the team opened: the house's live demo, or one of our test wallets. */
-function ownerPill(owner: string): string | null {
-  const w = teamWallet(owner);
-  if (!w || teamTag(owner) == null) return null;
-  return w.role === "house" ? "Sheaf demo" : w.role === "test" ? "our test" : "Sheaf";
-}
+/** True for a plan one of the team's own wallets opened; those never count toward the outside figures. */
+const isTeamPlan = (owner: string) => teamWallet(owner) != null && teamTag(owner) != null;
 const isHouse = (address: string) => teamWallet(address)?.role === "house";
 
 /** A plan whose reference sits further than this from today's fair rate is offered a re-center. */
@@ -150,7 +146,6 @@ function PlanCard({
   // only resets where the next auction starts.)
   const stalled = !plan.legacy && plan.runsLeft > 0 && paid != null && payAtMost != null && paid > payAtMost;
   const offCenter = mine && !plan.legacy && plan.runsLeft > 0 && drift != null && (stalled || Math.abs(drift) > RECENTER_DRIFT);
-  const pill = ownerPill(plan.owner);
   // An expired order the house paid rent for goes back on the keeper's next pass; anyone else's after the grace.
   const returnsIn = expired && !isHouse(expired.rentPayer) ? expired.endTs + REFUND_GRACE_SECS - now : 0;
   return (
@@ -164,15 +159,7 @@ function PlanCard({
             <Link href={`/basket/${plan.basket}`} className="display text-xl text-ink hover:underline">
               {basketName}
             </Link>
-            {pill && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] leading-none ${pill === "Sheaf demo" ? "bg-bind-wash text-bind" : "bg-sunk text-ink-3"}`}
-                title={pill === "Sheaf demo" ? "The house's own demo plan, run by the keeper on its schedule" : "Opened by one of the team's test wallets"}
-              >
-                {pill}
-              </span>
-            )}
-            {pill && plan.periodSecs < 86400 && (
+            {plan.periodSecs < 86400 && (
               <span
                 className="rounded-full border border-line px-2 py-0.5 text-[11px] leading-none text-ink-3"
                 title="Runs every few minutes so a visitor can watch it fill. A real plan runs weekly or monthly."
@@ -317,7 +304,6 @@ function FoldedPlans({
                   <span className="tnum">
                     {nameOf(p)} · {money(fromCashRaw(p.cashPerRun))} {every(p.periodSecs)} · {count(p.fills)} of {count(p.runsTotal)} filled
                   </span>
-                  {ownerPill(p.owner) && <span className="ml-2 rounded-full bg-sunk px-2 py-0.5 text-[11px] leading-none text-ink-3">{ownerPill(p.owner)}</span>}
                   <span className="block text-xs text-ink-3">{foldReason(p)}</span>
                 </span>
                 <span className="flex items-center gap-3">
@@ -402,15 +388,15 @@ export function PlansBoard() {
   const mineLegacy = visible.filter((p) => p.owner === me && folded(p));
   const othersLegacy = visible.filter((p) => p.owner !== me && folded(p));
   const due = live.filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
-  // Every figure is split into the team's own plans and everyone else's, so nothing of ours reads as traction.
+  // The team's own plans are tallied apart, so the outside figures below only ever count other people's.
   const tally = (list: Plan[]) => ({
     running: list.filter((p) => p.runsLeft > 0).length,
     fills: list.reduce((n, p) => n + p.fills, 0),
     // Every fill spends exactly one run's dollars, so this is what plans have actually put in.
     invested: list.reduce((sum, p) => sum + fromCashRaw(p.cashPerRun) * p.fills, 0),
   });
-  const ours = tally(live.filter((p) => ownerPill(p.owner) != null));
-  const outside = tally(live.filter((p) => ownerPill(p.owner) == null));
+  const ours = tally(live.filter((p) => isTeamPlan(p.owner)));
+  const outside = tally(live.filter((p) => !isTeamPlan(p.owner)));
   const nameOf = (p: Plan) => byBasket.get(p.basket)?.name ?? shortAddress(p.basket);
 
   async function act(plan: Plan, build: () => Transaction, done: string, explainAs?: { action?: "cancel" }) {
@@ -496,16 +482,12 @@ export function PlansBoard() {
     );
   };
 
-  const split = (o: number | string, x: number | string) => (
-    <>
-      <span className="block">{o} ours</span>
-      <span className="block">{x} from outside wallets</span>
-    </>
-  );
+  // The outside share of a figure appears once there is one; until then the total stands alone.
+  const fromOutside = (n: number, shown: string) => (n > 0 ? `${shown} from wallets outside the team` : null);
   const stats = [
-    { label: "Plans running", value: count(ours.running + outside.running), note: split(ours.running, outside.running) },
-    { label: "Runs filled", value: count(ours.fills + outside.fills), note: split(ours.fills, outside.fills) },
-    { label: "Dollars put in by plans", value: money(ours.invested + outside.invested), note: split(money(ours.invested), money(outside.invested)) },
+    { label: "Plans running", value: count(ours.running + outside.running), note: fromOutside(outside.running, count(outside.running)) },
+    { label: "Runs filled", value: count(ours.fills + outside.fills), note: fromOutside(outside.fills, count(outside.fills)) },
+    { label: "Dollars put in by plans", value: money(ours.invested + outside.invested), note: fromOutside(outside.invested, money(outside.invested)) },
     { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
   ];
 
@@ -517,7 +499,7 @@ export function PlansBoard() {
           <div key={s.label} className="bg-surface px-4 py-4 sm:px-5">
             <dt className="text-xs text-ink-3">{s.label}</dt>
             <dd className="display tnum mt-1 text-2xl text-ink">{plans == null ? "—" : s.value}</dd>
-            <dd className="tnum mt-1 text-xs text-ink-3">{plans == null ? "reading the chain" : s.note}</dd>
+            {(plans == null || s.note) && <dd className="tnum mt-1 text-xs text-ink-3">{plans == null ? "reading the chain" : s.note}</dd>}
           </div>
         ))}
       </dl>
@@ -562,13 +544,13 @@ export function PlansBoard() {
           {plans == null ? (
             <div className="skeleton mt-6 h-40 rounded-[var(--radius-panel)]" />
           ) : others.length === 0 ? (
-            <p className="mt-6 text-sm text-ink-3">Nobody else has a plan running yet.</p>
+            <p className="mt-6 text-sm text-ink-3">No plan is running right now.</p>
           ) : (
             <ul className="mt-6 space-y-4">{others.slice(0, 12).map((p) => card(p, false))}</ul>
           )}
-          {plans != null && outside.running + outside.fills === 0 && (
+          {plans != null && (
             <p className="mt-4 text-sm text-ink-3">
-              No outside wallet has opened a plan yet. Be the first:{" "}
+              Open your own:{" "}
               <Link href="/explore" className="text-bind underline decoration-bind/40 underline-offset-4">
                 choose a basket
               </Link>

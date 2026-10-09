@@ -824,11 +824,20 @@ export async function LiveNumbers() {
 
   const outsideOrders = l.outsideDollar.orders != null && l.outsidePlan.orders != null ? l.outsideDollar.orders + l.outsidePlan.orders : null;
   const outsideFilled = l.outsideDollar.fills != null && l.outsidePlan.fills != null ? l.outsideDollar.fills + l.outsidePlan.fills : null;
+  // Figures about people outside the team appear once they are above zero; team wallets never count toward them.
+  const above = (v: number | null): v is number => v != null && v > 0;
+  const fillerTotal = l.byFiller.house != null && l.byFiller.second != null ? l.byFiller.house + l.byFiller.second : null;
   const cells: { label: string; value: string; note: string }[] = [
-    { label: "Wallets that aren't ours", value: whole(l.outsideWallets), note: `${whole(l.outsideActions)} actions by them; every team and test wallet we know of is listed and left out` },
-    { label: "Their orders and plan runs filled", value: whole(outsideFilled), note: `of ${whole(outsideOrders)} they placed` },
-    { label: "Plans opened", value: whole(l.plans), note: `${whole(l.outsidePlans)} of them by wallets that aren't ours` },
-    { label: "Baskets by others", value: whole(l.outsideBaskets), note: `of ${whole(l.baskets)} on the program, ours included` },
+    ...(above(l.outsideWallets)
+      ? [{ label: "Wallets outside the team", value: whole(l.outsideWallets), note: `${whole(l.outsideActions)} actions by them; team wallets are left out` }]
+      : []),
+    ...(above(outsideOrders) ? [{ label: "Their orders and plan runs filled", value: whole(outsideFilled), note: `of ${whole(outsideOrders)} they placed` }] : []),
+    {
+      label: "Plans opened",
+      value: whole(l.plans),
+      note: above(l.outsidePlans) ? `${whole(l.outsidePlans)} of them by wallets outside the team` : "monthly plans on the program",
+    },
+    ...(above(l.outsideBaskets) ? [{ label: "Baskets by people outside the team", value: whole(l.outsideBaskets), note: `of ${whole(l.baskets)} on the program` }] : []),
     {
       label: "One-off dollar orders",
       value: rate(l.dollar.fillRate),
@@ -839,25 +848,35 @@ export async function LiveNumbers() {
       value: rate(l.plan.fillRate),
       note: `filled, ${whole(l.plan.fills)} of ${whole(l.plan.orders)}; median ${secs(l.plan.medianSecsToFill)} on a 30-minute auction, by design`,
     },
-    {
-      label: "Fills by another filler",
-      value: whole(l.outsideFills),
-      note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by the open reference filler`,
-    },
-    { label: "Actions on the program", value: whole(l.actions), note: `by ${whole(l.wallets)} wallets, almost all ours: test dollars on devnet` },
+    above(l.outsideFills)
+      ? {
+          label: "Fills by another filler",
+          value: whole(l.outsideFills),
+          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by the open reference filler`,
+        }
+      : {
+          label: "Orders filled, by filler",
+          value: whole(fillerTotal),
+          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by the open reference filler; any filler may compete`,
+        },
+    { label: "Actions on the program", value: whole(l.actions), note: "in test dollars on devnet" },
   ];
   const launchCells: { label: string; value: string }[] = [
     { label: "Launch markets on the curve", value: launches ? String(launches.onCurve) : dash },
     { label: "Graduated to a locked pool", value: launches ? String(launches.graduated) : dash },
     { label: "SOL in the curves", value: launches ? launches.solIn.toFixed(3) : dash },
     { label: "Treasury fees not yet claimed, SOL", value: launches ? launches.unclaimedTreasurySol.toFixed(4) : dash },
-    { label: "Launches opened by others", value: launches ? String(launches.outsideCreators) : dash },
-    { label: "Launch traders who aren't us", value: launches?.outsideTraders != null ? String(launches.outsideTraders) : dash },
+    ...(launches && launches.outsideCreators > 0 ? [{ label: "Launches opened by people outside the team", value: String(launches.outsideCreators) }] : []),
+    ...(launches && above(launches.outsideTraders) ? [{ label: "Launch traders outside the team", value: String(launches.outsideTraders) }] : []),
   ];
 
   return (
     <div>
-      <ul className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
+      <ul
+        className={`grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line ${
+          cells.length === 5 ? "lg:grid-cols-5" : cells.length === 6 ? "lg:grid-cols-3" : "lg:grid-cols-4"
+        }`}
+      >
         {cells.map((c, i) => (
           <li key={c.label} className={`p-5 sm:p-6 ${i === 0 ? "bg-surface" : "bg-page"}`}>
             <p className={`tnum display text-3xl sm:text-4xl ${i === 0 ? "text-bind" : "text-ink"}`}>{c.value}</p>
@@ -867,7 +886,7 @@ export async function LiveNumbers() {
         ))}
       </ul>
       <p className="mt-8 text-sm text-ink">Launch markets on Meteora</p>
-      <dl className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
+      <dl className={`mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3 ${launchCells.length > 4 ? "lg:grid-cols-6" : "lg:grid-cols-4"}`}>
         {launchCells.map((c) => (
           <div key={c.label} className="bg-page p-4">
             <dd className="tnum display text-2xl text-ink">{c.value}</dd>
@@ -881,7 +900,7 @@ export async function LiveNumbers() {
           the ledger
         </Link>{" "}
         (decoded from the program&rsquo;s own events) and the launch feed (read from the pool accounts), on devnet with test
-        money{asOf ? `, at ${utcStamp(asOf)}` : ""}. Unfilled orders include our own tests under the ${HOUSE_MIN_DOLLARS} Sheaf&rsquo;s filler leaves alone, returned by design. Our QA baskets are left out of the launch counts. A dash means the number
+        money{asOf ? `, at ${utcStamp(asOf)}` : ""}. Unfilled orders include test orders under the ${HOUSE_MIN_DOLLARS} Sheaf&rsquo;s filler leaves alone, returned by design. QA baskets are left out of the launch counts. A dash means the number
         could not be read just now. One launch has gone from first buy to a locked pool: on a 1.126 SOL curve the treasury took
         about 0.0206 SOL, near 1.8% of it, plus 1% of the token supply (
         <a href={SOURCES.meteoraReceipts.href} target="_blank" rel="noreferrer" className={linkClass}>
@@ -1109,9 +1128,9 @@ export function CreatorSide() {
 
 export const PROVE_NEXT: { what: string; target: string; how: string }[] = [
   { what: "The fee, charged", target: "A fee-carrying basket with fee shares accrued and one treasury claim", how: "Shown above with its transaction, and on the ledger." },
-  { what: "People who aren't us", target: "30 outside wallets by 18 October; 350 in eight weeks", how: "Counted on the ledger, which lists every team and test wallet and leaves them out." },
+  { what: "People using it", target: "30 wallets outside the team by 18 October; 350 in eight weeks", how: "Counted on the ledger, with every team wallet left out." },
   { what: "They come back", target: "110 wallets with two actions a week apart, in eight weeks", how: "Retention, not sign-ups. A plan with two filled runs counts." },
-  { what: "Plans that keep running", target: "50 outside plans with at least two filled runs", how: "Read from plan runs and fills on the ledger." },
+  { what: "Plans that keep running", target: "50 plans from outside the team with at least two filled runs", how: "Read from plan runs and fills on the ledger." },
   { what: "Fills that land", target: `95% or more of orders of $${HOUSE_MIN_DOLLARS} or more filled; one-off orders in under 60 seconds`, how: "Plan runs are measured separately: their 30-minute auction is slower by design." },
   { what: "One platform", target: "A written reply from a wallet or front end that lists xStocks", how: "Even \"send the SDK\". It is the payer the model depends on." },
   { what: "Fill cost at size, on mainnet prices", target: "Under 0.25% round trip at $5,000 for liquid baskets", how: `Measured today at ${(MEASURED_ROUTE[2].roundTripBps / 100).toFixed(3)}% for five big US names.` },

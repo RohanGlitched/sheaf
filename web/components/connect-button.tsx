@@ -5,6 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { shortAddress } from "@/lib/format";
 import { WRITE_CLUSTER } from "@/lib/config";
+import { BrowserWalletName, storedBrowserWalletAddress } from "@/lib/browser-wallet";
+import { BrowserWalletMenu } from "./browser-wallet-menu";
 
 /** Wallet apps open a page in their own browser from these links, which is how a phone connects. */
 function walletBrowseLinks() {
@@ -48,8 +50,10 @@ export function ConnectButton({
   }, [open]);
 
   const installed = wallets.filter(
-    (w) => w.readyState === WalletReadyState.Installed,
+    (w) => w.readyState === WalletReadyState.Installed && w.adapter.name !== BrowserWalletName,
   );
+  const browserWallet = wallets.find((w) => w.adapter.name === BrowserWalletName);
+  const onBrowserWallet = wallet?.adapter.name === BrowserWalletName;
 
   /**
    * With autoConnect on, the provider connects a newly selected wallet itself,
@@ -68,6 +72,9 @@ export function ConnectButton({
     });
   }
 
+  // Read only while the picker is open, which is always after hydration.
+  const savedBrowserWallet = open && !connected ? storedBrowserWalletAddress() : null;
+
   if (connected && publicKey) {
     return (
       <div className="relative" ref={root}>
@@ -84,9 +91,12 @@ export function ConnectButton({
           <span className="tnum">{shortAddress(publicKey.toBase58())}</span>
         </button>
         {open && (
-          <div className="absolute right-0 top-full z-50 mt-1.5 w-60 border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] rounded-[var(--radius-panel)]">
-            <div className="px-3 py-2.5 text-xs text-ink-3">
+          <div className={`absolute right-0 top-full z-50 mt-1.5 max-w-[calc(100vw-2rem)] ${onBrowserWallet ? "w-72" : "w-60"} border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] rounded-[var(--radius-panel)]`}>
+            <div className="px-3 py-2.5 text-xs leading-relaxed text-ink-3">
               {wallet?.adapter.name} on {WRITE_CLUSTER}
+              {onBrowserWallet && (
+                <span className="block">Lives in this browser. Test funds only.</span>
+              )}
             </div>
             <button
               type="button"
@@ -98,6 +108,7 @@ export function ConnectButton({
             >
               Copy address
             </button>
+            {onBrowserWallet && <BrowserWalletMenu onDone={() => setOpen(false)} />}
             <button
               type="button"
               onClick={() => {
@@ -130,14 +141,53 @@ export function ConnectButton({
       </button>
       {open && (
         <div
-          className={`absolute top-full z-50 mt-1.5 rounded-[var(--radius-control)] border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)] ${
-            block ? "left-0 right-0" : "right-0 w-64"
+          // A block button sits inside order panels that clip their overflow, so
+          // its picker opens in the flow and pushes the panel taller instead.
+          className={`mt-1.5 rounded-[var(--radius-control)] border border-line bg-raised p-1 ${
+            block
+              ? "relative"
+              : "absolute right-0 top-full z-50 w-72 max-w-[calc(100vw-2rem)] shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)]"
           }`}
         >
-          {installed.length === 0 ? (
-            <div className="px-3 py-3 text-sm leading-relaxed text-ink-2">
-              <p>No Solana wallet in this browser. On a phone, open Sheaf inside your wallet app:</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+          {installed.map((w) => (
+            <button
+              key={w.adapter.name}
+              type="button"
+              onClick={() => pick(w.adapter.name)}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
+            >
+              {w.adapter.icon && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={w.adapter.icon} alt="" className="size-5" />
+              )}
+              {w.adapter.name}
+            </button>
+          ))}
+          {browserWallet && (
+            <>
+              {installed.length > 0 && <div aria-hidden className="mx-3 my-1 border-t border-line" />}
+              <button
+                type="button"
+                onClick={() => pick(BrowserWalletName)}
+                className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-sunk"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={browserWallet.adapter.icon} alt="" className="mt-0.5 size-5 shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-ink">Use a wallet in this browser</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-ink-3">
+                    {savedBrowserWallet
+                      ? `Reconnect ${shortAddress(savedBrowserWallet)}, saved here. ${WRITE_CLUSTER} test funds only.`
+                      : `Nothing to install, ${WRITE_CLUSTER} test funds only.`}
+                  </span>
+                </span>
+              </button>
+            </>
+          )}
+          {installed.length === 0 && (
+            <div className="mx-3 mt-1 border-t border-line py-3 text-xs leading-relaxed text-ink-3">
+              <p>Have a wallet app? On a phone, open Sheaf inside it:</p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
                 {walletBrowseLinks().map((w) => (
                   <a
                     key={w.name}
@@ -148,7 +198,7 @@ export function ConnectButton({
                   </a>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-ink-3">
+              <p className="mt-2.5">
                 On a computer,{" "}
                 <a
                   href="https://phantom.app/download"
@@ -161,21 +211,6 @@ export function ConnectButton({
                 and reload.
               </p>
             </div>
-          ) : (
-            installed.map((w) => (
-              <button
-                key={w.adapter.name}
-                type="button"
-                onClick={() => pick(w.adapter.name)}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
-              >
-                {w.adapter.icon && (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={w.adapter.icon} alt="" className="size-5" />
-                )}
-                {w.adapter.name}
-              </button>
-            ))
           )}
         </div>
       )}

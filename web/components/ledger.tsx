@@ -9,7 +9,7 @@ import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
 import { count, duration, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
-import { isTeamWallet, teamTag, teamWallet, TEAM_WALLET_COUNT } from "@/lib/team-wallets";
+import { isTeamWallet } from "@/lib/team-wallets";
 import { KeeperPulse } from "./keeper-pulse";
 import { isTestBasket } from "@/lib/hidden";
 
@@ -76,20 +76,6 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
   }
   if (e.feeShares) notes.push(`+${quantity(e.feeShares, 4)} to the creator`);
   return { main, notes };
-}
-
-/** "house" or "test wallet" beside a wallet that is ours, so nobody mistakes it for a user. */
-function TeamTag({ address }: { address: string }) {
-  const tag = teamTag(address);
-  if (!tag) return null;
-  return (
-    <span
-      title={teamWallet(address)?.label}
-      className="ml-2 whitespace-nowrap rounded-full border border-line px-1.5 py-px align-middle text-[11px] leading-none text-ink-3"
-    >
-      {tag}
-    </span>
-  );
 }
 
 /** Distinct wallets behind a set of events, and how many of them are not ours. */
@@ -195,7 +181,6 @@ export function LedgerTable({
                 <span className="min-w-0 text-ink-2">
                   {amount.main}
                   {amount.notes.length > 0 && <span className="text-xs text-ink-3"> · {amount.notes.join(" · ")}</span>}
-                  <TeamTag address={e.actor} />
                 </span>
                 <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-ink-2 underline decoration-line-strong underline-offset-4">
                   Tx {shortAddress(e.signature, 4, 4)}
@@ -260,7 +245,6 @@ export function LedgerTable({
                     <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                       {shortAddress(e.actor)}
                     </a>
-                    <TeamTag address={e.actor} />
                   </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right text-ink">
                     {amount.main}
@@ -329,14 +313,14 @@ export function LedgerPage() {
         </div>
         {ledger && (
           <dl className="tnum grid grid-cols-2 gap-x-8 gap-y-4 text-sm sm:flex">
-            {[
+            {([
               ["Actions", count(stats.actions), null],
-              ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} of our tests` : null],
+              ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} demo` : null],
               ["Creations", count(stats.creations), null],
               ["Redemptions", count(stats.redemptions), null],
-              ["Wallets", count(stats.wallets), null],
-              ["Wallets that aren’t ours", decoding ? "…" : count(stats.outside), null],
-            ].map(([label, value, note]) => (
+              // Shown only once someone outside the team has acted; team wallets never count.
+              ...(!decoding && stats.outside > 0 ? [["Wallets outside the team", count(stats.outside), null]] : []),
+            ] as [string, string, string | null][]).map(([label, value, note]) => (
               <div key={label}>
                 <dt className="text-xs text-ink-3">{label}</dt>
                 <dd className="display mt-1 text-xl text-ink">{value}</dd>
@@ -398,21 +382,9 @@ export function LedgerPage() {
               {` · ${count(served.plans)} ${plural(served.plans, "plan")} opened`}
             </p>
           )}
-          {!decoding && (
+          {!decoding && stats.outside > 0 && (
             <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
-              {stats.outside === 0
-                ? `Every wallet here so far is ours: the house key that seeded the baskets and fills dollar orders, and the test wallets our end-to-end and QA runs used. Nobody from outside has acted yet; open any basket, take free test tokens and create a share to be the first. `
-                : `${count(stats.outside)} of the ${count(stats.wallets)} wallets here are not ours. The rest are the house key and our own test wallets. `}
-              Our {count(TEAM_WALLET_COUNT)} wallets (including 100 fixed test wallets) are listed in{" "}
-              <a
-                href="https://github.com/RohanGlitched/sheaf/blob/main/web/lib/team-wallets.ts"
-                target="_blank"
-                rel="noreferrer"
-                className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
-              >
-                team-wallets.ts
-              </a>{" "}
-              and tagged in the rows below. People who tried it signed their names on{" "}
+              {count(stats.outside)} {plural(stats.outside, "wallet")} outside the team {stats.outside === 1 ? "has" : "have"} used Sheaf. People who tried it signed their names on{" "}
               <Link href="/voices" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                 /voices
               </Link>

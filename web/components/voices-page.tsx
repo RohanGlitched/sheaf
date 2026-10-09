@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useLedger } from "@/lib/use-ledger";
 import { useBaskets } from "@/lib/use-baskets";
-import { count, plural, shortAddress } from "@/lib/format";
+import { count, shortAddress } from "@/lib/format";
 import { TEAM_WALLET_COUNT } from "@/lib/team-wallets";
 import { byActor, deedsOf, type Deed } from "@/lib/voices-activity";
 import type { Voice, VoicesAnswer } from "@/lib/voices-message";
@@ -127,26 +127,37 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
         </div>
 
         <div className="rise rounded-[var(--radius-panel)] border border-line bg-surface p-6 sm:p-8" style={{ ["--i" as string]: 2 }}>
-          <p className="display tnum text-[clamp(4rem,9vw,7rem)] leading-none text-ink">{count(n)}</p>
-          <p className="mt-3 text-base text-ink-2">
-            {n === 1 ? "person who isn’t us has signed in" : "people who aren’t us have signed in"}
-          </p>
-          <dl className="tnum mt-7 grid grid-cols-3 gap-4 border-t border-line pt-5 text-sm">
-            <div>
-              <dt className="text-xs text-ink-3">With activity on the ledger</dt>
-              <dd className="display mt-1 text-xl text-ink">{ledgerReady ? count(active) : "…"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-ink-3">Invite links opened</dt>
-              <dd className="display mt-1 text-xl text-ink">{count(opens)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-ink-3">Ours, not counted</dt>
-              <dd className="display mt-1 text-xl text-ink-3">{count(shown.ours)}</dd>
-            </div>
-          </dl>
+          {/* The count appears once someone has signed; team wallets never count toward it. */}
+          {n > 0 ? (
+            <>
+              <p className="display tnum text-[clamp(4rem,9vw,7rem)] leading-none text-ink">{count(n)}</p>
+              <p className="mt-3 text-base text-ink-2">{n === 1 ? "person who tried Sheaf has signed in" : "people who tried Sheaf have signed in"}</p>
+              <dl className={`tnum mt-7 grid gap-4 border-t border-line pt-5 text-sm ${opens > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div>
+                  <dt className="text-xs text-ink-3">With activity on the ledger</dt>
+                  <dd className="display mt-1 text-xl text-ink">{ledgerReady ? count(active) : "…"}</dd>
+                </div>
+                {opens > 0 && (
+                  <div>
+                    <dt className="text-xs text-ink-3">Invite links opened</dt>
+                    <dd className="display mt-1 text-xl text-ink">{count(opens)}</dd>
+                  </div>
+                )}
+              </dl>
+            </>
+          ) : (
+            <>
+              <p className="display text-3xl leading-tight text-ink">Signed names, checkable by anyone.</p>
+              <p className="mt-3 text-sm leading-relaxed text-ink-2">
+                One signature from the wallet ties a name to what that wallet did on Sheaf; Verify on each card checks it in your browser.
+              </p>
+              <a href="#sign" className="mt-6 inline-flex rounded-[var(--radius-control)] bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep">
+                Add your name
+              </a>
+            </>
+          )}
           {shown.open && shown.message && <p className="mt-5 text-xs text-loss">{shown.message} The count may be behind.</p>}
-          {!shown.open && <p className="mt-5 text-xs leading-relaxed text-ink-3">Signing hasn&rsquo;t opened on this deployment yet, so the count is zero by construction.</p>}
+          {!shown.open && <p className="mt-5 text-xs leading-relaxed text-ink-3">Signing hasn&rsquo;t opened on this deployment yet.</p>}
         </div>
       </section>
 
@@ -177,14 +188,14 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
         ) : n === 0 ? (
           <div className="mt-8 grid gap-6 rounded-[var(--radius-panel)] border border-dashed border-line-strong/70 px-6 py-12 sm:px-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div>
-              <p className="display text-2xl text-ink">Nobody outside the team has signed yet.</p>
+              <p className="display text-2xl text-ink">Tried Sheaf? Sign your name with the wallet you used.</p>
               <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-                The first name here will be the first person who tried Sheaf and said so with their own wallet. We would rather show
-                zero than fill this with our own test wallets{shown.ours > 0 ? `, which have signed ${count(shown.ours)} ${plural(shown.ours, "time")} and are counted apart` : ""}.
+                Each name here is signed by the wallet that used Sheaf, with what that wallet did read from the ledger, so anyone
+                can check it.
               </p>
             </div>
             <a href="#sign" className="justify-self-start rounded-[var(--radius-control)] bg-bind px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep">
-              Be the first
+              Add your name
             </a>
           </div>
         ) : (
