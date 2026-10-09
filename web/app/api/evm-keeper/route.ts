@@ -8,7 +8,9 @@ import {
   runEvmKeeper,
   runSipSchedule,
   runTempoSip,
+  SIP_ACTIONS,
   SipRefused,
+  tempoSipTerms,
   type FillResult,
   type SipAction,
 } from "@/lib/evm-server";
@@ -20,7 +22,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * GET or POST /api/evm-keeper[?network=…&order=…]
+ * GET or POST /api/evm-keeper[?network=…&order=…&version=2]
  *
  * The house filler on the EVM creation desks. Open to anyone, because filling an
  * open order is permissionless on chain: the buyer gets shares minted in kind and
@@ -30,9 +32,14 @@ export const maxDuration = 60;
  *    mirrors it is missing from their public faucet, then fills. On Tempo that is
  *    one transaction, every call batched, fees in pathUSD.
  *  - Robinhood Chain: the components are Robinhood's real test stock tokens. The
- *    house fills only small orders priced within 2% of the live Robinhood quote,
- *    and only while it holds enough of each token; otherwise the order stays open
- *    for any other holder to fill, and the response says why.
+ *    house fills only small orders, and only while it holds enough of each token;
+ *    otherwise the order stays open for any other holder to fill, and the response
+ *    says why.
+ *  - v2 desk (CreationDeskV2, a Dutch auction): the house fills once the auction's
+ *    count reaches fair value plus 0.15%, waiting up to 30 s for it; past that the
+ *    response says when (retryInSec). v1 orders still open are filled as before, at
+ *    their fixed price if it is within 2% (Robinhood) or 5% (mirrors) of fair.
+ *    A named order takes `version` (1 by default, the v1 desk).
  *
  * With no network it sweeps every deployed chain (for a cron), and places each
  * Tempo SIP's instalment once its period comes round. Sepolia is left out of
@@ -61,12 +68,19 @@ async function handle(request: Request) {
   const url = new URL(request.url);
   let network = url.searchParams.get("network") ?? undefined;
   let orderParam = url.searchParams.get("order");
+  let versionParam = url.searchParams.get("version");
   let sip: { account?: string; action?: string } | undefined;
   if (request.method === "POST") {
     try {
-      const body = (await request.json()) as { network?: string; order?: number | string; sip?: { account?: string; action?: string } };
+      const body = (await request.json()) as {
+        network?: string;
+        order?: number | string;
+        version?: number | string;
+        sip?: { account?: string; action?: string };
+      };
       network = body.network ?? network;
       if (body.order != null) orderParam = String(body.order);
+      if (body.version != null) versionParam = String(body.version);
       sip = body.sip;
     } catch {
       // An empty POST is a sweep.
@@ -74,6 +88,8 @@ async function handle(request: Request) {
   }
   const orderId = orderParam != null && orderParam !== "" && Number.isInteger(Number(orderParam)) ? Number(orderParam) : undefined;
   if (orderParam != null && orderParam !== "" && orderId == null) return Response.json({ error: "order must be an order id." }, { status: 400 });
+  if (versionParam != null && versionParam !== "1" && versionParam !== "2") return Response.json({ error: "version must be 1 or 2." }, { status: 400 });
+  const version = versionParam === "2" ? 2 : versionParam === "1" ? 1 : undefined;
   const auto = !sip && orderId == null;
 
   const ip = clientIp(request);
@@ -82,14 +98,22 @@ async function handle(request: Request) {
   if (!limit.ok) return Response.json({ error: `Slow down; try again in ${limit.retryInSec}s.` }, { status: 429 });
   limiter.hit(ip);
 
-  // Tempo SIP: act as the access key a visitor's account authorized. The chain enforces the budget and scope;
-  // the keeper adds the schedule (one instalment per period) and only takes the request from this site's pages.
+  // Tempo SIP: act as the access key a visitor's account authorized. The plan contract fixes the amount, the
+  // interval and the worst price; the chain fixes the budget and the scope. The keeper supplies today's fair
+  // count and only takes the request from this site's pages. `terms` is a read: what a new plan would sign.
   if (sip) {
     if (!originAllowed(request)) return Response.json({ error: "SIP runs are started from this site." }, { status: 403 });
     if (network !== "tempoTestnet") return Response.json({ error: "SIPs run on Tempo." }, { status: 400 });
+    if (sip.action === "terms") {
+      try {
+        return Response.json(await tempoSipTerms(), noStore);
+      } catch (err) {
+        return Response.json({ error: fail(err) }, { status: err instanceof SipRefused ? 429 : 500 });
+      }
+    }
     if (!sip.account || !isAddress(sip.account)) return Response.json({ error: "sip.account must be an address." }, { status: 400 });
     const action = sip.action as SipAction;
-    if (!["instalment", "overspend", "outOfScope"].includes(action)) return Response.json({ error: "Unknown SIP action." }, { status: 400 });
+    if (!SIP_ACTIONS.includes(action)) return Response.json({ error: "Unknown SIP action." }, { status: 400 });
     try {
       return Response.json(await runTempoSip(sip.account as Address, action), noStore);
     } catch (err) {
@@ -119,7 +143,7 @@ async function handle(request: Request) {
     await Promise.all([
       ...targets.map(async (d) => {
         try {
-          results.push(...(await runEvmKeeper(d, { orderId, max: orderId != null ? 1 : 3 })));
+          results.push(...(await runEvmKeeper(d, { orderId, version, max: orderId != null ? 1 : 3 })));
         } catch (err) {
           errors.push({ network: d.network, error: fail(err) });
         }

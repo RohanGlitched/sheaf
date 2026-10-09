@@ -74,7 +74,7 @@ const NOTES: Record<string, { name: string; why: string; native: string; tier: C
     name: "Tempo",
     why: "A payments chain where gas is paid in dollars.",
     native:
-      "A monthly plan is a Tempo access key: one signature grants a keeper 25 AlphaUSD a month, callable only on the desk, and the chain refuses anything past it.",
+      "A monthly plan is a PlanDesk plan plus a Tempo access key: the key may spend 25 AlphaUSD a month on two calls only, and every run's price is capped on chain at the minimum share count you signed.",
     tier: "feature",
   },
   sepolia: {

@@ -1,27 +1,42 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, http, publicActions, type Address, type Hex } from "viem";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createClient, encodeFunctionData, http, publicActions, zeroAddress, type Address, type Hex } from "viem";
 import { tempoModerato } from "viem/chains";
+import { sendTransactionSync } from "viem/actions";
 import { Account, Actions, P256, WebAuthnP256 } from "viem/tempo";
 import type { Deployment } from "@/lib/chains";
-import { BASKET_ABI, ERC20_ABI, TEMPO_PATH_USD, TEMPO_SIP, explainEvmError, fromRaw } from "@/lib/evm";
+import {
+  BASKET_ABI,
+  ERC20_ABI,
+  PLAN_DESK_ABI,
+  TEMPO_PATH_USD,
+  TEMPO_SIP_V2,
+  explainEvmError,
+  fromRaw,
+  readDeskOrderV2,
+  readPlansOf,
+  tempoSipV2Scopes,
+  v2Of,
+  type PlanV2,
+} from "@/lib/evm";
 import { quantity, shortAddress } from "@/lib/format";
 
 /**
  * A monthly plan that the chain enforces, on Tempo.
  *
- * Tempo access keys let an account hand a second key a recurring TIP-20 spending
- * limit and a call scope. A Sheaf SIP is one of those: the investor signs once,
- * the keeper may spend 25 AlphaUSD every 30 days, and only on AlphaUSD.approve
- * (with the desk as spender) and CreationDesk.placeOrder. Anything past the
- * budget or outside the scope is refused by the chain itself, not by our code.
+ * Two contracts and one key authorization. The investor's root key opens a plan on
+ * PlanDesk: the cash per run, the interval, and a price cap (the fewest shares a run
+ * may buy). Then it signs one Tempo key authorization that lets the keeper spend 25
+ * AlphaUSD every 30 days on two calls only: AlphaUSD.approve with PlanDesk as spender,
+ * and PlanDesk.instalment. The key signs as the investor, so it can run the plan but
+ * never rewrite it: opening and closing plans are outside its scope. Each run posts a
+ * Dutch auction on CreationDeskV2 that never ends below the cap; any filler can fill it.
  *
- * Two halves: the run recorded by evm/scripts/tempo-sip.mjs, with its
- * transactions and a live read of that key's remaining budget; and the same thing
- * run in this browser, with the visitor as the investor (a passkey, or a key made
- * in the browser) and the house key as keeper. The house plays opposite roles in
- * the two halves, and the copy says so.
+ * Two halves: the run recorded by evm/scripts/tempo-sip-v2.mjs, with its transactions,
+ * its four refusals and a live read of that key's budget; and the same thing run in
+ * this browser, with the visitor as the investor (a passkey, or a key made in the
+ * browser) and the house key as keeper.
  */
 
 const chain = tempoModerato.extend({ feeToken: TEMPO_PATH_USD });
@@ -29,7 +44,11 @@ const chain = tempoModerato.extend({ feeToken: TEMPO_PATH_USD });
 const day = (secs: bigint | number) =>
   new Date(Number(secs) * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const fmt = (v: bigint | null | undefined) => (v == null ? "—" : quantity(fromRaw(v, 6), 2));
+const sh = (v: bigint | string | null | undefined) => (v == null ? "—" : quantity(fromRaw(BigInt(v)), 4));
 const link = "underline decoration-line-strong underline-offset-4 hover:text-ink";
+const CASH = fromRaw(TEMPO_SIP_V2.cashPerRun, 6).toFixed(2);
+/** Refusals that come from the plan contract, not from the chain's access-key rules. */
+const PLAN_REFUSALS = /\b(FairOutOfBounds|TooSoon|NotAllowed|PlanClosedAlready)\b/;
 
 function readClient(d: Deployment) {
   return createClient({ chain, transport: http(d.rpc, { timeout: 15_000 }) }).extend(publicActions);
@@ -63,21 +82,24 @@ function useBudget(d: Deployment, account: Address | null | undefined, key: Addr
 }
 
 export function TempoSip({ d }: { d: Deployment }) {
+  const v2 = v2Of(d);
+  if (!v2) return null;
   return (
     <div>
       <div className="max-w-[60rem]">
         <p className="text-xs text-ink-3">Tempo-native</p>
         <h2 className="display mt-2 text-title text-ink">A monthly plan the chain enforces</h2>
         <p className="mt-4 max-w-[66ch] text-base leading-relaxed text-ink-2">
-          On Tempo a monthly plan is not an allowance a server promises to respect. It is an access key: the investor signs once, the keeper may
-          spend {fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD every 30 days, and only on two calls, <span className="tnum">AlphaUSD.approve</span> with
-          the desk as spender and <span className="tnum">CreationDesk.placeOrder</span>. Ask for more, or call anything else, and the chain refuses.
-          Gas is paid in pathUSD, a dollar, because Tempo has no gas token.
+          On Tempo a monthly plan is not an allowance a server promises to respect. You write the plan on chain: {CASH} AlphaUSD a run, once
+          every 30 days, and the fewest shares a run may buy. Then you sign one access key that may spend {fromRaw(TEMPO_SIP_V2.limit, 6)}{" "}
+          AlphaUSD every 30 days on two calls only, <span className="tnum">AlphaUSD.approve</span> with the plan desk as spender and{" "}
+          <span className="tnum">PlanDesk.instalment</span>. Gas is paid in pathUSD, a dollar, because Tempo has no gas token.
         </p>
         <p className="mt-3 max-w-[66ch] text-sm leading-relaxed text-ink-3">
-          What the chain does not yet check: today the house key both prices and fills each installment, at a fixed{" "}
-          {fromRaw(TEMPO_SIP.instalment, 6).toFixed(2)} AlphaUSD a share. The budget caps how much it can spend in a period, but not the
-          price it pays per share inside that budget.
+          The keeper is the house key, and the house also fills. It still cannot choose your price. It can only run your plan&apos;s installment,
+          for exactly {CASH} AlphaUSD and at most once a period, and the auction it posts never ends below the minimum share count you signed. It
+          cannot run early, ask for fewer shares, rewrite the plan or call the desk directly: the plan contract or the chain refuses. Any other
+          filler can fill your installment sooner, at a better count for you.
         </p>
       </div>
       <div className="mt-10 grid gap-8 [&>*]:min-w-0 lg:grid-cols-2">
@@ -91,29 +113,49 @@ export function TempoSip({ d }: { d: Deployment }) {
 // ------------------------------------------------------------------- recorded
 
 function Recorded({ d }: { d: Deployment }) {
-  const sip = d.sip;
+  const sip = v2Of(d)?.sip;
   const { budget, error } = useBudget(d, d.deployer as Address | undefined, sip?.keeperKey as Address | undefined);
   if (!sip) return null;
   const rows: { label: string; detail: string; hash?: string; refused?: string }[] = [
     {
-      label: "The investor (here, the house) signs one key authorization",
-      detail: `Keeper ${shortAddress(sip.keeperKey, 6, 4)} may spend ${sip.limitPerPeriod} per 30 days, scoped to approve(desk) and placeOrder.`,
+      label: "The investor (here, the house) writes the plan",
+      detail: `Plan #${sip.planId} on PlanDesk: ${sip.cashPerRun} every 30 days, never fewer than ${sip.minSharesPerRun} MAG8 a run (fair bounded to ${sip.minSharesPerRun}–${sip.maxSharesPerRun}).`,
+      hash: sip.openPlanTx,
+    },
+    {
+      label: "…and signs one key authorization",
+      detail: `Keeper ${shortAddress(sip.keeperKey, 6, 4)} may spend ${sip.limitPerPeriod} per 30 days, scoped to ${sip.scopes.join(" and ")}.`,
       hash: sip.authorizeTx,
     },
     {
-      label: "Keeper places the month's installment",
-      detail: `approve + placeOrder in one atomic Tempo transaction: 1 MAG8 at 10.10 AlphaUSD, order #${sip.orderId}, then filled in kind.`,
+      label: "Keeper runs it at 1 raw share unit for 10.10",
+      detail: "The attack the old scope allowed: pay the whole installment for nothing. The plan's price cap refuses it.",
+      refused: sip.refused.dustFair,
+    },
+    {
+      label: "Keeper calls CreationDeskV2.placeOrder at its own price",
+      detail: "Outside the scope, so the chain rejects it before inclusion.",
+      refused: sip.refused.directOrder,
+    },
+    {
+      label: "Keeper opens a plan with its own terms",
+      detail: "Also outside the scope: the key can run the plan, never write one.",
+      refused: sip.refused.rewriteTerms,
+    },
+    {
+      label: "Keeper runs the month's installment",
+      detail: `approve + instalment in one atomic Tempo transaction: order #${sip.orderId} on the v2 desk, an auction from 1.02 down to 0.98 MAG8.`,
       hash: sip.instalmentTx,
     },
     {
-      label: "Keeper asks for 20 more",
-      detail: "Only 14.90 AlphaUSD was left in the period. Rejected before it could be included, so no transaction exists.",
-      refused: "SpendingLimitExceeded",
+      label: "Keeper runs it again at once",
+      detail: "The plan's 30-day interval refuses it.",
+      refused: sip.refused.tooSoon,
     },
     {
-      label: "Keeper tries AlphaUSD.transfer",
-      detail: "A call outside the scope. Rejected the same way.",
-      refused: "CallNotAllowed",
+      label: "Filled in kind",
+      detail: `The investor received ${Number(sip.sharesToInvestor).toFixed(4)} MAG8, after the creator fee and the 0.10% protocol fee.`,
+      hash: sip.fillTx,
     },
   ];
   return (
@@ -122,7 +164,7 @@ function Recorded({ d }: { d: Deployment }) {
         <h3 className="text-base text-ink">The recorded run</h3>
         <span className="text-xs text-ink-3">{new Date(sip.at).toUTCString().slice(5, 22)} UTC</span>
       </div>
-      <p className="mt-1 text-xs text-ink-3">evm/scripts/tempo-sip.mjs, against Tempo Moderato</p>
+      <p className="mt-1 text-xs text-ink-3">evm/scripts/tempo-sip-v2.mjs, against Tempo Moderato</p>
       <ol className="mt-5 space-y-4">
         {rows.map((r, i) => (
           <li key={r.label} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-3 text-sm">
@@ -141,7 +183,9 @@ function Recorded({ d }: { d: Deployment }) {
                     {shortAddress(r.hash, 10, 6)}
                   </a>
                 ) : (
-                  <span className="text-loss">Refused: {r.refused}</span>
+                  <span className="text-loss">
+                    Refused {PLAN_REFUSALS.test(r.refused ?? "") ? "by the plan" : "by the chain"}: {r.refused}
+                  </span>
                 )}
               </p>
             </div>
@@ -155,15 +199,12 @@ function Recorded({ d }: { d: Deployment }) {
         </div>
         <div className="bg-raised p-3">
           <p className="text-xs text-ink-3">Resets</p>
-          <p className="tnum display mt-1 text-xl text-ink">
-            {budget?.periodEnd ? day(budget.periodEnd) : "—"}
-          </p>
+          <p className="tnum display mt-1 text-xl text-ink">{budget?.periodEnd ? day(budget.periodEnd) : "—"}</p>
         </div>
       </div>
       <p className="mt-3 text-xs leading-relaxed text-ink-3">
         Read from Tempo&apos;s AccountKeychain precompile (<span className="tnum">getRemainingLimitWithPeriod</span>) for investor{" "}
-        {shortAddress(d.deployer ?? "", 6, 4)}, the house, which invested in this recording, and keeper key{" "}
-        {shortAddress(sip.keeperKey, 6, 4)}.
+        {shortAddress(d.deployer ?? "", 6, 4)}, the house, which invested in this recording, and keeper key {shortAddress(sip.keeperKey, 6, 4)}.
       </p>
     </div>
   );
@@ -189,6 +230,23 @@ function accountFrom(root: StoredRoot) {
 
 type LogLine = { label: string; ok: boolean; hash?: string; note?: string };
 
+/** What /api/evm-keeper answers for `sip.action = "terms"`: a new plan at today's price. Bigints as strings. */
+type Terms = {
+  basket: Address;
+  symbol: string;
+  nav: number;
+  planDesk: Address;
+  cashPerRun: string;
+  interval: string;
+  auctionSecs: string;
+  bandBps: number;
+  fairShares: string;
+  minShares: string;
+  maxShares: string;
+};
+
+type KeeperFill = { status: "filled" | "skipped" | "failed"; hash?: string; reason?: string; retryInSec?: number };
+
 /** One plain sentence for whatever a passkey prompt, the chain or our routes threw back. */
 function explainSip(err: unknown): string {
   const e = err as { name?: string; message?: string };
@@ -200,45 +258,69 @@ function explainSip(err: unknown): string {
   return text.replace(/\s*[:\-]?\s*[{[].*$/s, "").slice(0, 200) || "That step failed. Try again in a moment.";
 }
 
+async function keeperPost(body: Record<string, unknown>) {
+  const res = await fetch("/api/evm-keeper", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
+  if (!res.ok) throw new Error(json.error ?? "The keeper did not answer. Try again in a moment.");
+  return json;
+}
+
 /** What the visitor is about to do, shown before they start so the panel says what it is for. */
 const STEPS = [
   { n: 1, label: "Make your Tempo account", note: "A passkey, or a throwaway key kept in this browser" },
   { n: 2, label: "Fund it from Tempo's faucet", note: "pathUSD for fees, AlphaUSD to invest" },
-  { n: 3, label: "Sign the plan, once", note: `${fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD per 30 days, two calls only` },
-  { n: 4, label: "The keeper places this month's installment", note: "approve and placeOrder in one transaction, filled in kind" },
-  { n: 5, label: "The keeper tries to overspend", note: "The chain refuses: SpendingLimitExceeded" },
-  { n: 6, label: "The keeper calls outside the scope", note: "The chain refuses: CallNotAllowed" },
-  { n: 7, label: "Revoke the plan (optional)", note: "One signature stops it. Skip it and the keeper keeps investing once a period" },
+  { n: 3, label: "Sign the plan, once", note: `Write it on PlanDesk (${CASH} AlphaUSD a month and your price cap), then scope the keeper to two calls` },
+  { n: 4, label: "The keeper tries to overpay", note: "1 raw share unit for the whole installment. The plan refuses: FairOutOfBounds" },
+  { n: 5, label: "The keeper runs this month's installment", note: "An auction on the v2 desk that never ends below your cap, filled in kind" },
+  { n: 6, label: "The keeper runs it again at once", note: "The plan refuses: TooSoon" },
+  { n: 7, label: "The keeper calls the desk directly", note: "Outside the scope. The chain refuses: CallNotAllowed" },
+  { n: 8, label: "Revoke the key and close the plan (optional)", note: "Skip it and the keeper keeps investing once a period" },
 ];
 
 function LiveSip({ d }: { d: Deployment }) {
+  const v2 = v2Of(d)!;
   const [root, setRoot] = useState<StoredRoot | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [balances, setBalances] = useState<{ alpha: bigint; path: bigint; shares: bigint } | null>(null);
+  const [plan, setPlan] = useState<PlanV2 | null>(null);
+  const [plansRead, setPlansRead] = useState(false);
+  const [now, setNow] = useState(0);
+  const [waiting, setWaiting] = useState<{ orderId: number; inSec?: number } | null>(null);
+  const alive = useRef(true);
 
   useEffect(() => {
     void Promise.resolve().then(() => setRoot(loadRoot()));
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
   }, []);
 
   const account = useMemo(() => (root ? accountFrom(root) : null), [root]);
   const house = d.deployer as Address;
   const { budget } = useBudget(d, account?.address, house, tick);
-  const basket = d.baskets[0];
+  const basket = d.baskets.find((b) => plan && b.address.toLowerCase() === plan.basket.toLowerCase()) ?? d.baskets[0];
 
   const refresh = useCallback(async () => {
     if (!account) return;
     const c = readClient(d);
-    const [alpha, path, shares] = await Promise.all([
+    const [alpha, path, shares, plans] = await Promise.all([
       c.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] }),
       c.readContract({ address: TEMPO_PATH_USD, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] }),
-      c.readContract({ address: basket.address as Address, abi: BASKET_ABI, functionName: "balanceOf", args: [account.address] }),
+      c.readContract({ address: d.baskets[0].address as Address, abi: BASKET_ABI, functionName: "balanceOf", args: [account.address] }),
+      readPlansOf(d, account.address).catch(() => null),
     ]);
     setBalances({ alpha, path, shares });
+    setNow(Math.floor(Date.now() / 1000));
+    if (plans) {
+      setPlan([...plans].reverse().find((p) => p.active) ?? plans[plans.length - 1] ?? null);
+      setPlansRead(true);
+    }
     setTick((t) => t + 1);
-  }, [account, d, basket]);
+  }, [account, d]);
 
   useEffect(() => {
     void Promise.resolve().then(() => refresh().catch(() => undefined));
@@ -259,6 +341,8 @@ function LiveSip({ d }: { d: Deployment }) {
     }
   }
 
+  const rootClient = () => createClient({ account: account!, chain, transport: http(d.rpc, { timeout: 30_000 }) }).extend(publicActions);
+
   const create = (kind: "passkey" | "local") =>
     step("create", async () => {
       let next: StoredRoot;
@@ -274,81 +358,145 @@ function LiveSip({ d }: { d: Deployment }) {
         // Private mode: the plan lives as long as the tab.
       }
       setLog([]);
+      setPlan(null);
+      setPlansRead(false);
       setRoot(next);
       push({ label: kind === "passkey" ? "Passkey created; its public key is the account" : "Key created in this browser", ok: true });
     });
 
   const fund = () =>
     step("fund", async () => {
-      const res = await fetch("/api/evm-faucet", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ network: d.network, address: account!.address }),
-      });
-      const json = (await res.json()) as { txs?: { hash: string }[]; error?: string };
-      if (!res.ok) throw new Error(json.error ?? "Tempo's faucet did not answer. Try again in a moment.");
+      const json = (await keeperPostFaucet(d, account!.address)) as { txs?: { hash: string }[] };
       await new Promise((r) => setTimeout(r, 1500));
       push({ label: "Funded from Tempo's faucet (pathUSD for fees, AlphaUSD to invest)", ok: true, hash: json.txs?.[1]?.hash ?? json.txs?.[0]?.hash });
     });
 
-  const authorize = () =>
+  // Two signatures from the root key: the plan's terms on PlanDesk, then the scoped access key.
+  const sign = () =>
     step("authorize", async () => {
-      const client = createClient({ account: account!, chain, transport: http(d.rpc, { timeout: 30_000 }) }).extend(publicActions);
-      const res = await Actions.accessKey.authorizeSync(client, {
-        accessKey: { accessKeyAddress: house, keyType: "secp256k1" },
-        expiry: Math.floor(Date.now() / 1000) + 90 * 86_400,
-        limits: [
-          { token: d.stable.address as Address, limit: TEMPO_SIP.limit, period: TEMPO_SIP.period },
-          { token: TEMPO_PATH_USD, limit: TEMPO_SIP.feeLimit, period: TEMPO_SIP.period },
-        ],
-        scopes: [
-          { address: d.stable.address as Address, selector: "approve(address,uint256)", recipients: [d.desk as Address] },
-          { address: d.desk as Address, selector: "placeOrder(address,uint256,uint256,uint96)" },
-        ],
-      });
-      push({ label: `Plan signed once: ${fromRaw(TEMPO_SIP.limit, 6)} AlphaUSD per 30 days, two calls only`, ok: true, hash: res.receipt.transactionHash });
-    });
-
-  // "instalment" is the keeper route's action name; the visitor reads "installment".
-  const keeper = (action: "instalment" | "overspend" | "outOfScope") =>
-    step(action, async () => {
-      const res = await fetch("/api/evm-keeper", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ network: d.network, sip: { account: account!.address, action } }),
-      });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        hash?: string;
-        orderId?: number;
-        refusal?: string;
-        fill?: { status: string; hash?: string; reason?: string };
-        error?: string;
-      };
-      if (!res.ok) throw new Error(json.error ?? "The keeper did not answer. Try again in a moment.");
-      const label =
-        action === "instalment"
-          ? json.ok
-            ? `Keeper placed this month's ${fromRaw(TEMPO_SIP.instalment, 6)} AlphaUSD installment, order #${json.orderId}`
-            : "Keeper tried this month's installment"
-          : action === "overspend"
-            ? `Keeper asked for ${fromRaw(TEMPO_SIP.overspend, 6)} AlphaUSD more`
-            : "Keeper tried AlphaUSD.transfer, outside the scope";
-      push({ label, ok: !!json.ok, hash: json.hash, note: json.ok ? undefined : `Refused by the chain: ${json.refusal}` });
-      if (json.fill) {
+      const client = rootClient();
+      if (!plan?.active) {
+        const t = (await keeperPost({ network: d.network, sip: { action: "terms" } })) as unknown as Terms;
+        const receipt = await sendTransactionSync(client, {
+          calls: [
+            {
+              to: v2.planDesk as Address,
+              data: encodeFunctionData({
+                abi: PLAN_DESK_ABI,
+                functionName: "openPlan",
+                args: [t.basket, BigInt(t.cashPerRun), BigInt(t.interval), BigInt(t.auctionSecs), t.bandBps, BigInt(t.minShares), BigInt(t.maxShares), zeroAddress],
+              }),
+            },
+          ],
+        } as never);
         push({
-          label: json.fill.status === "filled" ? `Order filled in kind: 1 ${basket.symbol} minted to the plan` : `Fill: ${json.fill.reason ?? json.fill.status}`,
-          ok: json.fill.status === "filled",
-          hash: json.fill.hash,
+          label: `Plan written on PlanDesk: ${CASH} AlphaUSD every 30 days, never fewer than ${sh(t.minShares)} ${t.symbol} a run`,
+          ok: true,
+          hash: (receipt as { transactionHash: string }).transactionHash,
+          note: undefined,
+        });
+      }
+      if (!authorized) {
+        const res = await Actions.accessKey.authorizeSync(client, {
+          accessKey: { accessKeyAddress: house, keyType: "secp256k1" },
+          expiry: Math.floor(Date.now() / 1000) + 90 * 86_400,
+          limits: [
+            { token: d.stable.address as Address, limit: TEMPO_SIP_V2.limit, period: TEMPO_SIP_V2.period },
+            { token: TEMPO_PATH_USD, limit: TEMPO_SIP_V2.feeLimit, period: TEMPO_SIP_V2.period },
+          ],
+          scopes: tempoSipV2Scopes(d),
+        });
+        push({
+          label: `Keeper scoped: ${fromRaw(TEMPO_SIP_V2.limit, 6)} AlphaUSD per 30 days, approve(PlanDesk) and PlanDesk.instalment only`,
+          ok: true,
+          hash: res.receipt.transactionHash,
         });
       }
     });
 
+  /** Ask the house to fill the installment's auction until it does, or the auction ends. */
+  const followFill = useCallback(
+    async (orderId: number, first?: KeeperFill) => {
+      let r = first;
+      for (let i = 0; i < 10 && alive.current; i++) {
+        if (r?.status === "filled") {
+          push({
+            label: `Order #${orderId} filled in kind${r.reason ? `, ${r.reason}` : " by the house"}; the ${basket.symbol} shares are in your account`,
+            ok: true,
+            hash: r.hash,
+          });
+          setWaiting(null);
+          await refresh().catch(() => undefined);
+          return;
+        }
+        if (r && r.retryInSec == null && r.status !== "failed" && i > 0) break;
+        setWaiting({ orderId, inSec: r?.retryInSec });
+        // The route waits up to 30 s for the house's price itself, so ask again a little before it.
+        const pause = Math.max(2, (r?.retryInSec ?? 5) - 25) * 1000;
+        await new Promise((res) => setTimeout(res, pause));
+        try {
+          const json = await keeperPost({ network: d.network, order: orderId, version: 2 });
+          r = (json.results as KeeperFill[] | undefined)?.[0];
+          if (!r || (r.status === "skipped" && /^already filled/.test(r.reason ?? ""))) {
+            // No longer open: a sweep (or another filler) got there first, or it ended.
+            const o = await readDeskOrderV2(d, orderId);
+            r =
+              o.status === "Filled"
+                ? { status: "filled", reason: o.filler.toLowerCase() === house.toLowerCase() ? undefined : `filled by ${shortAddress(o.filler, 6, 4)}` }
+                : { status: "skipped", reason: o.status === "Cancelled" ? "it ended unfilled and the dollars went back to you" : "the house did not pick it up" };
+          }
+        } catch {
+          r = { status: "skipped", reason: "the house could not be reached", retryInSec: 20 };
+        }
+      }
+      setWaiting(null);
+      if (r && r.status !== "filled") {
+        push({ label: `Order #${orderId} not filled by the house`, ok: false, note: `${r.reason ?? r.status}. It stays open for any filler; if it ends unfilled, the dollars come back to you.` });
+      }
+    },
+    [basket.symbol, d, house, refresh],
+  );
+
+  // "instalment" is the keeper route's action name; the visitor reads "installment".
+  const keeper = (action: "instalment" | "overspend" | "outOfScope" | "tooSoon") =>
+    step(action, async () => {
+      const json = (await keeperPost({ network: d.network, sip: { account: account!.address, action } })) as {
+        ok?: boolean;
+        hash?: string;
+        orderId?: number;
+        startShares?: string;
+        endShares?: string;
+        refusal?: string;
+        fill?: KeeperFill;
+      };
+      const label =
+        action === "instalment"
+          ? json.ok
+            ? `Keeper ran this month's ${CASH} AlphaUSD installment: order #${json.orderId}, ${sh(json.startShares)} down to ${sh(json.endShares)} ${basket.symbol}`
+            : "Keeper tried this month's installment"
+          : action === "overspend"
+            ? `Keeper tried to pay ${CASH} AlphaUSD for 1 raw share unit`
+            : action === "tooSoon"
+              ? "Keeper tried a second installment this period"
+              : "Keeper called CreationDeskV2.placeOrder at its own price, outside the scope";
+      const by = PLAN_REFUSALS.test(json.refusal ?? "") ? "the plan" : "the chain";
+      push({ label, ok: !!json.ok, hash: json.hash, note: json.ok ? undefined : `Refused by ${by}: ${json.refusal}` });
+      if (json.ok && json.orderId != null) void followFill(json.orderId, json.fill);
+    });
+
   const revoke = () =>
     step("revoke", async () => {
-      const client = createClient({ account: account!, chain, transport: http(d.rpc, { timeout: 30_000 }) }).extend(publicActions);
-      const res = await Actions.accessKey.revokeSync(client, { accessKey: house });
-      push({ label: "Plan revoked by the investor", ok: true, hash: res.receipt.transactionHash });
+      const client = rootClient();
+      if (authorized) {
+        const res = await Actions.accessKey.revokeSync(client, { accessKey: house });
+        push({ label: "Keeper key revoked by the investor", ok: true, hash: res.receipt.transactionHash });
+      }
+      if (plan?.active) {
+        const receipt = await sendTransactionSync(client, {
+          calls: [{ to: v2.planDesk as Address, data: encodeFunctionData({ abi: PLAN_DESK_ABI, functionName: "closePlan", args: [BigInt(plan.id)] }) }],
+        } as never);
+        push({ label: `Plan #${plan.id} closed on PlanDesk`, ok: true, hash: (receipt as { transactionHash: string }).transactionHash });
+      }
     });
 
   const reset = () => {
@@ -360,12 +508,19 @@ function LiveSip({ d }: { d: Deployment }) {
     setRoot(null);
     setLog([]);
     setBalances(null);
+    setPlan(null);
+    setPlansRead(false);
     setError(null);
+    setWaiting(null);
   };
 
   const funded = (balances?.path ?? 0n) > 0n && (balances?.alpha ?? 0n) > 0n;
   const authorized = !!budget && !budget.revoked && (budget.expiry ?? 0n) > 0n;
   const revoked = !!budget?.revoked;
+  const planOpen = !!plan?.active;
+  const ready = authorized && planOpen;
+  // A key the house was granted under the v1 scope (CreationDesk.placeOrder) cannot run a PlanDesk plan.
+  const v1Key = plansRead && authorized && !plan;
 
   return (
     <div className="rounded-[var(--radius-panel)] border border-line-strong bg-surface p-6">
@@ -403,24 +558,24 @@ function LiveSip({ d }: { d: Deployment }) {
               </li>
             ))}
           </ol>
-        <div className="mt-5 space-y-2">
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => void create("passkey")}
-            className="w-full rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white hover:bg-bind-deep disabled:opacity-50"
-          >
-            {busy === "create" ? "Waiting for the passkey…" : "1. Create a plan with a passkey"}
-          </button>
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => void create("local")}
-            className="w-full rounded-[var(--radius-control)] border border-line-strong px-4 py-2.5 text-sm text-ink hover:border-ink-3 disabled:opacity-50"
-          >
-            No passkey here? Use a throwaway key in this browser
-          </button>
-        </div>
+          <div className="mt-5 space-y-2">
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void create("passkey")}
+              className="w-full rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white hover:bg-bind-deep disabled:opacity-50"
+            >
+              {busy === "create" ? "Waiting for the passkey…" : "1. Create a plan with a passkey"}
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void create("local")}
+              className="w-full rounded-[var(--radius-control)] border border-line-strong px-4 py-2.5 text-sm text-ink hover:border-ink-3 disabled:opacity-50"
+            >
+              No passkey here? Use a throwaway key in this browser
+            </button>
+          </div>
         </>
       ) : (
         <>
@@ -428,22 +583,44 @@ function LiveSip({ d }: { d: Deployment }) {
             <Stat label="Plan account" value={shortAddress(account!.address, 6, 4)} href={`${d.explorer}/address/${account!.address}`} />
             <Stat label="Budget left" value={revoked ? "revoked" : authorized ? `${fmt(budget?.remaining)}` : "—"} />
             <Stat label="AlphaUSD in account" value={fmt(balances?.alpha)} />
-            <Stat label={`${basket.symbol} held`} value={balances ? quantity(fromRaw(balances.shares), 2) : "—"} />
+            <Stat label={`${basket.symbol} held`} value={balances ? quantity(fromRaw(balances.shares), 4) : "—"} />
           </dl>
+          {plan && (
+            <p className="tnum mt-3 text-xs leading-relaxed text-ink-3">
+              Plan #{plan.id} on{" "}
+              <a href={`${d.explorer}/address/${v2.planDesk}`} target="_blank" rel="noreferrer" className={link}>
+                PlanDesk
+              </a>
+              : {fmt(plan.cashPerRun)} AlphaUSD a run, never fewer than {sh(plan.minShares)} {basket.symbol} (at most{" "}
+              {(fromRaw(plan.cashPerRun, 6) / fromRaw(plan.minShares)).toFixed(2)} AlphaUSD a share). {plan.runs} run{plan.runs === 1 ? "" : "s"} so far
+              {plan.active ? "" : "; closed"}.
+            </p>
+          )}
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <SipButton n={2} label="Fund from Tempo's faucet" done={funded} busy={busy === "fund"} disabled={!!busy} onClick={fund} />
-            <SipButton n={3} label="Sign the plan, once" done={authorized || revoked} busy={busy === "authorize"} disabled={!!busy || !funded || authorized || revoked} onClick={authorize} />
-            <SipButton n={4} label="Keeper: this month's installment" busy={busy === "instalment"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("instalment")} />
-            <SipButton n={5} label="Keeper: try to overspend" busy={busy === "overspend"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("overspend")} />
-            <SipButton n={6} label="Keeper: call outside the scope" busy={busy === "outOfScope"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("outOfScope")} />
-            <SipButton n={7} label="Revoke the plan (optional)" done={revoked} busy={busy === "revoke"} disabled={!!busy || !authorized} onClick={revoke} quiet />
+            <SipButton n={3} label="Sign the plan, once" done={ready || revoked} busy={busy === "authorize"} disabled={!!busy || !funded || ready || revoked || v1Key} onClick={sign} />
+            <SipButton n={4} label="Keeper: try to overpay" busy={busy === "overspend"} disabled={!!busy || !planOpen} onClick={() => keeper("overspend")} />
+            <SipButton n={5} label="Keeper: this month's installment" busy={busy === "instalment"} disabled={!!busy || !planOpen || waiting != null} onClick={() => keeper("instalment")} />
+            <SipButton n={6} label="Keeper: run it again at once" busy={busy === "tooSoon"} disabled={!!busy || !planOpen || (plan?.runs ?? 0) === 0} onClick={() => keeper("tooSoon")} />
+            <SipButton n={7} label="Keeper: call the desk directly" busy={busy === "outOfScope"} disabled={!!busy || !(authorized || revoked)} onClick={() => keeper("outOfScope")} />
+            <SipButton n={8} label="Revoke and close (optional)" done={revoked && !planOpen} busy={busy === "revoke"} disabled={!!busy || !(authorized || planOpen)} onClick={revoke} quiet />
           </div>
-          {budget?.periodEnd != null && authorized && (
+          {v1Key && (
+            <p className="mt-3 text-xs leading-relaxed text-loss">
+              This account authorized the keeper under the old scope, which could only call the v1 desk. Start over to sign a plan the chain caps.
+            </p>
+          )}
+          {waiting && (
+            <p className="pulse mt-3 text-xs leading-relaxed text-ink-2">
+              Order #{waiting.orderId} is a live auction. The house fills once it reaches fair value plus 0.15%
+              {waiting.inSec != null ? `, in about ${waiting.inSec}s` : ""}; any filler can take it sooner, at a better count for you.
+            </p>
+          )}
+          {ready && plan && (
             <p className="tnum mt-3 text-xs leading-relaxed text-ink-3">
-              Budget resets {day(budget.periodEnd)}.{" "}
-              {budget.remaining < TEMPO_SIP.limit
-                ? `Next installment happens automatically on ${day(budget.periodEnd)}: the keeper places it on its own.`
-                : "If you skip step 4, the keeper places this period's installment on its own within about 20 minutes, then once every 30 days."}{" "}
+              {plan.runs === 0
+                ? "If you skip step 5, the keeper runs this period's installment on its own within about 20 minutes, then once every 30 days."
+                : `Next installment is due ${day(plan.nextRunAt)}${now > 0 && plan.nextRunAt <= now ? " (now)" : ""}: the keeper runs it on its own.`}{" "}
               Revoke to stop it.
             </p>
           )}
@@ -473,6 +650,17 @@ function LiveSip({ d }: { d: Deployment }) {
       {error && <p className="mt-3 text-sm text-loss">{error}</p>}
     </div>
   );
+}
+
+async function keeperPostFaucet(d: Deployment, address: Address) {
+  const res = await fetch("/api/evm-faucet", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ network: d.network, address }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { txs?: { hash: string }[]; error?: string };
+  if (!res.ok) throw new Error(json.error ?? "Tempo's faucet did not answer. Try again in a moment.");
+  return json;
 }
 
 function Stat({ label, value, href }: { label: string; value: string; href?: string }) {

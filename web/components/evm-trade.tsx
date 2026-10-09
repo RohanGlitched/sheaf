@@ -5,17 +5,21 @@ import { encodeFunctionData, formatEther, parseEventLogs, type Address, type Hex
 import type { ChainBasket, Deployment } from "@/lib/chains";
 import {
   BASKET_ABI,
-  DESK_ABI,
+  DESK_V2_ABI,
   ERC20_ABI,
   MIRROR_ABI,
   ONE_SHARE,
+  PROTOCOL_FEE_BPS,
+  auctionBounds,
   explainEvmError,
   fromRaw,
   gasSymbol,
   isTempo,
   mintAmounts,
   redeemAmounts,
+  readDeskOrderV2,
   toShares,
+  v2Of,
 } from "@/lib/evm";
 import { money, quantity, shortAddress } from "@/lib/format";
 import { EvmConnect, StepList, type EvmWallet, type Step, type StepState } from "./evm-wallet";
@@ -34,12 +38,17 @@ const TABS: { mode: Mode; label: string }[] = [
 const DRIP_CHAINS = new Set(["robinhoodTestnet", "arbitrumSepolia", "baseSepolia"]);
 const MIRROR_FAUCET_SHARES = 2n * ONE_SHARE;
 const MIRROR_DOLLARS = 50_000_000n; // 50 test dollars, 6 decimals
-/** A dollar order offers this much over the live value, so a filler is not short by a tick. */
-const CASH_BUFFER = 1.01;
+/**
+ * A dollar order is a Dutch auction on the v2 desk, as on Solana: the escrow is the
+ * shares' live value, and the count the buyer receives starts 2% above that and
+ * falls to 2% below over ninety seconds. The house fills once the dollars cover the
+ * stocks at fair plus 0.15%; any filler can fill sooner, for a better count.
+ */
+const AUCTION_SECS = 90n;
+const BAND_BPS = 200;
+const HOUSE_MARGIN_BPS = 15;
 
-const inAnHour = () => BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-type KeeperResult = { status: "filled" | "skipped" | "failed"; reason?: string; hash?: Hex };
+type KeeperResult = { status: "filled" | "skipped" | "failed"; reason?: string; hash?: Hex; retryInSec?: number; filler?: string };
 
 export function EvmTradePanel({
   d,
@@ -65,6 +74,7 @@ export function EvmTradePanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [serverTxs, setServerTxs] = useState<{ label: string; hash: Hex }[]>([]);
   const [order, setOrder] = useState<{ id: number; keeper?: KeeperResult | null } | null>(null);
+  const v2 = v2Of(d);
 
   const user = reads?.user ?? null;
   const shares = toShares(amount);
@@ -173,45 +183,70 @@ export function EvmTradePanel({
         ]
       : [];
 
-  const cashCost = shares && nav != null ? BigInt(Math.ceil(nav * fromRaw(shares) * CASH_BUFFER * 10 ** d.stable.decimals)) : null;
+  // The escrow is the shares' live value: the auction is centred on the count it buys at fair.
+  const cashCost = shares && nav != null ? BigInt(Math.ceil(nav * fromRaw(shares) * 10 ** d.stable.decimals)) : null;
+  const floorShares = shares ? (shares * BigInt(10_000 - BAND_BPS)) / 10_000n : 0n;
+  const bounds = shares ? auctionBounds(shares, BAND_BPS, floorShares) : null;
+  // What the house's fill leaves the buyer: the stocks at fair plus its margin must fit the escrow, both fees included.
+  const feeBps = BigInt(basket.feeBps) + PROTOCOL_FEE_BPS;
+  const atHouse = shares ? (((shares * (10_000n - feeBps)) / 10_000n) * 10_000n) / BigInt(10_000 + HOUSE_MARGIN_BPS) : null;
 
   const cashSteps = (): Step[] => {
-    if (!shares || cashCost == null) return [];
+    if (!shares || cashCost == null || !v2) return [];
     const list: Step[] = [];
     if ((user?.deskAllowance ?? 0n) < cashCost) {
       list.push({
         label: `Approve ${fromRaw(cashCost, d.stable.decimals).toFixed(2)} ${d.stable.symbol}`,
         to: d.stable.address as Address,
-        data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [d.desk as Address, cashCost] }),
+        data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [v2.desk as Address, cashCost] }),
       });
     }
-    const expiry = inAnHour();
     list.push({
-      label: `Order ${amount} ${basket.symbol} on the desk`,
-      to: d.desk as Address,
-      data: encodeFunctionData({ abi: DESK_ABI, functionName: "placeOrder", args: [basket.address as Address, shares, cashCost, expiry] }),
+      label: `Auction for about ${amount} ${basket.symbol} on the desk`,
+      to: v2.desk as Address,
+      data: encodeFunctionData({
+        abi: DESK_V2_ABI,
+        functionName: "placeAuction",
+        args: [basket.address as Address, cashCost, shares, BAND_BPS, AUCTION_SECS, floorShares],
+      }),
     });
     return list;
   };
 
-  async function afterOrder(receipts: Awaited<ReturnType<EvmWallet["send"]>>) {
-    const placed = receipts.flatMap((r) => parseEventLogs({ abi: DESK_ABI, logs: r.logs, eventName: "OrderPlaced" }));
-    const id = placed[0] ? Number(placed[0].args.id) : null;
-    if (id == null) return;
-    setOrder({ id, keeper: null });
-    onDone();
+  async function askKeeper(id: number): Promise<KeeperResult> {
     try {
       const res = await fetch("/api/evm-keeper", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ network: d.network, order: id }),
+        body: JSON.stringify({ network: d.network, order: id, version: 2 }),
       });
       const json = (await res.json()) as { results?: KeeperResult[]; error?: string };
-      const r = json.results?.[0] ?? { status: "skipped" as const, reason: json.error ?? "the house filler did not pick it up" };
-      setOrder({ id, keeper: r });
+      const r = json.results?.[0];
+      if (r && !(r.status === "skipped" && /^already filled/.test(r.reason ?? ""))) return r;
+      if (json.error) return { status: "skipped", reason: json.error };
+      // No longer open: a sweep or another participant filled it, or it ended.
+      const o = await readDeskOrderV2(d, id);
+      if (o.status === "Filled") return { status: "filled", filler: o.filler };
+      return { status: "skipped", reason: o.status === "Cancelled" ? "it ended unfilled and the dollars went back" : "the house filler did not pick it up" };
     } catch {
-      setOrder({ id, keeper: { status: "skipped", reason: "the house filler could not be reached" } });
+      return { status: "skipped", reason: "the house filler could not be reached", retryInSec: 10 };
     }
+  }
+
+  async function afterOrder(receipts: Awaited<ReturnType<EvmWallet["send"]>>) {
+    const placed = receipts.flatMap((r) => parseEventLogs({ abi: DESK_V2_ABI, logs: r.logs, eventName: "OrderPlaced" }));
+    const id = placed[0] ? Number(placed[0].args.id) : null;
+    if (id == null) return;
+    setOrder({ id, keeper: null });
+    onDone();
+    // The route waits up to 30 s for the house's price; past that it says when. Ask until filled or the auction ends.
+    let r = await askKeeper(id);
+    for (let i = 0; i < 5 && r.status === "skipped" && r.retryInSec != null; i++) {
+      setOrder({ id, keeper: r });
+      await new Promise((res) => setTimeout(res, Math.max(2, (r.retryInSec ?? 5) - 25) * 1000));
+      r = await askKeeper(id);
+    }
+    setOrder({ id, keeper: r });
   }
 
   // ------------------------------------------------------------- derived
@@ -397,14 +432,24 @@ export function EvmTradePanel({
                       {cashCost != null ? `${fromRaw(cashCost, d.stable.decimals).toFixed(2)} ${d.stable.symbol}` : "—"}
                     </span>
                   </div>
+                  {bounds && (
+                    <dl className="tnum mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <Bal label="Count starts at" value={quantity(fromRaw(bounds.startShares), 4)} />
+                      <Bal label="House fills near" value={atHouse != null ? quantity(fromRaw(atHouse), 4) : "—"} />
+                      <Bal label="Never below" value={quantity(fromRaw(bounds.endShares), 4)} />
+                    </dl>
+                  )}
                   <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                    The live value plus 1%, held by the desk contract until a participant delivers the components in kind. The shares are minted
-                    straight to you; cancel any time before then and the dollars come back.
+                    The live value, held by the v2 desk while a Dutch auction runs for ninety seconds: the shares you receive start 2% above what
+                    it buys at fair and fall to 2% below. Any participant who delivers the components in kind can fill at the current count;
+                    the house fills once the dollars cover the stocks at fair plus 0.15%, after the {basket.feeBps / 100}% creator fee and the
+                    0.10% protocol fee. The shares are minted straight to you. Cancel any time before a fill; once the auction ends, anyone can
+                    return the dollars to you.
                   </p>
                 </div>
                 <ActionButton
                   className="mt-4"
-                  disabled={!ready || busy || !shares || cashCost == null || (user ? user.stable < cashCost : true)}
+                  disabled={!ready || busy || !shares || cashCost == null || !v2 || (user ? user.stable < cashCost : true)}
                   onClick={() => void run(cashSteps, afterOrder)}
                 >
                   {busy
@@ -425,11 +470,25 @@ export function EvmTradePanel({
                         "Asking the house filler…"
                       ) : order.keeper.status === "filled" ? (
                         <>
-                          Filled by the house:{" "}
-                          <a href={`${d.explorer}/tx/${order.keeper.hash}`} target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
-                            {shortAddress(order.keeper.hash ?? "", 6, 4)}
-                          </a>
+                          {order.keeper.hash ? (
+                            <>
+                              Filled by the house:{" "}
+                              <a href={`${d.explorer}/tx/${order.keeper.hash}`} target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
+                                {shortAddress(order.keeper.hash, 6, 4)}
+                              </a>
+                            </>
+                          ) : (
+                            <>
+                              Filled by{" "}
+                              {order.keeper.filler && order.keeper.filler.toLowerCase() !== d.deployer?.toLowerCase() ? shortAddress(order.keeper.filler, 6, 4) : "the house"}
+                            </>
+                          )}
                           . The shares are in your wallet.
+                        </>
+                      ) : order.keeper.retryInSec != null ? (
+                        <>
+                          The auction is live. The house fills once it reaches fair plus 0.15%, in about {order.keeper.retryInSec}s; any participant
+                          can fill it sooner.
                         </>
                       ) : (
                         <>Still open for any participant: the house left it because {order.keeper.reason ?? "it could not fill it"}.</>

@@ -34,7 +34,7 @@ const RULES = [
   {
     title: "A desk that turns dollars into shares",
     body: "A buyer escrows dollars; any participant who delivers the components collects them, and the shares go to the buyer.",
-    fn: "placeOrder() · fill()",
+    fn: "placeAuction() · fill()",
   },
 ];
 
@@ -100,9 +100,9 @@ export default function ChainsPage() {
             <p className="text-xs text-ink-3">Tempo</p>
             <h2 className="display mt-2 text-title text-ink">A monthly plan is an access key</h2>
             <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
-              One passkey signature grants a keeper 25 AlphaUSD every 30 days, callable only on AlphaUSD.approve to the desk and
-              CreationDesk.placeOrder. The keeper places the month&apos;s installment; ask for more and the chain answers SpendingLimitExceeded,
-              call anything else and it answers CallNotAllowed. No allowance, no custody, and gas paid in a dollar.
+              One passkey signature writes the plan on PlanDesk: the amount, the interval and the price cap. A second scopes the keeper to
+              AlphaUSD.approve(PlanDesk) and PlanDesk.instalment. Ask for fewer shares and the plan answers FairOutOfBounds, run early and it
+              answers TooSoon, call anything else and the chain answers CallNotAllowed. No custody, and gas paid in a dollar.
             </p>
             <Link
               href={`${basketHref(tempo.d.network, tempo.d.baskets[0].symbol)}#sip`}

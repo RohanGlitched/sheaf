@@ -41,6 +41,7 @@ import {
   mintAmounts,
   navFrom,
   publicClientFor,
+  readDeskOrderV2,
   readDeskOrders,
   readDeskOrdersV2,
   readPlansOf,
@@ -136,7 +137,8 @@ export function rateLimiter(windowMs: number, max: number) {
  */
 export const GAS_DRIP: Record<string, { amount: string; below: string } | undefined> = {
   robinhoodTestnet: { amount: "0.00003", below: "0.00001" },
-  arbitrumSepolia: { amount: "0.00015", below: "0.00005" },
+  // Arbitrum Sepolia gas rose: 0.00015 no longer covered 8 mints, 8 approvals and a create (Oct 9 QA).
+  arbitrumSepolia: { amount: "0.0003", below: "0.0001" },
   baseSepolia: { amount: "0.00003", below: "0.00001" },
   // Sepolia: the house has almost nothing left. Tempo: there is no gas token.
 };
@@ -349,6 +351,11 @@ async function fillOneV2(d: Deployment, o: DeskOrderV2, prices: Record<string, n
   if (!quota.ok) return { ...base, status: "skipped", reason: `the house has filled this buyer's orders enough for now; try again in ${Math.ceil(quota.retryInSec / 60)} min, or any holder can fill it` };
 
   if (at > now) await sleep((at - now) * 1000 + 1_000);
+  // Another sweep (or another filler) may have taken it while this one waited for the chain lock or the price.
+  const fresh = await readDeskOrderV2(d, o.id);
+  if (fresh.status !== "Open") {
+    return { ...base, status: "skipped", reason: fresh.status === "Filled" ? `already filled by ${fresh.filler.toLowerCase() === houseAccount()!.address.toLowerCase() ? "the house" : fresh.filler}` : "no longer open" };
+  }
   // The count only falls, so the chain's own quote at its latest block bounds what the fill takes when it lands.
   const client = publicClientFor(d);
   let quote: readonly [bigint, bigint, readonly bigint[]] | null = null;

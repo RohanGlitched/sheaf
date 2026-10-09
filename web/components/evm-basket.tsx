@@ -14,6 +14,7 @@ import {
   isTempo,
   navFrom,
   publicClientFor,
+  v2Of,
 } from "@/lib/evm";
 import { readHyperCorePrices, type PerpPrice } from "@/lib/hypercore";
 import { count, money, percent, plural, quantity, shortAddress } from "@/lib/format";
@@ -89,7 +90,8 @@ export function useBasketReads(d: Deployment, basket: ChainBasket, address: Addr
             basket.components.map((c) => client.readContract({ address: c.token as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, b] })),
           ),
           client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
-          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, d.desk as Address] }),
+          // Dollar orders go to the v2 desk (the auction) where it is deployed.
+          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, (v2Of(d)?.desk ?? d.desk) as Address] }),
           // Tempo has no gas token. Its getBalance is a placeholder; the real fee balance is pathUSD.
           isTempo(d)
             ? client.readContract({ address: TEMPO_PATH_USD, abi: ERC20_ABI, functionName: "balanceOf", args: [address] })
@@ -429,9 +431,23 @@ export function EvmBasket({
               {basket.symbol} basket
             </a>
           </li>
+          {v2Of(d) && (
+            <>
+              <li>
+                <a href={`${d.explorer}/address/${v2Of(d)!.desk}`} target="_blank" rel="noreferrer" className={link}>
+                  Creation desk v2 (auction, 0.10% protocol fee)
+                </a>
+              </li>
+              <li>
+                <a href={`${d.explorer}/address/${v2Of(d)!.planDesk}`} target="_blank" rel="noreferrer" className={link}>
+                  Plan desk
+                </a>
+              </li>
+            </>
+          )}
           <li>
             <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={link}>
-              Creation desk
+              Creation desk v1
             </a>
           </li>
           <li>

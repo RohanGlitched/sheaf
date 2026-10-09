@@ -94,6 +94,8 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "0xF948aE3A26341324196ae18381f5B8d01fA79874", role: "test", label: "EVM test wallet, QA round 2" },
   { address: "0x2FD70697FDbC7a9788fbc36a631CDd06834BF38e", role: "test", label: "EVM test wallet, chain walkthroughs" },
   { address: "0x7B854D62B06ac29C32b56ee36a12f5e823262248", role: "test", label: "EVM test wallet, QA round 3 (Arbitrum Sepolia)" },
+  { address: "0x9Ca9Ec96A31aCC698DE51E516D2B55A7092E4647", role: "test", label: "EVM test wallet, v2 walkthrough (Arbitrum Sepolia)" },
+  { address: "0xB60df24c5A8D3eaF12f3b0a5D26147074820d8c1", role: "test", label: "Tempo test plan account, v2 walkthrough" },
   // Tempo plan accounts from the "Run it in this browser" SIP, each made in a test run.
   { address: "0xEae83b650726a9bfb600FFF74c3AeD54a54805b8", role: "test", label: "Tempo test plan account, QA round 3" },
   { address: "0xDF9e887bbA6A569845D0cD1ddA91461Bb60321e1", role: "test", label: "Tempo test plan account, QA round 2" },
