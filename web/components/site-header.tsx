@@ -11,6 +11,7 @@ const NAV = [
   { href: "/compose", label: "Create", long: "Create a basket" },
   { href: "/explore", label: "Explore" },
   { href: "/plans", label: "Plans" },
+  { href: "/predict", label: "Predict" },
   { href: "/chains", label: "Chains" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/ledger", label: "Ledger" },

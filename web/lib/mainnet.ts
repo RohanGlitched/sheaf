@@ -1,17 +1,12 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getScaledUiAmountConfig, unpackMint } from "@solana/spl-token";
-import { MAINNET_RPC } from "./config";
+import { pacedFetch, rpcUrl, solamiCooling, solamiKey, type Via } from "./solami";
 
 /**
  * Mainnet reads go through Solami's private RPC when a key is configured, and
- * fall back to the public endpoint when it is not. The key stays on the server.
+ * fall back to the public endpoint when it is not, or when Solami fails this
+ * read. `via` says which one actually answered. The key stays on the server.
  */
-function mainnetRpc(): { url: string; via: "solami" | "public" } {
-  const key = process.env.SOLAMI_API_KEY?.trim();
-  return key
-    ? { url: `https://rpc.solami.dev/solana?api-key=${encodeURIComponent(key)}`, via: "solami" }
-    : { url: MAINNET_RPC, via: "public" };
-}
 
 export type MintState = {
   /** Raw supply over 10^decimals, before the multiplier. */
@@ -35,8 +30,21 @@ export type ChainRead = {
  * from an aggregator's copy of it.
  */
 export async function readMints(mints: string[]): Promise<ChainRead | null> {
-  const { url, via } = mainnetRpc();
-  const connection = new Connection(url, "confirmed");
+  const order: Via[] = solamiKey() && !solamiCooling() ? ["solami", "public"] : ["public"];
+  for (const via of order) {
+    const read = await readMintsVia(via, mints);
+    if (read) return read;
+  }
+  return null;
+}
+
+async function readMintsVia(via: Via, mints: string[]): Promise<ChainRead | null> {
+  const connection = new Connection(rpcUrl(via), {
+    commitment: "confirmed",
+    fetch: pacedFetch(via),
+    // web3.js would otherwise retry 429s on its own schedule, outside the pacing.
+    disableRetryOnRateLimit: true,
+  });
   try {
     const keys = mints.map((m) => new PublicKey(m));
     const out = new Map<string, MintState>();

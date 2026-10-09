@@ -8,7 +8,7 @@
  * figure on screen stays real.
  */
 
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://sheaf.vercel.app").replace(/\/$/, "");
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://sheaf-index.vercel.app").replace(/\/$/, "");
 
 export const MAINNET_RPC =
   process.env.NEXT_PUBLIC_MAINNET_RPC ?? "https://api.mainnet-beta.solana.com";

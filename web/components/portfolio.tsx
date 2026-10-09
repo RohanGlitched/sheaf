@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useBaskets } from "@/lib/use-baskets";
 import { LaunchHoldings } from "./launch-holdings";
+import { PantaPositions } from "./panta-positions";
 import { useBalances } from "@/lib/use-balances";
 import { valueBasket } from "@/lib/basket-view";
 import { useMarket } from "./market-provider";
@@ -535,6 +536,8 @@ export function Portfolio() {
       )}
 
       <LaunchHoldings baskets={baskets} />
+
+      <PantaPositions />
 
       {view.loose.length > 0 && (
         <section className="mt-16">
