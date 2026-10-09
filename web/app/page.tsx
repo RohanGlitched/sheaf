@@ -2,6 +2,8 @@ import Link from "next/link";
 import { HomeMosaic, HomeStats, ComposeCta } from "@/components/home-mosaic";
 import { HomeSheaf } from "@/components/home-sheaf";
 import { LiveTape } from "@/components/live-tape";
+import { HomePlans } from "@/components/home-plans";
+import { HomeChains } from "@/components/home-chains";
 import { MarketClock } from "@/components/market-clock";
 import { FeaturedBaskets } from "@/components/featured-baskets";
 import { LaunchMarket } from "@/components/launch-market";
@@ -127,6 +129,11 @@ export default function Home() {
         </p>
       </section>
 
+      {/* ----------------------------------------------------------- plans */}
+      <section className="border-t border-line py-20">
+        <HomePlans />
+      </section>
+
       {/* --------------------------------------------------------- anatomy */}
       <section className="reveal py-20">
         <Anatomy />
@@ -135,6 +142,11 @@ export default function Home() {
       {/* ---------------------------------------------------------- launch */}
       <section id="launch" className="reveal scroll-mt-24 border-t border-line py-20">
         <LaunchMarket />
+      </section>
+
+      {/* ---------------------------------------------------------- chains */}
+      <section className="border-t border-line py-20">
+        <HomeChains />
       </section>
 
       {/* -------------------------------------------------------- premiums */}
