@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { fetchPlans, fetchOrders, runPlanIx, closePlanIx, freshNonce, type Plan, type Order } from "@/lib/desk";
+import { fetchPlans, fetchOrders, runPlanIx, closePlanIx, cancelOrderIx, freshNonce, type Plan, type Order } from "@/lib/desk";
 import { useBaskets } from "@/lib/use-baskets";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
@@ -31,20 +31,24 @@ function PlanCard({
   basketName,
   basketSymbol,
   pending,
+  expired,
   now,
   mine,
   onRun,
   onClose,
+  onRefund,
   busy,
 }: {
   plan: Plan;
   basketName: string;
   basketSymbol: string;
   pending: Order | undefined;
+  expired: Order | undefined;
   now: number;
   mine: boolean;
   onRun: (p: Plan) => void;
   onClose: (p: Plan) => void;
+  onRefund: (o: Order) => void;
   busy: boolean;
 }) {
   const ran = plan.runsTotal - plan.runsLeft;
@@ -64,15 +68,26 @@ function PlanCard({
           </span>
         </div>
         <p className="tnum mt-1 text-sm text-ink-3">
-          {plan.fills} of {plan.runsTotal} gathered · {ran - plan.fills > 0 && pending ? "one order out now · " : ""}
-          {plan.runsLeft > 0 ? `next ${until(plan.nextRunTs, now)}` : "finished"}
+          {plan.fills} of {plan.runsTotal} filled, {ran} run
+          {plan.runsLeft > 0 ? ` · next run ${due ? "is due now" : until(plan.nextRunTs, now)}` : " · finished"}
         </p>
         {pending && (
           <p className="mt-2 text-sm text-ink-2">
-            An order for {money(fromCashRaw(pending.cashAmount))} of {basketSymbol} is waiting for a filler.
+            This run&apos;s {money(fromCashRaw(pending.cashAmount))} order for {basketSymbol} is open to fillers for another{" "}
+            {until(pending.endTs, now).replace("in ", "")}.
+          </p>
+        )}
+        {expired && (
+          <p className="mt-2 text-sm text-ink-2">
+            A {money(fromCashRaw(expired.cashAmount))} order ended unfilled. Anyone can return the dollars to the plan owner.
           </p>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          {expired && (
+            <button type="button" onClick={() => onRefund(expired)} disabled={busy} className="rounded-[var(--radius-control)] border border-line-strong px-3.5 py-2 text-ink hover:border-ink-3 disabled:opacity-60">
+              Return {money(fromCashRaw(expired.cashAmount))}
+            </button>
+          )}
           {due && (
             <button type="button" onClick={() => onRun(plan)} disabled={busy} className="rounded-[var(--radius-control)] bg-bind px-3.5 py-2 font-medium text-white hover:bg-bind-deep disabled:opacity-60">
               {mine ? "Run it now" : "Run it for them"}
@@ -119,11 +134,12 @@ export function PlansBoard() {
   }, [load]);
 
   const byBasket = useMemo(() => new Map((baskets ?? []).map((b) => [b.address, b])), [baskets]);
-  const pendingFor = (p: Plan) => orders.find((o) => o.plan === p.address);
+  const pendingFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs >= now);
+  const expiredFor = (p: Plan) => orders.find((o) => o.plan === p.address && o.endTs < now);
   const me = publicKey?.toBase58();
   const mine = (plans ?? []).filter((p) => p.owner === me);
   const others = (plans ?? []).filter((p) => p.owner !== me);
-  const due = others.filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
+  const due = (plans ?? []).filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
 
   async function act(build: () => Transaction, done: string) {
     if (!publicKey) return;
@@ -145,6 +161,7 @@ export function PlansBoard() {
   const run = (p: Plan) =>
     act(() => new Transaction().add(runPlanIx({ cranker: publicKey!, plan: p, nonce: freshNonce() }).ix), "Ran it. The order is out; a filler will take it within the auction.");
   const close = (p: Plan) => act(() => new Transaction().add(closePlanIx({ owner: publicKey!, plan: p })), "Closed. The plan can no longer spend anything.");
+  const refund = (o: Order) => act(() => new Transaction().add(cancelOrderIx({ caller: publicKey!, order: o })), "Returned. The dollars went back to the plan owner.");
 
   const card = (p: Plan, own: boolean) => {
     const b = byBasket.get(p.basket);
@@ -155,10 +172,12 @@ export function PlansBoard() {
         basketName={b?.name ?? shortAddress(p.basket)}
         basketSymbol={b?.symbol ?? ""}
         pending={pendingFor(p)}
+        expired={expiredFor(p)}
         now={now}
         mine={own}
         onRun={run}
         onClose={close}
+        onRefund={refund}
         busy={busy}
       />
     );
@@ -194,7 +213,7 @@ export function PlansBoard() {
         <h2 className="display text-title text-ink">Every plan on Sheaf</h2>
         <p className="mt-3 max-w-[50ch] text-sm leading-relaxed text-ink-2">
           Running a due plan needs no permission: anyone can send the transaction, and the plan can only do the one thing
-          its owner allowed. {due.length > 0 ? `${due.length} ${due.length === 1 ? "is" : "are"} due right now.` : "None is due right now."}
+          its owner allowed. {due.length > 0 ? `${due.length} ${due.length === 1 ? "plan is" : "plans are"} due right now.` : "No plan is due right now."}
         </p>
         {plans == null ? (
           <div className="skeleton mt-6 h-40 rounded-[var(--radius-panel)]" />

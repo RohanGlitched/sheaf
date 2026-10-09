@@ -64,8 +64,11 @@ async function fill(connection: Connection, order: Order, basket: Basket, gross:
   const shareMint = new PublicKey(basket.shareMint);
   prep.push(
     createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, tokenAccount(cashMint, keeper.publicKey, cashProgram), keeper.publicKey, cashMint, cashProgram),
-    createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, tokenAccount(shareMint, new PublicKey(order.buyer), TOKEN_2022_PROGRAM_ID), new PublicKey(order.buyer), shareMint, TOKEN_2022_PROGRAM_ID),
   );
+  // The buyer's share account must already exist: the order form creates it, so the
+  // house never pays rent for a stranger's account.
+  const buyerShares = await connection.getAccountInfo(tokenAccount(shareMint, new PublicKey(order.buyer), TOKEN_2022_PROGRAM_ID));
+  if (!buyerShares) throw new Error("buyer has no share account yet");
   if (basket.creatorFeeBps > 0) {
     prep.push(
       createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, tokenAccount(shareMint, new PublicKey(basket.creator), TOKEN_2022_PROGRAM_ID), new PublicKey(basket.creator), shareMint, TOKEN_2022_PROGRAM_ID),
@@ -88,11 +91,22 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   const now = Math.floor(Date.now() / 1000);
   let budget = opts.maxActions ?? 6;
 
-  // 1. Plans that are due.
-  const plans = await fetchPlans(connection);
+  // The keeper spends the house key's SOL on rent it gets back later. Below this
+  // floor it only refunds, so nobody can drain it by flooding the program.
+  const balance = await connection.getBalance(keeper.publicKey);
+  const lowOnSol = balance < 0.5e9;
+  if (lowOnSol) report.skipped.push(`house key low on SOL (${(balance / 1e9).toFixed(3)}); refunds only`);
+  const known = new Set((await fetchBaskets(connection)).map((b) => b.address));
+
+  // 1. Plans that are due. Only plans the house would sensibly run: Sheaf's test
+  // dollar, a real basket, at least a minute between runs, an auction no longer
+  // than two hours and at least a dollar a run. Anyone else's plan can still be
+  // run by anyone; the house just won't pay for it.
+  const plans = lowOnSol ? [] : await fetchPlans(connection);
   for (const plan of plans) {
     if (budget <= 0) break;
     if (plan.runsLeft <= 0 || now < plan.nextRunTs) continue;
+    if (plan.cashMint !== CASH_MINT || !known.has(plan.basket) || plan.periodSecs < 60 || plan.auctionSecs > 7200 || plan.cashPerRun < 1_000_000n) continue;
     try {
       const { ix } = runPlanIx({ cranker: keeper.publicKey, plan, nonce: freshNonce() });
       await send(connection, [ix]);
@@ -120,7 +134,9 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   // 3. Live orders worth filling. An order still above fair is waited for, inside this
   // call, when its auction reaches fair within the next ~40 seconds; later ones are
   // left for the next run (plans keep a half-hour auction so the schedule catches them).
-  const orders = all.filter((o) => o.endTs >= now + 2);
+  // Dollar orders under $5 are left to other fillers: a fill costs the house rent
+  // for the creator's share account at most, never the buyer's.
+  const orders = lowOnSol ? [] : all.filter((o) => o.endTs >= now + 2 && o.cashAmount >= 5_000_000n && known.has(o.basket));
   if (!orders.length) return report;
   const [baskets, market] = await Promise.all([fetchBaskets(connection), fetchMarket()]);
   const byAddress = new Map(baskets.map((b) => [b.address, b]));

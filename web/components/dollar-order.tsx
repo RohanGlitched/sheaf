@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
 import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, type Order } from "@/lib/desk";
@@ -119,7 +121,16 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         startTs: t,
         endTs: t + AUCTION_SECS,
       });
-      const signature = await sendTransaction(new Transaction().add(ix), connection);
+      // The share account the fill will pay into, created by the buyer, idempotently.
+      const shareMint = new PublicKey(basket.shareMint);
+      const shareAccount = createAssociatedTokenAccountIdempotentInstruction(
+        publicKey,
+        tokenAccount(shareMint, publicKey, TOKEN_2022_PROGRAM_ID),
+        publicKey,
+        shareMint,
+        TOKEN_2022_PROGRAM_ID,
+      );
+      const signature = await sendTransaction(new Transaction().add(shareAccount, ix), connection);
       await confirmSignature(connection, signature);
       const info = await connection.getAccountInfo(order);
       const decoded = info ? decodeOrder(order, new Uint8Array(info.data)) : null;

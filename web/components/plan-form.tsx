@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
 import { openPlanIx } from "@/lib/desk";
@@ -16,7 +18,7 @@ import { PlanSheaf } from "./plan-sheaf";
 const CADENCE = [
   { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month" },
   { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week" },
-  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", hint: "for trying it out today" },
+  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", hint: "demo speed, to watch runs land today" },
 ] as const;
 
 /**
@@ -27,6 +29,22 @@ const CADENCE = [
  * once it is due, places the same dollar order as the tab beside this one, and
  * every fill moves the plan's reference price to where the market cleared.
  */
+/** Today's rupee rate, for showing a plan in the currency an Indian saver thinks in. Optional: no rate, no rupees. */
+function useInrRate() {
+  const [rate, setRate] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("https://open.er-api.com/v6/latest/USD")
+      .then((r) => r.json())
+      .then((j) => live && typeof j?.rates?.INR === "number" && setRate(j.rates.INR))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  return rate;
+}
+
 export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navPerShare: number | null; onDone: () => void }) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
@@ -42,6 +60,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
   const valid = Number.isFinite(amount) && amount >= 1 && runs >= 1 && navPerShare != null;
   const c = CADENCE.find((x) => x.key === cadence)!;
   const total = valid ? amount * runs : 0;
+  const inr = useInrRate();
 
   async function start() {
     if (!publicKey || !valid || !navPerShare) return;
@@ -64,7 +83,16 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
         // Half an hour, so a scheduled keeper always gets a turn before it ends.
         auctionSecs: 1800,
       });
-      const signature = await sendTransaction(new Transaction().add(ix), connection);
+      // The share account the fill will pay into, created by the buyer, idempotently.
+      const shareMint = new PublicKey(basket.shareMint);
+      const shareAccount = createAssociatedTokenAccountIdempotentInstruction(
+        publicKey,
+        tokenAccount(shareMint, publicKey, TOKEN_2022_PROGRAM_ID),
+        publicKey,
+        shareMint,
+        TOKEN_2022_PROGRAM_ID,
+      );
+      const signature = await sendTransaction(new Transaction().add(shareAccount, ix), connection);
       await confirmSignature(connection, signature);
       setOpened(plan.toBase58());
       // The first run is due now; ask the keeper, though anyone may run it.
@@ -142,7 +170,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
 
       {valid && (
         <p className="tnum mt-4 text-sm text-ink-2">
-          {money(total)} over {runs} runs. About {(amount / navPerShare!).toFixed(4)} {basket.symbol} a run at today&apos;s price.
+          {money(total)} over {runs} runs{inr ? ` (about ₹${Math.round(amount * inr).toLocaleString("en-IN")} a run)` : ""}. About {(amount / navPerShare!).toFixed(4)} {basket.symbol} a run at today&apos;s price.
         </p>
       )}
 
