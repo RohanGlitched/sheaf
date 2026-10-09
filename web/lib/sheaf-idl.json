@@ -1510,6 +1510,21 @@
       "code": 6047,
       "name": "NotLegacyPlan",
       "msg": "Not a pre-hardening plan account"
+    },
+    {
+      "code": 6048,
+      "name": "ComponentIssuerAuthority",
+      "msg": "Component mint gives a freeze, seize, pause or hook power to someone other than a known stock issuer"
+    },
+    {
+      "code": 6049,
+      "name": "CashMintAuthority",
+      "msg": "Cash mint lets someone other than a known issuer change its transfer fee or transfer hook"
+    },
+    {
+      "code": 6050,
+      "name": "ShareMintNotToken2022",
+      "msg": "Share mint must be a Token-2022 mint"
     }
   ],
   "types": [

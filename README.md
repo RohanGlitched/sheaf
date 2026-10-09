@@ -6,7 +6,7 @@
 
 [**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
 
-![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![51 program tests](https://img.shields.io/badge/program%20tests-51%20%2B%209%20unit-3438c9?style=flat-square) ![100 EVM tests](https://img.shields.io/badge/EVM%20tests-100%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
+![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![59 program tests](https://img.shields.io/badge/program%20tests-59%20%2B%2010%20unit-3438c9?style=flat-square) ![100 EVM tests](https://img.shields.io/badge/EVM%20tests-100%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
 
 </div>
 
@@ -54,7 +54,7 @@ What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
 - **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events, in the browser. There is no database.
-- **Tests.** `tests/sheaf.ts` holds 51 integration tests (`anchor test`) and `lib.rs` 9 unit tests (`cargo test -p sheaf --lib`): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions). The EVM suite in `evm/` has 100 tests.
+- **Tests.** `tests/sheaf.ts` and `tests/mainnet-clone.ts` hold 59 integration tests (`anchor test`) and `lib.rs` 10 unit tests (`cargo test -p sheaf --lib`): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 100 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
 - **EVM vaults.** The same vault, recipe and dollar desk as Solidity contracts, deployed and source-verified on five testnets:
 
@@ -105,7 +105,7 @@ The program itself has no protocol fee and no fee switch.
 
 ```bash
 # Program (Linux or WSL, Anchor 0.31.1)
-anchor test                      # 51 integration tests on a local validator
+anchor test                      # 59 integration tests on a local validator
 cargo test -p sheaf --lib        # 9 unit tests
 
 # Web app
@@ -158,7 +158,7 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 - **No editable recipe.** No admin key, no rebalance authority, no fee switch. The share mint's authority is the basket PDA.
 - **The program is upgradeable on devnet.** Its upgrade authority is a single deploy key. Before it holds real tokens it moves to a multisig and is then burned, after an audit.
 - **Devnet, with mirror mints.** The program is unaudited, so it does not take custody of real stocks. Prices, dividend multipliers and the tape come from mainnet; vaults hold devnet mirrors. The mirrors match the real mints' decimals, metadata, `ScaledUiAmount` dividend multiplier and (for PreStocks) transfer fee. They do not carry the issuer powers the real mints have.
-- **Issuer powers.** Real xStocks carry a permanent delegate and a pause authority held by their issuer. The program currently refuses those extensions on components, and support for real mints is in progress.
+- **Issuer powers.** Real xStocks and PreStocks carry a freeze authority, a permanent delegate and a pause authority held by their issuer. Sheaf accepts those powers only when Backed or PreStocks hold them (`KNOWN_ISSUERS` in `lib.rs`) and refuses them under anyone else, including the basket creator. This is tested against byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock; the devnet mirrors themselves carry only metadata, ScaledUiAmount and transfer-fee extensions. An issuer that pauses or freezes one component blocks redemption of the whole basket until it lifts it.
 - **The EVM contracts** have no owner, no pause, no upgrade path and no oracle; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labelled mirrors worth nothing.
 - **Fill competition.** Today the house keeper is the only regular filler. A filler with no competition can wait for the bottom of every auction; a plan's floor is the owner's own `min_ref`.
 
@@ -170,7 +170,7 @@ Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window op
 
 ```
 programs/sheaf   the Solana program (Anchor, Token-2022)
-tests            51 integration tests
+tests            59 integration tests
 web              Next.js app: pages, the house keeper, the RPC proxy, share images
 evm              Solidity vaults, desk and mirrors for EVM chains, 100 tests
 scripts          devnet setup, the reference filler, Meteora lifecycle scripts

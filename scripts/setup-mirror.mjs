@@ -21,6 +21,18 @@
  *   node scripts/setup-mirror.mjs                    # localnet
  *   node scripts/setup-mirror.mjs --url devnet
  *   node scripts/setup-mirror.mjs --url devnet --refresh-multipliers
+ *
+ * --issuer-powers builds mirrors that match mainnet extension for extension:
+ * on top of the above, each new mint carries the issuer powers every real
+ * one has (permanent delegate, pause switch, confidential-transfer config,
+ * a program-less transfer hook, an "initialised" default state and a freeze
+ * authority), all held by the payer, which should be the stand-in issuer the
+ * program lists in KNOWN_ISSUERS. These mints are recorded under their own
+ * key in the state file and the generated web/lib file is left alone, so the
+ * live mirrors are never touched or replaced:
+ *
+ *   node scripts/setup-mirror.mjs --issuer-powers               # localnet
+ *   node scripts/setup-mirror.mjs --url devnet --issuer-powers --keypair .keys/faucet-key.json
  */
 
 import fs from "node:fs";
@@ -34,6 +46,7 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { resilientConnection, withRetry } from "./lib/rpc.mjs";
+import { STAND_IN_ISSUER, issuerMintLen, issuerPowerInstructions } from "./lib/issuer-powers.mjs";
 import {
   TOKEN_2022_PROGRAM_ID,
   ExtensionType,
@@ -57,6 +70,7 @@ const flag = (name, fallback = null) => {
   return i >= 0 ? (args[i + 1] ?? true) : fallback;
 };
 const has = (name) => args.includes(`--${name}`);
+const ISSUER_POWERS = has("issuer-powers");
 
 const URLS = {
   localnet: "http://127.0.0.1:8899",
@@ -132,7 +146,7 @@ async function ensureMint(symbol, company, multiplier, existing) {
     ExtensionType.MetadataPointer,
     ExtensionType.ScaledUiAmountConfig,
   ];
-  const space = getMintLen(extensions);
+  const space = ISSUER_POWERS ? issuerMintLen(extensions) : getMintLen(extensions);
   // Headroom for the variable-length metadata, which is appended after init.
   const lamports = await connection.getMinimumBalanceForRentExemption(space + 320);
 
@@ -156,11 +170,13 @@ async function ensureMint(symbol, company, multiplier, existing) {
       multiplier,
       TOKEN_2022_PROGRAM_ID,
     ),
+    ...(ISSUER_POWERS ? issuerPowerInstructions(mint.publicKey, payer.publicKey) : []),
     createInitializeMint2Instruction(
       mint.publicKey,
       8,
       payer.publicKey,
-      null, // no freeze authority, matching how Sheaf treats a share mint
+      // A real xStock's freeze authority is its issuer's; a plain mirror has none.
+      ISSUER_POWERS ? payer.publicKey : null,
       TOKEN_2022_PROGRAM_ID,
     ),
   );
@@ -202,6 +218,14 @@ async function main() {
   console.log(`cluster   ${cluster} (${rpc})`);
   console.log(`payer     ${payer.publicKey.toBase58()}`);
   console.log(`balance   ${(balance / 1e9).toFixed(4)} SOL`);
+  if (ISSUER_POWERS) {
+    console.log("mode      issuer powers (new mints only; live mirrors untouched)");
+    if (!payer.publicKey.equals(STAND_IN_ISSUER)) {
+      console.warn(
+        `! payer is not the stand-in issuer ${STAND_IN_ISSUER.toBase58()}: the program will refuse these mints as components`,
+      );
+    }
+  }
   if (balance < 0.5e9) {
     console.error(
       `\nNot enough SOL to create 20 mints. Fund ${payer.publicKey.toBase58()} on ${cluster} and rerun.`,
@@ -213,13 +237,16 @@ async function main() {
   const state = fs.existsSync(STATE)
     ? JSON.parse(fs.readFileSync(STATE, "utf8"))
     : {};
-  const perCluster = state[cluster] ?? {};
+  // Issuer-power mirrors live under their own key, so they never replace
+  // (or get mistaken for) the mirrors the app uses.
+  const stateKey = ISSUER_POWERS ? `${cluster}+issuer-powers` : cluster;
+  const perCluster = state[stateKey] ?? {};
 
   // Written after every mint, not once at the end. A run that throws partway
   // through has already paid rent on the mints it created, and their addresses
   // are unrecoverable if they only ever existed in memory.
   const saveState = () => {
-    state[cluster] = perCluster;
+    state[stateKey] = perCluster;
     fs.writeFileSync(STATE, `${JSON.stringify(state, null, 2)}\n`);
   };
 
@@ -275,6 +302,11 @@ async function main() {
   }
 
   saveState();
+
+  if (ISSUER_POWERS) {
+    console.log(`\nstate ${path.relative(ROOT, STATE)} under "${stateKey}"; ${path.relative(ROOT, OUT_TS)} left as is`);
+    return;
+  }
 
   const body = rows
     .map(

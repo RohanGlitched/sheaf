@@ -9,9 +9,10 @@ plans on top of them.
 | Program ID (devnet) | `GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz` |
 | Deployed | first deploy: devnet slot 508915971, tx `Af2eUxjUzrcYVRxuZMt3DdfKdv3w3PhZEpqxr4oD6bX6LvVac6YLhAc1wHxjwgHSK6ECh68uaPDmn93ya6qfdHG` |
 | Hardening upgrade | devnet slot 509084920, tx `2ia49PHW3qtstt4LM1EocsYtKH6zVPd4NCcdZH7tsVtZkfsrF1eHvTzS1J8WW8p9wihgh872ZTxb4hrmczxKHt1b`; 517,800-byte program; upgrade authority `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` (a single key: the program is upgradeable) |
+| Real-issuer upgrade | devnet slot 509118619, tx `4BWEZTsENAXhe9GtFtX5uSN2x6teejqs8ya4z9w8dMj3wu5WLej9sA7BFQTvJDio2dCajeii5r8FN8P6udPpiGX7`; 515,664-byte build in the same 517,800-byte program account (no extend); on-chain IDL upgraded. Accepts real xStocks and PreStocks under their issuers (`KNOWN_ISSUERS`), refuses issuer powers held by anyone else, gates cash transfer-fee and hook authorities, refuses legacy SPL Token share mints. No account layout changed; existing baskets, orders and plans decode and work unchanged |
 | Source | `programs/sheaf/src/lib.rs` |
 | IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`; on chain at `Brx9QqE7Hzh9ReaoNvk9BMSM5Ci1U2C6qx6qukciugBS`, `anchor idl fetch`) |
-| Tests | `tests/sheaf.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`) |
+| Tests | `tests/sheaf.ts` and `tests/mainnet-clone.ts` (integration, `anchor test`; the second runs against real mainnet xStock and PreStocks mints), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`) |
 
 The program never reads a price. Baskets are minted and redeemed in kind, so
 the vault can never back a share by less than its recipe. The desk turns cash
@@ -23,6 +24,8 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
 ## 1. Concepts and units
 
 - **Share**: a Token-2022 token with 6 decimals. `ONE_SHARE = 1_000_000` raw units.
+- **Component**: a tokenized stock: a real xStock or PreStocks mint, or any
+  mint whose issuer powers are empty or held by a known issuer (§8).
 - **Recipe**: per component, `units_per_share` raw units of that component back
   one whole share. Up to 8 components, all on one token program.
 - **Creator fee**: `creator_fee_bps <= 100` (1%), taken in newly minted shares,
@@ -102,8 +105,10 @@ succeeds and simply leaves it alone, and its owner closes it with
 Signer `creator` pays. `remaining_accounts` = each component mint, in order.
 Weights must sum to 10,000 bps, and components must be distinct.
 
-**Share mint.** It must be owned by SPL Token or Token-2022
-(`ShareMintProgram`) and decode as a real, initialised mint (`MalformedMint`,
+**Share mint.** It must be owned by a token program (`ShareMintProgram`),
+and that program must be Token-2022 (`ShareMintNotToken2022`): every client
+derives share accounts under Token-2022, so a legacy SPL Token share mint is
+refused. It must decode as a real, initialised mint (`MalformedMint`,
 which rejects a token account that merely happens to be long enough). It must
 have 6 decimals, zero supply, mint authority = the basket PDA and no freeze
 authority. It may carry **only** `MetadataPointer` and `TokenMetadata`
@@ -121,23 +126,50 @@ holders' shares:
 | NonTransferable, DefaultAccountState, ConfidentialTransfer | change what holders can do |
 
 **Components.** Each must be owned by `component_token_program` and decode as
-a real mint. It may carry what xStocks and PreStocks mirrors use:
-`MetadataPointer`, `TokenMetadata`, group pointer and member,
-`ScaledUiAmount`, `TransferFeeConfig`, and `DefaultAccountState` only when
-the default is *initialised*. Refused (`ComponentMintExtension`), along with
-anything unrecognised:
+a real mint. Always accepted: `MetadataPointer`, `TokenMetadata`, group
+pointer and member, `ScaledUiAmount` (display only), `TransferFeeConfig` (a
+deposit grosses up for it, and a fee can never stop a transfer), and
+`DefaultAccountState` when the default is *initialised*.
 
-- `PermanentDelegate`, which drains the vault.
-- `Pausable` or a frozen default state, which blocks every redemption, since
-  a redemption pays out all components.
-- `TransferHook`, which bricks the basket because hook accounts aren't forwarded.
-- `NonTransferable`.
-- Confidential-transfer configs.
+**Issuer powers** are accepted only when every authority on them is empty or
+in `KNOWN_ISSUERS` (`ComponentIssuerAuthority` otherwise), because each one is
+a lever over the vault:
+
+| Power | Authority checked | What it could do to a basket |
+|---|---|---|
+| Freeze authority | the mint's freeze authority | freeze the vault, blocking every redemption |
+| `PermanentDelegate` | the delegate | move or burn vault balances |
+| `Pausable` | the pause authority | block every transfer, so every redemption |
+| `ConfidentialTransferMint`, `ConfidentialTransferFeeConfig` | the config authority | reconfigure confidential transfers |
+| `TransferHook` with no program set | the hook authority | set a hook program later, which bricks the basket (hook accounts aren't forwarded) |
+
+Every real xStock and PreStock carries all of these, held by its issuer:
+
+| Key | Holds |
+|---|---|
+| `5aMNNLQJwAEeoemTEMkv5NVjqKwvvefRYCQ5Z67HFvEq` (Backed, xStocks) | permanent delegate, confidential-transfer, transfer-hook and metadata authority on every xStock |
+| `JDq14BWvqCRFNu1krb12bcRpbGtJZ1FLEakMw6FdxJNs` (Backed, xStocks) | pause and freeze authority on every xStock |
+| `WV9PJN7XTmTLVwbutCLFxp8TyePee6Xq5mRq6Fti5Wc` (PreStocks) | every authority on every PreStocks mint |
+| `B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L` (write cluster only) | the stand-in issuer that mints the devnet mirrors and the test dollar; left out of a build with the `mainnet` feature |
+
+The mainnet keys were read with `getAccountInfo` (jsonParsed) from all 20
+xStocks and 8 PreStocks the app lists (`web/lib/universe.ts`,
+`web/lib/prestocks.ts`); every one carries exactly these authorities. Backed's
+mint authority (`7pt9tkct…`) and ScaledUiAmount authority (`S7vYFFWH…`) are
+not in the list because those powers are not checked: minting cannot touch a
+vault, and the multiplier changes only what wallets display.
+
+Refused outright (`ComponentMintExtension`), whoever holds it, along with
+anything unrecognised: a `TransferHook` with a program set, a frozen default
+state, `NonTransferable`, and `MintCloseAuthority`.
 
 The `spl-token-2022` crate this program builds against predates
 `ScaledUiAmount` (25) and `Pausable` (26), so the program walks the
 Token-2022 TLV area by extension number (`for_each_mint_extension`) and
-fails closed on anything it doesn't know.
+fails closed on anything it doesn't know. The transfer-fee gross-up reads
+`TransferFeeConfig` the same way: the crate's own lookup stops at the first
+extension it doesn't know, so on a mint that lists `Pausable` or
+`ScaledUiAmount` before its fee config it would silently skip the fee.
 
 ### `mint_shares(shares)`
 
@@ -176,7 +208,8 @@ Checks:
 - `cash_amount > 0`, `end_shares > 0`, `start_shares >= end_shares`.
 - `start_ts < end_ts`, `end_ts > now`, and `end_ts <= now + 30 days`
   (`MAX_ORDER_SECS`), so no one's cash or rent can be parked for a century.
-- The cash mint passes the cash policy (`CashMintExtension`, §8).
+- The cash mint passes the cash policy (`CashMintExtension`,
+  `CashMintAuthority`, §8).
 
 It moves `cash_amount` into escrow and
 records the escrow's balance delta as `order.cash_amount`. Fills before
@@ -273,7 +306,7 @@ Checks (`validate_plan_terms`, shared with `update_plan`):
 - `ref > 0` (`BadReferenceRate`) and `0 < min <= ref <= max` (`BadReferenceBounds`).
 - `band_bps <= 5000` (`BandTooWide`).
 - The first run's `end_shares > 0`.
-- The cash mint passes the cash policy (`CashMintExtension`).
+- The cash mint passes the cash policy (`CashMintExtension`, `CashMintAuthority`).
 - `cash_per_run × runs` doesn't overflow.
 
 If the cash account already has a
@@ -365,7 +398,8 @@ Rehearsed locally: the old binary created a plan plus a plan order and a
 user order, the program was upgraded in place to this release, and then
 both orders filled under their original seeds, `run_plan` and `close_plan`
 refused the old plan, and `close_legacy_plan` closed it and revoked its
-allowance.
+allowance. `tests/mainnet-clone.ts` now covers the success path on every
+run, against a 280-byte first-release plan loaded as a validator fixture.
 
 ---
 
@@ -522,6 +556,9 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6045 | EscrowShort | escrow holds less than `order.cash_amount` at fill time |
 | 6046 | BadReferenceBounds | not `0 < min <= ref <= max` |
 | 6047 | NotLegacyPlan | `close_legacy_plan` on something that isn't a 280-byte first-release plan |
+| 6048 | ComponentIssuerAuthority | a component's freeze authority, permanent delegate, pause, confidential-transfer or program-less hook authority is held by someone outside `KNOWN_ISSUERS` |
+| 6049 | CashMintAuthority | a cash mint's transfer-fee config authority, or the authority of its program-less transfer hook, is held by someone outside `KNOWN_ISSUERS` |
+| 6050 | ShareMintNotToken2022 | share mint is a legacy SPL Token mint |
 
 Anchor's own constraint errors also apply: `ConstraintTokenOwner` (a refund to a
 non-buyer account), `ConstraintAssociated` (shares to a non-canonical account),
@@ -560,9 +597,17 @@ back.
 - A `TransferHook` with a program set, whose accounts aren't forwarded.
 - Any extension number the program doesn't know.
 
-Transfer fees, metadata, confidential-transfer configs, interest or scaled
-display, and a close authority (a mint can't close while escrow holds
-supply) can't touch an escrow and are allowed. A plain freeze authority (USDC
+Accepted only when the authority is empty or in `KNOWN_ISSUERS`
+(`CashMintAuthority`), because that authority could change it after an
+order is placed:
+
+- `TransferFeeConfig`: its config authority could raise the fee to 100% and
+  take the filler's payout. (The devnet test dollar has no transfer fee.)
+- A `TransferHook` with no program set: its authority could set one.
+
+Metadata, confidential-transfer configs, interest or scaled display, and a
+close authority (a mint can't close while escrow holds supply) can't touch
+an escrow and are allowed. A plain freeze authority (USDC
 has one) is the issuer's power over every holder and is accepted as a stated
 trust assumption. `fill_order` independently requires
 `escrow.amount >= order.cash_amount`.
@@ -620,14 +665,25 @@ valid fill fail.
   the bottom of its auction. Since this release, that bottom is never below
   the owner's `min_ref`: the worst case is the owner's own limit price, not a
   geometric ratchet. The owner can also re-centre with `update_plan`.
-- **Issuer powers that remain.** A cash or component mint's plain freeze
-  authority can still freeze an escrow or a vault, as it can for any holder.
-  Mints with a permanent delegate, a pause switch or a live transfer hook are
-  refused outright. As a consequence, PYUSD (which has a permanent delegate)
-  isn't accepted as cash, and a real xStock that carries a permanent delegate
-  or pause would be refused as a component. On devnet, every mirror in use
-  passes. All five live devnet baskets and the devnet cash mint were audited
-  against the new policy before the upgrade.
+- **Issuer powers are a named trust assumption.** Every real xStock and
+  PreStock lets its issuer freeze, seize (permanent delegate) or pause the
+  token, and so the share of a basket's vault held in it, as with any
+  tokenized stock. Sheaf accepts those powers only from the issuers
+  themselves (`KNOWN_ISSUERS`): a basket holder trusts each stock's issuer
+  and nobody else. A basket creator cannot add such a power, because a
+  component whose freeze, delegate, pause, confidential-transfer or hook
+  authority is anyone else is refused at creation and at every deposit. An
+  issuer that pauses or freezes one component blocks redemption of the
+  whole basket until it lifts it, since a redemption pays out every
+  component in one transaction. Adding a new issuer is a program upgrade.
+- **Cash issuers.** A cash mint's plain freeze authority (USDC has one) can
+  still freeze an escrow, as it can for any holder. Cash with a permanent
+  delegate or a pause switch is refused whoever holds it, so PYUSD (which has
+  a permanent delegate) isn't accepted as cash. All six live devnet baskets,
+  their 15 component mints and the devnet cash mint were audited against the
+  policy before the upgrade: none has a freeze authority, and the mirrors'
+  only authority-bearing extensions (metadata, ScaledUiAmount, transfer fee)
+  are not gated.
 - **Creator-fee rounding.** The fee is floored, so a mint of fewer than
   `10_000 / fee_bps` raw units (333 at 30 bps) pays no fee. Each such
   instruction saves less than one raw share unit, about $0.00025 at $250 a
@@ -658,12 +714,34 @@ valid fill fail.
 
 ## 9. Tests
 
-`anchor test` runs 51 integration tests: 11 basket tests, 28 desk and plan
-tests, and 12 hardening tests. `cargo test -p sheaf --lib` runs 8 unit
-tests: the auction line, the gross-up, the plan bounds and floor, the three
-extension policies (built from synthetic TLV images, including malformed
-lengths and unknown types), and the size of the plan layout. The integration
-suite covers:
+`anchor test` runs 59 integration tests: 7 against real mainnet mints
+(`tests/mainnet-clone.ts`), 11 basket tests, 28 desk and plan tests, and 13
+hardening tests. `cargo test -p sheaf --lib` runs 10 unit tests: the auction
+line, the gross-up, the plan bounds and floor, the three extension policies
+(built from synthetic TLV images: every issuer power under nobody, under each
+known issuer and under a stranger, a freeze authority, malformed lengths and
+unknown types), the transfer-fee schedule read by number, the issuer keys
+themselves, and the size of the plan layout.
+
+**Against real mints.** `tests/fixtures/build.mjs` reads TSLAx
+(`XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB`), NVDAx
+(`Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh`) and PreStocks Anduril
+(`PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB`) from mainnet and writes each
+as a `[[test.validator.account]]` fixture, byte for byte, except that the
+mint authority is rewritten to a throwaway localnet key so the test can mint
+balances (a plain `--clone` gives the mint but no way to hold any). Every
+extension and every issuer authority is left as the issuer set it. The test
+checks the clones still carry the permanent delegate, pause switch, freeze
+authority, confidential-transfer configs, program-less hook, default state,
+ScaledUiAmount, metadata and (Anduril) the transfer fee and its confidential
+config, under Backed's and PreStocks' keys; then creates a basket of the
+three, mints two shares (the vault nets exactly the recipe, with Anduril's
+live 3% fee grossed up), redeems one, refuses a look-alike mint whose powers
+belong to the creator, and drives the two fixture-only paths: `EscrowShort`
+on an order whose escrow holds less than it records, and `close_legacy_plan`
+on a 280-byte first-release plan (allowance revoked, rent returned).
+
+The rest of the integration suite covers:
 
 - Placing an order: escrow and order fields, and the malformed auction cases
   (rising, zero floor, closed window, zero-length window, zero cash).
@@ -696,13 +774,18 @@ suite covers:
   - A share mint with each of PermanentDelegate, Pausable,
     MintCloseAuthority, TransferHook, ScaledUiAmount and NonTransferable is
     refused. A token account or a system account posing as the share mint is
-    refused. A plain legacy SPL Token share mint is accepted.
-  - Components with PermanentDelegate, Pausable, frozen-by-default,
-    TransferHook or NonTransferable are refused, as is a token account posing
-    as a mint. An initialised-by-default component, a ScaledUiAmount
+    refused, and so is a legacy SPL Token share mint.
+  - Components that are frozen-by-default, have a hook program,
+    NonTransferable or MintCloseAuthority are refused; so are a permanent
+    delegate, a pause switch, a program-less hook and a freeze authority held
+    by the creator, and a token account posing as a mint. A component
+    carrying all the issuer powers under the stand-in issuer, a ScaledUiAmount
     component and a metadata component are accepted together.
   - Cash with PermanentDelegate, Pausable, frozen-by-default or a live
     TransferHook is refused at `place_order`, and the first three at `open_plan`.
+  - Cash whose transfer-fee authority or program-less hook authority is the
+    buyer is refused at `place_order` and `open_plan`; the same cash with no
+    such authority, or the stand-in issuer's, is accepted.
   - An order and a plan auction closing more than 30 days out are refused.
   - `0 < min <= ref <= max` is enforced.
   - A run's auction ends exactly at the owner's floor (360,000, not the
@@ -715,6 +798,7 @@ suite covers:
     same id.
   - `close_legacy_plan` refuses a current-layout plan.
 
-`EscrowShort` has no integration test: once the cash policy refuses every
-mint that could drain an escrow, no order placed through this program can
-reach it. It protects orders placed before the policy existed.
+`EscrowShort` can't be reached through the program any more: the cash
+policy refuses every mint that could drain an escrow. It protects orders
+placed before the policy existed, and is tested with a fixture order (see
+"Against real mints").

@@ -893,9 +893,11 @@ describe("sheaf", () => {
       );
       if (transferFeeBps !== undefined) {
         tx.add(
+          // No fee-config authority: nobody can raise the fee on an open
+          // order (a cash mint whose fee someone could change is refused).
           createInitializeTransferFeeConfigInstruction(
             mint.publicKey,
-            payer.publicKey,
+            null,
             payer.publicKey,
             transferFeeBps,
             BigInt("18446744073709551615"),
@@ -1757,6 +1759,36 @@ describe("sheaf", () => {
           init: (mint: PublicKey) => TransactionInstruction;
           freeze?: boolean;
         };
+        /**
+         * The write cluster's stand-in stock issuer (in KNOWN_ISSUERS outside
+         * a mainnet build). Only its public key is needed: these extensions
+         * take their authority as a plain key at initialisation.
+         */
+        const STAND_IN_ISSUER = new PublicKey("B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L");
+        /** The issuer powers every real xStock carries, held by `who`. */
+        const issuerPowers = (who: PublicKey): Ext[] => [
+          {
+            name: "PermanentDelegate",
+            type: ExtensionType.PermanentDelegate,
+            init: (m) => createInitializePermanentDelegateInstruction(m, who, TOKEN_2022_PROGRAM_ID),
+          },
+          {
+            name: "Pausable",
+            type: ExtensionType.PausableConfig,
+            init: (m) => createInitializePausableConfigInstruction(m, who, TOKEN_2022_PROGRAM_ID),
+          },
+          {
+            name: "TransferHook(no program)",
+            type: ExtensionType.TransferHook,
+            init: (m) => createInitializeTransferHookInstruction(m, who, PublicKey.default, TOKEN_2022_PROGRAM_ID),
+          },
+        ];
+        const feeUnder = (who: PublicKey | null): Ext => ({
+          name: "TransferFeeConfig",
+          type: ExtensionType.TransferFeeConfig,
+          init: (m) =>
+            createInitializeTransferFeeConfigInstruction(m, who, payer.publicKey, 10, 1_000_000n, TOKEN_2022_PROGRAM_ID),
+        });
         const EXT: Record<string, Ext> = {
           permanentDelegate: {
             name: "PermanentDelegate",
@@ -1804,8 +1836,12 @@ describe("sheaf", () => {
           },
         };
 
-        /** A bare Token-2022 mint carrying exactly the given extensions. */
-        async function mintWith(exts: Ext[], decimals: number, authority: PublicKey) {
+        /**
+         * A bare Token-2022 mint carrying exactly the given extensions. Mints
+         * whose extensions need a freeze authority get `freezer` (the payer
+         * unless told otherwise).
+         */
+        async function mintWith(exts: Ext[], decimals: number, authority: PublicKey, freezer = payer.publicKey) {
           const mint = Keypair.generate();
           const space = getMintLen(exts.map((e) => e.type));
           const tx = new Transaction().add(
@@ -1821,7 +1857,7 @@ describe("sheaf", () => {
               mint.publicKey,
               decimals,
               authority,
-              exts.some((e) => e.freeze) ? payer.publicKey : null,
+              exts.some((e) => e.freeze) ? freezer : null,
               TOKEN_2022_PROGRAM_ID,
             ),
           );
@@ -1908,7 +1944,7 @@ describe("sheaf", () => {
           );
         });
 
-        it("accepts a plain legacy SPL Token share mint", async () => {
+        it("refuses a legacy SPL Token share mint: shares are always Token-2022", async () => {
           const symbol = "SXSPL";
           const mint = Keypair.generate();
           await sendAndConfirmTransaction(
@@ -1925,9 +1961,7 @@ describe("sheaf", () => {
             ),
             [payer, mint],
           );
-          await createBasketWith(symbol, mint.publicKey, [components[0]]);
-          const b = await program.account.basket.fetch(basketPda(payer.publicKey, symbol));
-          assert.equal(b.shareMint.toBase58(), mint.publicKey.toBase58());
+          await expectError(createBasketWith(symbol, mint.publicKey, [components[0]]), "ShareMintNotToken2022");
         });
 
         // ------------------------------------------------ component mints (M8)
@@ -1936,22 +1970,44 @@ describe("sheaf", () => {
           // One valid share mint, reused: a refused create_basket consumes nothing.
           const symbol = "CXT";
           const share = await mintWith([], 6, basketPda(payer.publicKey, symbol));
-          for (const bad of [EXT.permanentDelegate, EXT.pausable, EXT.frozenByDefault, EXT.transferHook, EXT.nonTransferable]) {
+          // Never acceptable, whoever holds them.
+          for (const bad of [EXT.frozenByDefault, EXT.transferHook, EXT.nonTransferable, EXT.closeAuthority]) {
             const mint = await mintWith([bad], 8, payer.publicKey);
             await expectError(
               createBasketWith(symbol, share, [components[0], mint]),
               "ComponentMintExtension",
             );
           }
+          // Issuer powers held by the basket creator (or anyone but a known
+          // stock issuer): a permanent delegate, a pause switch, a hook
+          // authority that could later set a hook program, a freeze authority.
+          for (const power of issuerPowers(payer.publicKey)) {
+            const mint = await mintWith([power], 8, payer.publicKey);
+            await expectError(
+              createBasketWith(symbol, share, [components[0], mint]),
+              "ComponentIssuerAuthority",
+            );
+          }
+          const creatorFreezes = await mintWith([EXT.openByDefault], 8, payer.publicKey, payer.publicKey);
+          await expectError(
+            createBasketWith(symbol, share, [components[0], creatorFreezes]),
+            "ComponentIssuerAuthority",
+          );
           // A token account posing as a component mint.
           await expectError(
             createBasketWith(symbol, share, [components[0], holderComponentAtas[1]]),
             "MalformedMint",
           );
-          // What xStocks and PreStocks mirrors carry (metadata, ScaledUiAmount,
-          // TransferFee), plus an "initialised" default account state, is fine.
-          const open = await mintWith([EXT.openByDefault], 8, payer.publicKey);
-          await createBasketWith(symbol, share, [components[0], components[2], open]);
+          // What xStocks and PreStocks carry (metadata, ScaledUiAmount,
+          // TransferFee, an "initialised" default state) is fine, and so are
+          // the issuer powers when a known issuer holds every one of them.
+          const issued = await mintWith(
+            [...issuerPowers(STAND_IN_ISSUER), EXT.openByDefault],
+            8,
+            payer.publicKey,
+            STAND_IN_ISSUER,
+          );
+          await createBasketWith(symbol, share, [components[0], components[2], issued]);
         });
 
         // ----------------------------------------------------- cash mints (H2)
@@ -1974,6 +2030,45 @@ describe("sheaf", () => {
               }),
               "CashMintExtension",
             );
+          }
+        });
+
+        it("refuses cash whose transfer fee or hook someone other than a known issuer could change", async () => {
+          const now = await chainNow();
+          const order = (mint: PublicKey, ata: PublicKey) =>
+            place({
+              who: hodler,
+              from: ata,
+              mint,
+              cashProgram: TOKEN_2022_PROGRAM_ID,
+              cash: 10n * USDC,
+              start: 50_000n,
+              end: 40_000n,
+              t0: now,
+              t1: now + 600,
+            });
+          // A fee authority could raise the fee to 100% after the order is
+          // placed and take the filler's payout; a hook authority could set a
+          // hook program and brick the order.
+          for (const bad of [feeUnder(payer.publicKey), issuerPowers(payer.publicKey)[2]]) {
+            const { mint, ata } = await hostileCash([bad], hodler.publicKey);
+            await expectError(order(mint, ata), "CashMintAuthority");
+            await expectError(
+              openPlan(510, {}, hodler, () => ata, () => mint, TOKEN_2022_PROGRAM_ID),
+              "CashMintAuthority",
+            );
+          }
+          // Nobody, or a known issuer, holding those powers is fine.
+          for (const ok of [feeUnder(null), feeUnder(STAND_IN_ISSUER), issuerPowers(STAND_IN_ISSUER)[2]]) {
+            const { mint, ata } = await hostileCash([ok], hodler.publicKey);
+            const placed = await order(mint, ata);
+            await cancel(placed.order, {
+              by: hodler,
+              owner: hodler.publicKey,
+              refundTo: ata,
+              mint,
+              cashProgram: TOKEN_2022_PROGRAM_ID,
+            });
           }
         });
 

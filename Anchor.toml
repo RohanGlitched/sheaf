@@ -23,3 +23,35 @@ wallet = "~/.config/solana/id.json"
 # node_modules is a symlink to another checkout (pnpm exec resolves the
 # package root through the link and then finds no test files).
 test = 'NODE_OPTIONS=--no-experimental-strip-types "$PWD/node_modules/.bin/ts-mocha" -p "$PWD/tsconfig.json" -t 1000000 "$PWD"/tests/*.ts'
+
+[test.validator]
+# Anchor binds the test validator to 0.0.0.0 once this table exists, which
+# current validators refuse for gossip.
+bind_address = "127.0.0.1"
+
+# Real mainnet mints, loaded byte for byte into the test validator with only
+# the mint authority rewritten to a throwaway localnet key (so the tests can
+# mint balances): every extension and every issuer authority stays as Backed
+# and PreStocks set them. Rebuild with `node tests/fixtures/build.mjs`, which
+# also writes the two program-state fixtures below. See tests/mainnet-clone.ts.
+[[test.validator.account]]
+address = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+filename = "tests/fixtures/TSLAx.json"
+
+[[test.validator.account]]
+address = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+filename = "tests/fixtures/NVDAx.json"
+
+[[test.validator.account]]
+address = "PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB"
+filename = "tests/fixtures/ANDURIL.json"
+
+# A 280-byte pre-hardening Plan (close_legacy_plan's success path).
+[[test.validator.account]]
+address = "GqH2ndNzTMG4BifGTeHAPTgQw5AGJRyFrr6zZHeWJaLV"
+filename = "tests/fixtures/legacy-plan.json"
+
+# An open Order whose escrow holds less than it records (EscrowShort).
+[[test.validator.account]]
+address = "8bt3HAKTjXFFbxbqHmQdFBKZePT9StUafAGycFdygjgQ"
+filename = "tests/fixtures/short-order.json"
