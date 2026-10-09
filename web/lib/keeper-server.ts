@@ -118,7 +118,7 @@ const marginBps = (cash: number, net: bigint, basket: Basket, nav: number) => {
 function maxShares(cash: number, basket: Basket, nav: number): bigint {
   const grossCap = BigInt(Math.floor((cash / (nav * (1 + FILL_MARGIN_BPS / 10_000))) * Number(ONE_SHARE)));
   if (grossCap <= 0n) return 0n;
-  const fee = BigInt(basket.creatorFeeBps);
+  const fee = BigInt(basket.creatorFeeBps + basket.protocolFeeBps);
   let net = (grossCap * (10_000n - fee)) / 10_000n;
   for (let i = 0; i < 4 && net > 0n && grossSharesForNet(net, basket.creatorFeeBps, basket.protocolFeeBps) > grossCap; i++) net--;
   for (let i = 0; i < 4 && grossSharesForNet(net + 1n, basket.creatorFeeBps, basket.protocolFeeBps) <= grossCap; i++) net++;
