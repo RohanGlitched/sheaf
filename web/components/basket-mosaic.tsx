@@ -51,7 +51,7 @@ export function BasketMosaic({
 
   return (
     <div style={{ minHeight: height }} className="flex items-center gap-4 sm:gap-6">
-      <div className="shrink-0" style={{ width: height * 0.9, height }}>
+      <div className="aspect-square shrink-0" style={{ width: `min(${Math.round(height * 0.9)}px, 38%)` }}>
         <SheafMark
           stalks={tiles.map((t) => ({ key: t.key, weight: t.weightBps / total, color: slotColor(t.slot) }))}
           className="h-full w-full"

@@ -84,11 +84,11 @@ export function LiveTape() {
       </div>
 
       <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
-        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem] gap-3 border-b border-line px-5 py-3 text-xs text-ink-3">
+        <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_4.5rem] gap-3 border-b border-line px-4 py-3 text-xs text-ink-3 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem] sm:px-5">
           <span>When</span>
           <span>Trade</span>
           <span className="text-right">Value</span>
-          <span className="text-right">Wallet</span>
+          <span className="hidden text-right sm:block">Wallet</span>
         </div>
         <ol className="max-h-[420px] overflow-y-auto" aria-live="polite" aria-label="Recent trades">
           {rows.length === 0 &&
@@ -101,7 +101,7 @@ export function LiveTape() {
             return (
               <li
                 key={p.signature}
-                className={`grid grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem] items-baseline gap-3 border-b border-line/70 px-5 py-2.5 text-sm transition-colors duration-[1600ms] last:border-0 ${
+                className={`grid grid-cols-[3.5rem_minmax(0,1fr)_4.5rem] items-baseline gap-3 border-b border-line/70 px-4 py-2.5 text-sm sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5.5rem] sm:px-5 transition-colors duration-[1600ms] last:border-0 ${
                   fresh.has(p.signature) ? "bg-bind-wash" : "bg-transparent"
                 }`}
               >
@@ -118,7 +118,7 @@ export function LiveTape() {
                   href={`https://solscan.io/tx/${p.signature}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="tnum truncate text-right text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink"
+                  className="tnum hidden truncate text-right text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink sm:block"
                   title="Open the transaction on Solscan"
                 >
                   {p.wallet.slice(0, 4)}…{p.wallet.slice(-4)}

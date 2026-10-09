@@ -28,7 +28,7 @@ const LIFE = [
     n: "3",
     title: "Or pay in dollars",
     on: "Filler auction",
-    body: "Escrow dollars for a number of shares that falls over a few minutes. The first filler who delivers the stocks gets paid. Competition sets the price, the vault still receives the real stocks.",
+    body: "Escrow dollars for a number of shares that falls over ninety seconds. The first filler who delivers the stocks gets paid. Competition sets the price, the vault still receives the real stocks.",
   },
   {
     n: "4",

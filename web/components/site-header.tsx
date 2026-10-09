@@ -62,7 +62,7 @@ export function SiteHeader() {
       </div>
 
       {/* The same destinations, laid as tiles across the full width. */}
-      <nav className="flex border-t border-line text-sm sm:hidden">
+      <nav className="flex overflow-x-auto border-t border-line text-sm [scrollbar-width:none] sm:hidden">
         {NAV.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -71,7 +71,7 @@ export function SiteHeader() {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={`flex-1 border-r border-line py-3 text-center last:border-r-0 ${
+              className={`flex-none whitespace-nowrap border-r border-line px-4 py-3 text-center last:border-r-0 ${
                 active ? "bg-raised text-ink" : "text-ink-2"
               }`}
             >
