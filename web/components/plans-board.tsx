@@ -198,6 +198,11 @@ function PlanCard({
                 : ` · next run ${until(plan.nextRunTs, now)}`}
           {plan.fills > 0 && plan.lastFillTs > 0 && ` · last filled ${timeAgo(plan.lastFillTs)}`}
         </p>
+        {!plan.legacy && plan.trailStepBps > 0 && plan.runsLeft > 0 && (
+          <p className="mt-1 text-xs text-ink-3">
+            Follows the market: each fill re-centers its bounds at ±{(plan.trailStepBps / 100).toFixed(0)}% around the price it filled at.
+          </p>
+        )}
         {pending && (
           <p className="mt-2 text-sm text-ink-2">
             This run&apos;s {money(fromCashRaw(pending.cashAmount))} order for {basketSymbol || basketName} is open to fillers for another{" "}

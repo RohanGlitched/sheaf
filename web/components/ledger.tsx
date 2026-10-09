@@ -32,6 +32,9 @@ const KIND: Record<LedgerEntry["kind"], { label: string; color: string }> = {
   filled: { label: "Order filled", color: "var(--color-gain)" },
   returned: { label: "Dollars returned", color: "var(--color-ink-3)" },
   planOpened: { label: "Plan opened", color: "#8a4fa0" },
+  sellOrdered: { label: "Sell order", color: "#b9821a" },
+  sold: { label: "Shares sold", color: "var(--color-loss)" },
+  sellReturned: { label: "Shares returned", color: "var(--color-ink-3)" },
 };
 
 function describe(entry: LedgerEntry, basket: Basket | undefined): string {
@@ -41,6 +44,9 @@ function describe(entry: LedgerEntry, basket: Basket | undefined): string {
   if (entry.kind === "filled") return "A filler delivered the stocks to the vault and took the dollars";
   if (entry.kind === "returned") return "Nobody filled in time; the dollars went back";
   if (entry.kind === "planOpened") return "Allowed to spend exactly this much per run";
+  if (entry.kind === "sellOrdered") return "Escrowed; fillers bid to pay dollars for the shares";
+  if (entry.kind === "sold") return "A filler paid the dollars and took the shares";
+  if (entry.kind === "sellReturned") return "Nobody bought in time; the shares went back";
   if (!entry.amounts || !basket) return "";
   basket.components.forEach((c, i) => {
     const raw = entry.amounts![i];
@@ -66,7 +72,7 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
   } else {
     const n = e.shares ?? 0;
     main = `${quantity(n, 4)} ${plural(n, "share")}`;
-    if (e.kind === "filled" && e.cash != null) notes.push(`for ${money(e.cash)}`);
+    if ((e.kind === "filled" || e.kind === "sold") && e.cash != null) notes.push(`for ${money(e.cash)}`);
   }
   if (e.feeShares) notes.push(`+${quantity(e.feeShares, 4)} to the creator`);
   return { main, notes };

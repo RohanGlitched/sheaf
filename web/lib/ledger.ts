@@ -31,7 +31,21 @@ export type LedgerEntry = {
   /** Unix seconds. */
   time: number;
   slot: number;
-  kind: "created" | "minted" | "redeemed" | "ordered" | "planRun" | "filled" | "returned" | "planOpened";
+  kind:
+    | "created"
+    | "minted"
+    | "redeemed"
+    | "ordered"
+    | "planRun"
+    | "filled"
+    | "returned"
+    | "planOpened"
+    /** A holder offered shares for dollars (the dollar exit). */
+    | "sellOrdered"
+    /** A filler paid for them. */
+    | "sold"
+    /** Nobody bought in time, or the seller withdrew: the shares went back. */
+    | "sellReturned";
   basket: string;
   /** The creator, depositor or redeemer. */
   actor: string;
@@ -53,8 +67,11 @@ export type LedgerEntry = {
   order?: string;
   /** The plan, when the order came from one. */
   plan?: string;
-  /** Who delivered the stocks, on a fill. */
+  /** Who delivered the stocks on a fill, or paid the dollars on a sale. */
   filler?: string;
+  /** On a sell order: the dollars the seller asks for at the start, and their floor at the end. */
+  startCash?: number;
+  endCash?: number;
 };
 
 export type Ledger = {
@@ -73,6 +90,9 @@ const EVENT_ORDER_PLACED = [96, 130, 204, 234, 169, 219, 216, 227];
 const EVENT_ORDER_FILLED = [120, 124, 109, 66, 249, 116, 174, 30];
 const EVENT_ORDER_CANCELLED = [108, 56, 128, 68, 168, 113, 168, 239];
 const EVENT_PLAN_OPENED = [180, 40, 139, 132, 248, 34, 213, 58];
+const EVENT_SELL_PLACED = [102, 129, 44, 158, 235, 219, 216, 128];
+const EVENT_SELL_FILLED = [119, 36, 160, 142, 108, 196, 88, 104];
+const EVENT_SELL_CANCELLED = [182, 0, 198, 165, 128, 233, 74, 99];
 const CASH = 1_000_000;
 const ONE_SHARE = 1_000_000;
 const PREFIX = "Program data: ";
@@ -199,6 +219,34 @@ export function decodeEvent(
       r.u64(); // period
       const runs = r.u32();
       return { kind: "planOpened", basket, actor, cash, runs };
+    }
+    if (matches(data, EVENT_SELL_PLACED)) {
+      const order = r.pubkey();
+      const basket = r.pubkey();
+      const actor = r.pubkey(); // the seller
+      r.pubkey(); // cash mint
+      r.u64(); // nonce
+      const shares = Number(r.u64()) / ONE_SHARE;
+      const startCash = Number(r.u64()) / CASH;
+      const endCash = Number(r.u64()) / CASH;
+      return { kind: "sellOrdered", basket, actor, shares, cash: startCash, startCash, endCash, order };
+    }
+    if (matches(data, EVENT_SELL_FILLED)) {
+      const order = r.pubkey();
+      const basket = r.pubkey();
+      const actor = r.pubkey(); // the seller
+      const filler = r.pubkey();
+      const shares = Number(r.u64()) / ONE_SHARE;
+      const cash = Number(r.u64()) / CASH; // what the seller received
+      return { kind: "sold", basket, actor, shares, cash, order, filler };
+    }
+    if (matches(data, EVENT_SELL_CANCELLED)) {
+      const order = r.pubkey();
+      const basket = r.pubkey();
+      const actor = r.pubkey(); // the seller
+      r.pubkey(); // by
+      const shares = Number(r.u64()) / ONE_SHARE;
+      return { kind: "sellReturned", basket, actor, shares, order };
     }
   } catch {
     // A log line that is not one of ours, or a truncated one. Skip it.
@@ -435,6 +483,16 @@ export type LedgerStats = {
   outside: { dollar: FillStats; plan: FillStats };
   /** Who delivered: the house filler, the second (reference-code) filler, and anyone else. */
   fillsByFiller: { house: number; second: number; outside: number; otherOurs: number };
+  /** The dollar exit: sell orders placed, filled and returned, and the dollars paid out to sellers. */
+  sells: number;
+  sellFills: number;
+  sellReturned: number;
+  dollarsPaidOut: number;
+  /** Fills over finished sell orders, and the median seconds from a sell order to its sale. */
+  sellFillRate: number | null;
+  medianSecsToSell: number | null;
+  /** Who bought the shares, as fillsByFiller does for buys. */
+  sellFillsByFiller: { house: number; second: number; outside: number; otherOurs: number };
   /** The oldest event in view, unix seconds. */
   since: number | null;
 };
@@ -480,6 +538,16 @@ export function ledgerStats(
   const theirs = (xs: LedgerEntry[]) => xs.filter((e) => !isOurs(e.actor));
   const all = fillStats(orderish, placedAt);
   const fills = entries.filter((e) => e.kind === "filled");
+  const sold = entries.filter((e) => e.kind === "sold");
+  const sellReturned = entries.filter((e) => e.kind === "sellReturned").length;
+  const sellPlacedAt = new Map<string, number>();
+  for (const e of entries) if (e.kind === "sellOrdered" && e.order) sellPlacedAt.set(e.order, e.time);
+  const byFiller = (xs: LedgerEntry[]) => ({
+    house: xs.filter((f) => f.filler != null && f.filler === fillers.house).length,
+    second: xs.filter((f) => f.filler != null && f.filler === fillers.second).length,
+    outside: xs.filter((f) => f.filler != null && !isOurs(f.filler) && f.filler !== fillers.second).length,
+    otherOurs: xs.filter((f) => f.filler != null && isOurs(f.filler) && f.filler !== fillers.house && f.filler !== fillers.second).length,
+  });
   return {
     actions: entries.length,
     wallets: wallets.size,
@@ -498,12 +566,16 @@ export function ledgerStats(
     fillRate: all.fillRate,
     byCause: { dollar: fillStats(dollar, placedAt), plan: fillStats(plan, placedAt) },
     outside: { dollar: fillStats(theirs(dollar), placedAt), plan: fillStats(theirs(plan), placedAt) },
-    fillsByFiller: {
-      house: fills.filter((f) => f.filler != null && f.filler === fillers.house).length,
-      second: fills.filter((f) => f.filler != null && f.filler === fillers.second).length,
-      outside: fills.filter((f) => f.filler != null && !isOurs(f.filler) && f.filler !== fillers.second).length,
-      otherOurs: fills.filter((f) => f.filler != null && isOurs(f.filler) && f.filler !== fillers.house && f.filler !== fillers.second).length,
-    },
+    fillsByFiller: byFiller(fills),
+    sells: entries.filter((e) => e.kind === "sellOrdered").length,
+    sellFills: sold.length,
+    sellReturned,
+    dollarsPaidOut: Math.round(sold.reduce((a, e) => a + (e.cash ?? 0), 0) * 100) / 100,
+    sellFillRate: sold.length + sellReturned > 0 ? Math.round((sold.length / (sold.length + sellReturned)) * 1000) / 1000 : null,
+    medianSecsToSell: median(
+      sold.map((e) => (e.order && sellPlacedAt.has(e.order) ? e.time - sellPlacedAt.get(e.order)! : -1)).filter((w) => w >= 0),
+    ),
+    sellFillsByFiller: byFiller(sold),
     since: entries.reduce<number | null>((a, e) => (e.time > 0 && (a == null || e.time < a) ? e.time : a), null),
   };
 }

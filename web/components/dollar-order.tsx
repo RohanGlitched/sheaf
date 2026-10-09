@@ -59,6 +59,9 @@ export function routeBpsFor(cost: RouteCost | null, dollars: number): number | n
   return cost.bps[String(nearest)];
 }
 
+/** "about 0.42%", or "next to nothing" when routes are at or better than fair, so a negative cost never reads as "-0.03%". */
+export const routeCostText = (bps: number) => (bps <= 0.5 ? "next to nothing" : `about ${(bps / 100).toFixed(2)}%`);
+
 /** True when no filler could buy the stocks inside the auction's band today, so a dollar order or plan run could not fill. */
 export const routeOutsideBand = (bps: number | null, bandBps = 200) => bps != null && bps > bandBps;
 
@@ -329,7 +332,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
               </p>
               {routeBps != null && (
                 <p className="tnum mt-1.5 text-xs leading-relaxed text-ink-3">
-                  On mainnet routes, buying these stocks costs a filler about {(routeBps / 100).toFixed(2)}% one way
+                  On mainnet routes, buying these stocks costs a filler {routeCostText(routeBps)} one way
                   {routeCost?.at ? `, measured ${timeAgo(routeCost.at > 1e12 ? routeCost.at / 1000 : routeCost.at)}` : ""}.
                 </p>
               )}

@@ -18,7 +18,9 @@ export const maxDuration = 60;
  * runs), at an 8 bps margin, so it bids against the house filler's 15. It holds
  * only what any outsider can get: test stocks from the public faucet, asked for
  * here over HTTP like anyone else, never minted. Whatever it was short of on this
- * pass it claims for the next one.
+ * pass it claims for the next one. It also buys on the dollar exit: a sell order
+ * whose cash has decayed to the redeemed stocks' value less 8 bps, redeemed in
+ * kind in the same transaction, which tops up its stock inventory too.
  *
  * Open to anyone, like the keeper; a short gap stops a loop.
  */
@@ -64,6 +66,8 @@ export async function GET(request: Request) {
         const symbol = symbolForWriteMint(m.toBase58());
         if (symbol) short.add(symbol);
       }),
+      // Dollars to buy sell orders with, from the same public faucet.
+      shortOfCash: () => short.add("USDC"),
       log: (line) => lines.push(line),
     });
     // Stock for next time, from the public faucet, the way an outside filler gets it.

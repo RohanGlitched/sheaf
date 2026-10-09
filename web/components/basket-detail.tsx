@@ -26,6 +26,7 @@ import { symbolForWriteMint } from "@/lib/mirror";
 import { PRESTOCK_SYMBOLS, BY_SYMBOL_PRESTOCKS } from "@/lib/prestocks";
 import { BasketLaunch } from "./launch-market";
 import { DollarOrder } from "./dollar-order";
+import { SellOrderPanel } from "./sell-order";
 import { PlanForm } from "./plan-form";
 import { BasketPredict } from "./basket-predict";
 import { ConnectButton } from "./connect-button";
@@ -674,10 +675,11 @@ function Command({
 
 // ------------------------------------------------------------------ trade panel
 
-type Mode = "create" | "redeem" | "cash" | "plan";
+type Mode = "create" | "redeem" | "cash" | "sell" | "plan";
 
 const TABS: { mode: Mode; label: string }[] = [
   { mode: "cash", label: "Buy with dollars" },
+  { mode: "sell", label: "Sell for dollars" },
   { mode: "plan", label: "Monthly plan" },
   { mode: "create", label: "Create in kind" },
   { mode: "redeem", label: "Redeem" },
@@ -786,7 +788,7 @@ function TradePanel({
   return (
     <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
       <div className="p-2">
-        <div className="grid grid-cols-4 gap-1 rounded-[var(--radius-control)] bg-sunk p-1" role="tablist" aria-label="How to get shares">
+        <div className="grid grid-cols-5 gap-1 rounded-[var(--radius-control)] bg-sunk p-1" role="tablist" aria-label="How to buy or sell shares">
           {TABS.map((tab) => (
             <button
               key={tab.mode}
@@ -809,6 +811,7 @@ function TradePanel({
       </div>
 
       {mode === "cash" && <DollarOrder basket={basket} navPerShare={navPerShare} onDone={onDone} />}
+      {mode === "sell" && <SellOrderPanel basket={basket} navPerShare={navPerShare} shareBalance={shareBalance} onDone={onDone} />}
       {mode === "plan" && <PlanForm basket={basket} navPerShare={navPerShare} onDone={onDone} />}
       {(mode === "create" || mode === "redeem") && (
       <div className="p-6">

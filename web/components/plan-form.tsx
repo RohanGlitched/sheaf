@@ -14,7 +14,7 @@ import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
 import { money } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 import { PlanSheaf } from "./plan-sheaf";
-import { useRouteCost, routeBpsFor, routeOutsideBand } from "./dollar-order";
+import { useRouteCost, routeBpsFor, routeOutsideBand, routeCostText } from "./dollar-order";
 import { useInrRate } from "./india-fx";
 import { fxNote, rupees } from "@/lib/fx";
 
@@ -270,7 +270,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       )}
       {valid && routeBps != null && (
         <p className="tnum mt-2 text-xs leading-relaxed text-ink-3">
-          On mainnet routes, buying these stocks costs a filler about {(routeBps / 100).toFixed(2)}% one way.
+          On mainnet routes, buying these stocks costs a filler {routeCostText(routeBps)} one way.
         </p>
       )}
       {blocked && (
@@ -282,9 +282,10 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       )}
       {navPerShare != null && (
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          This plan never pays more than {BOUND_ABOVE}% above or {BOUND_BELOW}% below today&apos;s fair price of{" "}
-          {money(navPerShare)} a share, however the market moves. If the price leaves that range, re-center the plan from your
-          plans page.
+          The first run never pays more than {BOUND_ABOVE}% above or {BOUND_BELOW}% below today&apos;s fair price of{" "}
+          {money(navPerShare)} a share. After that the plan follows the market: each fill re-centers those bounds at ±
+          {PLAN_BOUND_BPS / 100}% around the price it filled at. If the price jumps past them between runs, re-center the plan
+          from your plans page.
         </p>
       )}
 

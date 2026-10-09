@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import feeReceipts from "@/lib/fee-receipts.json";
 import { MAX_CREATOR_FEE_BPS, SHARE_DECIMALS, SITE_URL, explorerTx } from "@/lib/config";
 import { getInrRate, fxNote, rupees } from "@/lib/fx";
 import { isTestBasket } from "@/lib/hidden";
@@ -187,7 +186,7 @@ export const FEE_ROWS: FeeRow[] = [
     payer: "Whoever creates shares: in kind, by dollar order or by a plan run",
     receiver: "Sheaf's treasury",
     how: "Minted as new shares and accrued in the basket; anyone can send the claim, which pays only the treasury. The vault still receives the full recipe, so what a share redeems for is unchanged. Written into the basket when it is created and can never change.",
-    status: `Live on devnet since ${PROTOCOL_FEE_SINCE} for baskets created from then on. Baskets created before it carry none, for good. Solana only: the EVM vaults carry the creator fee alone.`,
+    status: `Live on devnet since ${PROTOCOL_FEE_SINCE} for baskets created from then on. Baskets created before it carry none, for good. On EVM, the v2 desk runs the same auction with a 0.10% protocol fee on fills; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable.`,
   },
   {
     line: "Creator fee",
@@ -555,7 +554,7 @@ export function ShareFacts() {
   const facts = [
     ["A fixed basket", "Like a unit investment trust, the recipe is set once and never changes. Nobody rebalances it, adds a name or drops one: you hold exactly what you chose, and nobody trades your holdings."],
     ["Backed in kind", "Every share is backed by the stocks in its own vault, created and redeemed for them by anyone. No price oracle is read."],
-    ["Exit is in kind today", "Redeeming hands back the stocks themselves. There is no sell-for-dollars order yet, so turning them into dollars means selling each one."],
+    ["Two ways out", "Redeem for the stocks themselves at any time, or sell the share for dollars: a sell order is an auction where the dollars you receive start 2% above fair and fall to your own floor 2% below over 90 seconds, and any filler can take it. No protocol fee on a sale."],
     ["In your own wallet", "A share is a token you hold yourself, not a line in someone's database. That is why it matters to wallets, and much less to a custodial exchange."],
   ];
   return (
@@ -898,14 +897,9 @@ export async function LiveNumbers() {
 
 type FeeReceiptFile = { basket?: string; claims?: { signature: string; shares: number | string; at?: string | number }[] };
 
-/** web/lib/fee-receipts.json, written when the treasury claims; absent until the first claim. */
+/** web/lib/fee-receipts.json, written when the treasury claims and bundled at build time. */
 async function readReceipts(): Promise<FeeReceiptFile | null> {
-  try {
-    const text = await readFile(path.join(process.cwd(), "lib", "fee-receipts.json"), "utf8");
-    return JSON.parse(text) as FeeReceiptFile;
-  } catch {
-    return null;
-  }
+  return feeReceipts as FeeReceiptFile;
 }
 
 type BasketRow = { address: string; name?: string; symbol?: string; creator?: string; protocolFeeBps?: number; protocolFeeAccrued?: string };

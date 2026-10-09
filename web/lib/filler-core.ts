@@ -14,6 +14,12 @@
  * by the caller's margin. Before it sends, it simulates the exact signed
  * transaction and checks that its cash account grows by at least the expected
  * payout and that no component leaves it in a larger amount than was priced.
+ *
+ * It buys on the dollar exit too: a holder's sell order is filled once the cash
+ * it asks (decaying to the seller's floor) is at most the redeemed stocks' value
+ * less the margin, and the shares are redeemed in kind in the same transaction,
+ * after a simulation shows the cash leaving is no more than priced and every
+ * component arriving is at least what was priced.
  */
 import {
   AddressLookupTableAccount,
@@ -54,6 +60,21 @@ export type CoreOrder = {
   cashAmount: bigint;
   startShares: bigint;
   endShares: bigint;
+  startTs: number;
+  endTs: number;
+};
+
+export type CoreSellOrder = {
+  address: PublicKey;
+  basket: PublicKey;
+  seller: PublicKey;
+  rentPayer: PublicKey;
+  cashMint: PublicKey;
+  cashProgram: PublicKey;
+  nonce: bigint;
+  shares: bigint;
+  startCash: bigint;
+  endCash: bigint;
   startTs: number;
   endTs: number;
 };
@@ -136,6 +157,25 @@ export function decodeOrder(address: PublicKey, data: Uint8Array): CoreOrder {
     cashAmount: r.u64(),
     startShares: r.u64(),
     endShares: r.u64(),
+    startTs: r.i64(),
+    endTs: r.i64(),
+  };
+}
+
+/** `SellOrder` in programs/sheaf/src/lib.rs. */
+export function decodeSellOrder(address: PublicKey, data: Uint8Array): CoreSellOrder {
+  const r = reader(bytes(data), 8);
+  return {
+    address,
+    basket: r.key(),
+    seller: r.key(),
+    rentPayer: r.key(),
+    cashMint: r.key(),
+    cashProgram: r.key(),
+    nonce: r.u64(),
+    shares: r.u64(),
+    startCash: r.u64(),
+    endCash: r.u64(),
     startTs: r.i64(),
     endTs: r.i64(),
   };
@@ -293,6 +333,57 @@ export function fillIx(idl: FillerIdl, filler: PublicKey, order: CoreOrder, bask
   return new TransactionInstruction({ programId, keys, data: Buffer.from(FILL.discriminator) });
 }
 
+/** fill_sell_order: pay the seller (their canonical cash account, opened at the filler's expense if missing), take the escrowed shares. */
+export function fillSellIx(idl: FillerIdl, filler: PublicKey, order: CoreSellOrder, basket: CoreBasket) {
+  const programId = new PublicKey(idl.address);
+  const FILL = idl.instructions.find((ix) => ix.name === "fill_sell_order")!;
+  const accounts: Record<string, PublicKey> = {
+    filler,
+    sell_order: order.address,
+    basket: basket.address,
+    share_mint: basket.shareMint,
+    escrow: ata(basket.shareMint, order.address, TOKEN_2022),
+    filler_share_account: ata(basket.shareMint, filler, TOKEN_2022),
+    seller: order.seller,
+    seller_cash_account: ata(order.cashMint, order.seller, order.cashProgram),
+    cash_mint: order.cashMint,
+    filler_cash_account: ata(order.cashMint, filler, order.cashProgram),
+    rent_payer: order.rentPayer,
+    share_token_program: TOKEN_2022,
+    cash_token_program: order.cashProgram,
+  };
+  const keys = FILL.accounts.map((a) => ({
+    pubkey: a.address ? new PublicKey(a.address) : accounts[a.name],
+    isSigner: !!a.signer,
+    isWritable: !!a.writable,
+  }));
+  return new TransactionInstruction({ programId, keys, data: Buffer.from(FILL.discriminator) });
+}
+
+/** redeem_shares: burn `shares` and take the recipe in kind, three remaining accounts per component (mint, vault, recipient). */
+export function redeemIx(idl: FillerIdl, owner: PublicKey, basket: CoreBasket, shares: bigint) {
+  const programId = new PublicKey(idl.address);
+  const REDEEM = idl.instructions.find((ix) => ix.name === "redeem_shares")!;
+  const accounts: Record<string, PublicKey> = {
+    basket: basket.address,
+    share_mint: basket.shareMint,
+    owner,
+    owner_share_account: ata(basket.shareMint, owner, TOKEN_2022),
+    share_token_program: TOKEN_2022,
+    component_token_program: basket.tokenProgram,
+  };
+  const keys = REDEEM.accounts.map((a) => ({ pubkey: a.address ? new PublicKey(a.address) : accounts[a.name], isSigner: !!a.signer, isWritable: !!a.writable }));
+  for (const c of basket.components) {
+    keys.push({ pubkey: c.mint, isSigner: false, isWritable: false });
+    keys.push({ pubkey: ata(c.mint, basket.address, basket.tokenProgram), isSigner: false, isWritable: true });
+    keys.push({ pubkey: ata(c.mint, owner, basket.tokenProgram), isSigner: false, isWritable: true });
+  }
+  const data = Buffer.alloc(16);
+  Buffer.from(REDEEM.discriminator).copy(data, 0);
+  data.writeBigUInt64LE(shares, 8);
+  return new TransactionInstruction({ programId, keys, data });
+}
+
 // ---------------------------------------------------------------- one pass
 
 export type PassOptions = {
@@ -313,10 +404,15 @@ export type PassOptions = {
   lookupTable?: (basket: CoreBasket) => Promise<AddressLookupTableAccount | null>;
   /** Called with what the filler is short of, before an order it would otherwise price. */
   shortOf?: (basket: CoreBasket, mints: PublicKey[]) => void;
+  /** Called when a sell order is worth buying but the filler holds too few dollars. */
+  shortOfCash?: (needed: bigint) => void;
   log?: (line: string) => void;
 };
 
-export type PassResult = { filled: { order: string; basket: string; dollars: number; cost: number; edgeBps: number; signature: string }[]; considered: number };
+export type PassResult = {
+  filled: { side: "buy" | "sell"; order: string; basket: string; dollars: number; cost: number; edgeBps: number; signature: string }[];
+  considered: number;
+};
 
 const short = (k: PublicKey) => k.toBase58().slice(0, 6);
 
@@ -342,9 +438,18 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
   const ORDER_DISC = Uint8Array.from(idl.accounts.find((a) => a.name === "Order")!.discriminator);
   const BASKET_DISC = Uint8Array.from(idl.accounts.find((a) => a.name === "Basket")!.discriminator);
   const now = Math.floor(Date.now() / 1000);
-  const raw = await connection.getProgramAccounts(programId, { filters: [{ memcmp: { offset: 0, bytes: base58(ORDER_DISC) } }] });
+  const SELL_DISC = idl.accounts.find((a) => a.name === "SellOrder");
+  const [raw, rawSells] = await Promise.all([
+    connection.getProgramAccounts(programId, { filters: [{ memcmp: { offset: 0, bytes: base58(ORDER_DISC) } }] }),
+    SELL_DISC
+      ? connection.getProgramAccounts(programId, { filters: [{ memcmp: { offset: 0, bytes: base58(Uint8Array.from(SELL_DISC.discriminator)) } }] })
+      : Promise.resolve([]),
+  ]);
   const orders = raw.map((a) => decodeOrder(a.pubkey, a.account.data)).filter((x) => x.endTs > now + 3);
-  if (!orders.length) {
+  const sells = rawSells
+    .map((a) => decodeSellOrder(a.pubkey, a.account.data))
+    .filter((x) => x.endTs > now + 3 && !x.seller.equals(filler.publicKey) && x.cashMint.equals(cashMint));
+  if (!orders.length && !sells.length) {
     log("no open orders");
     return result;
   }
@@ -355,8 +460,8 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
     log(`${short(x.address)} skipped: unknown cash mint ${x.cashMint.toBase58()}`);
     return false;
   });
-  if (!accepted.length) return result;
-  result.considered = accepted.length;
+  if (!accepted.length && !sells.length) return result;
+  result.considered = accepted.length + sells.length;
 
   // Defences 2 and 3: decimals and transfer fee from the mint itself, read fresh every pass.
   const [{ epoch }, clock] = await Promise.all([connection.getEpochInfo(), chainClock(connection)]);
@@ -368,7 +473,7 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
     return result;
   }
 
-  const basketKeys = [...new Set(accepted.map((x) => x.basket.toBase58()))].map((k) => new PublicKey(k));
+  const basketKeys = [...new Set([...accepted, ...sells].map((x) => x.basket.toBase58()))].map((k) => new PublicKey(k));
   const basketInfos = await connection.getMultipleAccountsInfo(basketKeys);
   const baskets = new Map<string, CoreBasket>();
   basketKeys.forEach((k, i) => {
@@ -400,7 +505,154 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
       log(`${id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
     }
   }
+  for (const order of sells) {
+    const id = short(order.address);
+    try {
+      const basket = baskets.get(order.basket.toBase58());
+      if (!basket) {
+        log(`sell ${id} skipped: basket ${order.basket.toBase58()} not readable on chain`);
+        continue;
+      }
+      if (!order.cashProgram.equals(cash.program)) {
+        log(`sell ${id} skipped: cash program ${order.cashProgram.toBase58()} is not the mint's owner`);
+        continue;
+      }
+      const fill = await priceAndFillSell(o, order, basket, cash, epoch, clock, log);
+      if (fill) result.filled.push(fill);
+    } catch (err) {
+      log(`sell ${id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
+    }
+  }
   return result;
+}
+
+/** The cash a sell order owes its seller at `t`: start_cash decaying to end_cash, rounded in the seller's favour. */
+export const requiredCash = (o: Pick<CoreSellOrder, "startCash" | "endCash" | "startTs" | "endTs">, t: number) =>
+  required({ startShares: o.startCash, endShares: o.endCash, startTs: o.startTs, endTs: o.endTs }, t);
+
+async function priceAndFillSell(
+  o: PassOptions,
+  order: CoreSellOrder,
+  basket: CoreBasket,
+  cash: MintInfo,
+  epoch: number,
+  clock: () => number,
+  log: (line: string) => void,
+): Promise<PassResult["filled"][number] | null> {
+  const { connection, filler, idl, edgeBps } = o;
+  const id = `sell ${short(order.address)}`;
+  const fillerCash = ata(order.cashMint, filler.publicKey, order.cashProgram);
+  const fillerShares = ata(basket.shareMint, filler.publicKey, TOKEN_2022);
+  const fillerComponents = basket.components.map((c) => ata(c.mint, filler.publicKey, basket.tokenProgram));
+  const [fillerCashInfo, fillerShareInfo, ...rest] = await connection.getMultipleAccountsInfo([
+    fillerCash,
+    fillerShares,
+    ...basket.components.map((c) => c.mint),
+    ...fillerComponents,
+  ]);
+  const mintInfos = rest.slice(0, basket.components.length);
+  const holdingInfos = rest.slice(basket.components.length);
+  const mints: MintInfo[] = [];
+  for (const [i, c] of basket.components.entries()) {
+    try {
+      mints.push(readMint(mintInfos[i] as AccountInfo<Buffer> | null, epoch));
+    } catch (e) {
+      log(`${id} ${basket.symbol} skipped: component ${c.mint.toBase58()} unreadable (${(e as Error).message})`);
+      return null;
+    }
+  }
+  // Defence 4, the other way round: what the shares redeem for, from the on-chain
+  // recipe, net of each component's own transfer fee on the way out of the vault.
+  const receive: bigint[] = [];
+  let value = 0;
+  for (const [i, c] of basket.components.entries()) {
+    const q = o.quote(c.mint);
+    if (!q) {
+      log(`${id} skipped: no quote for ${c.mint.toBase58()}`);
+      return null;
+    }
+    const units = (c.unitsPerShare * order.shares) / ONE_SHARE;
+    const net = units - transferFee(units, mints[i].fee);
+    receive.push(net);
+    value += (Number(net) / 10 ** c.decimals) * q.price * (q.multiplier ?? 1);
+  }
+  const tag = `${id} ${basket.symbol} ${Number(order.shares) / 1e6} shares worth $${value.toFixed(2)}`;
+  // What the filler pays at `t`: the cash owed, grossed up for the cash mint's own fee.
+  const payAt = (t: number) => preFeeAmount(requiredCash(order, t), cash.fee);
+  const edgeAt = (t: number) => {
+    const paid = Number(payAt(t)) / 10 ** cash.decimals;
+    return paid > 0 ? (value - paid) / paid : -1;
+  };
+  // The cash only decays, so the amount owed at the cluster's clock now is the most the fill can cost.
+  let t = clock();
+  if (edgeAt(t) * 10_000 < edgeBps && o.waitUpToSecs) {
+    for (let dt = 1; dt <= o.waitUpToSecs; dt++) {
+      if (edgeAt(t + dt) * 10_000 >= edgeBps) {
+        log(`${tag}: margin in ${dt}s, waiting`);
+        await sleep(dt * 1000);
+        t = clock();
+        break;
+      }
+    }
+  }
+  const edge = edgeAt(t);
+  const pay = payAt(t);
+  const dollars = Number(pay) / 10 ** cash.decimals;
+  if (edge * 10_000 < edgeBps) {
+    log(`${tag}: asks $${dollars.toFixed(2)}, edge ${(edge * 100).toFixed(2)}%, waiting`);
+    return null;
+  }
+  const heldCash = tokenAmount(fillerCashInfo?.data);
+  if (heldCash < pay) {
+    o.shortOfCash?.(pay - heldCash);
+    log(`${tag}: skipped, holds $${(Number(heldCash) / 10 ** cash.decimals).toFixed(2)} of the $${dollars.toFixed(2)} it would pay`);
+    return null;
+  }
+
+  // Defence 5: simulate the exact signed transaction: no more cash out than priced, every component in.
+  const table = basket.components.length > 6 && o.lookupTable ? await o.lookupTable(basket) : null;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const ixs = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+    ...(fillerShareInfo ? [] : [createAtaIdempotent(filler.publicKey, basket.shareMint, filler.publicKey, TOKEN_2022)]),
+    ...basket.components.flatMap((c, i) => (holdingInfos[i] ? [] : [createAtaIdempotent(filler.publicKey, c.mint, filler.publicKey, basket.tokenProgram)])),
+    fillSellIx(idl, filler.publicKey, order, basket),
+    redeemIx(idl, filler.publicKey, basket, order.shares),
+  ];
+  const tx = new VersionedTransaction(
+    new TransactionMessage({ payerKey: filler.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message(table ? [table] : []),
+  );
+  tx.sign([filler]);
+  const sim = await connection.simulateTransaction(tx, {
+    commitment: "confirmed",
+    accounts: { encoding: "base64", addresses: [fillerCash, ...fillerComponents].map((k) => k.toBase58()) },
+  });
+  const plan = `buy ${Number(order.shares) / 1e6} shares for $${dollars.toFixed(2)} and redeem them for $${value.toFixed(2)} of stocks, edge ${(edge * 100).toFixed(2)}%`;
+  if (sim.value.err) {
+    const why = (sim.value.logs ?? []).filter((l) => /error|failed/i.test(l)).slice(-1)[0] ?? JSON.stringify(sim.value.err);
+    log(`${tag}: simulation failed (${why.slice(0, 160)})${o.dryRun ? `; would ${plan}` : ""}`);
+    return null;
+  }
+  const after = (sim.value.accounts ?? []).map((a) => (a ? Buffer.from(a.data[0], "base64") : null));
+  const cashOut = heldCash - tokenAmount(after[0]);
+  if (cashOut > pay) {
+    log(`${tag}: simulation pays ${cashOut} raw, priced at most ${pay}`);
+    return null;
+  }
+  const shortChange = basket.components.findIndex((_, i) => tokenAmount(after[i + 1]) - tokenAmount(holdingInfos[i]?.data) < receive[i]);
+  if (shortChange > -1) {
+    log(`${tag}: simulation returns less ${basket.components[shortChange].mint.toBase58()} than priced`);
+    return null;
+  }
+  if (o.dryRun) {
+    log(`${tag}: DRY RUN would ${plan} (simulation ok)`);
+    return null;
+  }
+  const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+  if (res.value.err) throw new Error(JSON.stringify(res.value.err));
+  log(`${tag}: FILLED: ${plan} ${signature}`);
+  return { side: "sell", order: order.address.toBase58(), basket: basket.symbol, dollars, cost: value, edgeBps: Math.round(edge * 100_000) / 10, signature };
 }
 
 async function priceAndFill(
@@ -535,5 +787,5 @@ async function priceAndFill(
   const res = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
   if (res.value.err) throw new Error(JSON.stringify(res.value.err));
   log(`${tag} FILLED: ${plan} ${signature}`);
-  return { order: order.address.toBase58(), basket: basket.symbol, dollars, cost: p.cost, edgeBps: Math.round(p.edge * 100_000) / 10, signature };
+  return { side: "buy", order: order.address.toBase58(), basket: basket.symbol, dollars, cost: p.cost, edgeBps: Math.round(p.edge * 100_000) / 10, signature };
 }

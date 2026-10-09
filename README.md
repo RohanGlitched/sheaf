@@ -6,7 +6,7 @@
 
 [**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
 
-![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![71 program tests](https://img.shields.io/badge/program%20tests-71%20%2B%2014%20unit-3438c9?style=flat-square) ![100 EVM tests](https://img.shields.io/badge/EVM%20tests-100%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
+![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![71 program tests](https://img.shields.io/badge/program%20tests-71%20%2B%2014%20unit-3438c9?style=flat-square) ![158 EVM tests](https://img.shields.io/badge/EVM%20tests-158%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
 
 </div>
 
@@ -43,7 +43,8 @@ flowchart LR
 | **Bind** | Anyone writes a recipe: 1 to 8 Token-2022 mints, raw units per share, weights, and a creator fee of at most 1%. The basket PDA becomes the share mint's authority; no instruction edits the recipe. | `create_basket` |
 | **Buy in kind** | Deposit exactly the recipe for N shares and receive N shares (less the creator fee, minted to the creator as new shares). Deposits round up and are grossed up for any component transfer fee, so the vault always nets the full recipe. | `mint_shares` |
 | **Buy with dollars** | Escrow dollars for a share count that falls linearly over the auction (the site uses 90 seconds, from 2% above the fair count to 2% below). The first filler to deliver the stocks at the current count takes the dollars; the vault receives the stocks through the same deposit path. Fillers compete on timing, so no price feed is read. The buyer, or anyone after expiry, can cancel for a full refund. | `place_order`, `fill_order`, `cancel_order` |
-| **Every month** | A plan approves exactly `cash_per_run × runs` to the plan PDA once. When a run is due, anyone can turn it into a dollar order bracketing a reference rate. Each fill moves the reference to the rate the market cleared at, bounded by the owner's min and max. | `open_plan`, `run_plan`, `update_plan`, `close_plan` |
+| **Every month** | A plan approves exactly `cash_per_run × runs` to the plan PDA once. When a run is due, anyone can turn it into a dollar order bracketing a reference rate. Each fill moves the reference to the rate the market cleared at; plans opened since Oct 9 re-center their bounds at ±6% around each fill, so a plan follows the market while no single run can be pushed far. | `open_plan`, `run_plan`, `update_plan`, `close_plan` |
+| **Sell for dollars** | Escrow shares for a dollar amount that starts 2% above fair and falls to the seller's own floor, 2% below, over 90 seconds. The first filler to pay the current amount takes the shares and can redeem them in the same transaction. No protocol fee. | `place_sell_order`, `fill_sell_order`, `cancel_sell_order` |
 | **Redeem** | Burn shares and take the components back, rounded down. Always available to any holder. | `redeem_shares` |
 
 Every instruction, account, seed, event and error is in [docs/program.md](docs/program.md).
@@ -54,17 +55,17 @@ What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
 - **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
-- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 71 integration tests as mocha counts them (`anchor test`) and `lib.rs` 14 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 100 tests.
+- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 71 integration tests as mocha counts them (`anchor test`) and `lib.rs` 14 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 158 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
-- **EVM vaults.** The same vault, recipe and dollar desk as Solidity contracts, deployed and source-verified on five testnets:
+- **EVM vaults.** The same vault and recipe as Solidity contracts, deployed and source-verified on five testnets. The EVM v2 desk (`CreationDeskV2`) runs the same Dutch auction as Solana, with a 0.10% protocol fee on fills; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable. `PlanDesk` holds monthly plans whose amount, interval and price cap are on chain. The v1 desk, a fixed-price limit order, stays live beside it:
 
-| Chain | Chain ID | SheafFactory | CreationDesk | Verified on |
-|---|---|---|---|---|
-| Robinhood Chain testnet | 46630 | [`0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1`](https://explorer.testnet.chain.robinhood.com/address/0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1#code) | [`0x4184eb1540908CB0DbEd533c45Fba7123991951C`](https://explorer.testnet.chain.robinhood.com/address/0x4184eb1540908CB0DbEd533c45Fba7123991951C#code) | Blockscout |
-| Tempo testnet (Moderato) | 42431 | [`0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7`](https://explore.testnet.tempo.xyz/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://explore.testnet.tempo.xyz/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | Sourcify (contracts.tempo.xyz) |
-| Ethereum Sepolia | 11155111 | [`0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0`](https://eth-sepolia.blockscout.com/address/0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0) | [`0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4`](https://eth-sepolia.blockscout.com/address/0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4) | Blockscout |
-| Arbitrum Sepolia | 421614 | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://arbitrum-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://arbitrum-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | Sourcify |
-| Base Sepolia | 84532 | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://base-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://base-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | Blockscout |
+| Chain | Chain ID | SheafFactory | CreationDesk (v1) | CreationDeskV2 | PlanDesk | Verified on |
+|---|---|---|---|---|---|---|
+| Robinhood Chain testnet | 46630 | [`0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1`](https://explorer.testnet.chain.robinhood.com/address/0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1#code) | [`0x4184eb1540908CB0DbEd533c45Fba7123991951C`](https://explorer.testnet.chain.robinhood.com/address/0x4184eb1540908CB0DbEd533c45Fba7123991951C#code) | [`0x5C49…Ba24`](https://explorer.testnet.chain.robinhood.com/address/0x5C49b021F5E53514B6457907b92fA5Eb6DdeBa24#code) | [`0xF1C8…9c05`](https://explorer.testnet.chain.robinhood.com/address/0xF1C863cbdeBDFac4a4Adb6B440567F7772619c05#code) | Blockscout |
+| Tempo testnet (Moderato) | 42431 | [`0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7`](https://explore.testnet.tempo.xyz/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://explore.testnet.tempo.xyz/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x1855…4742`](https://explore.testnet.tempo.xyz/address/0x18556B83da661B0341C4dc9218137FBfA81B4742) | [`0xEB04…51f2`](https://explore.testnet.tempo.xyz/address/0xEB0482405811264c6F46479516F6c523750851f2) | Sourcify (contracts.tempo.xyz) |
+| Ethereum Sepolia | 11155111 | [`0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0`](https://eth-sepolia.blockscout.com/address/0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0) | [`0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4`](https://eth-sepolia.blockscout.com/address/0x336cd7CF93e6b4CF4072C8C99D189B9eAc8126E4) | [`0x5F66…51d6`](https://eth-sepolia.blockscout.com/address/0x5F6607dd194304fd8DC28Dac683136bf5Fd051d6) | [`0x43e5…2330`](https://eth-sepolia.blockscout.com/address/0x43e50Ed35ae6250dB43713AA4d89eB90c81d2330) | Blockscout |
+| Arbitrum Sepolia | 421614 | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://arbitrum-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://arbitrum-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | [`0xd47a…E9fB`](https://arbitrum-sepolia.blockscout.com/address/0xd47a3957e7D66fAb781A47cEe0E7076c3157E9fB) | [`0xFD0c…08FE`](https://arbitrum-sepolia.blockscout.com/address/0xFD0cA910186c9dD613B57DAa52Dad20B057908FE) | Sourcify |
+| Base Sepolia | 84532 | [`0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0`](https://base-sepolia.blockscout.com/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | [`0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0`](https://base-sepolia.blockscout.com/address/0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0) | [`0x2B14…3432`](https://base-sepolia.blockscout.com/address/0x2B14dC27D9b5202AEBEDbB4fa70bdF7A8B123432) | [`0x74a4…4B6c`](https://base-sepolia.blockscout.com/address/0x74a4f663Fee63462d43D04769C9b14526D644B6c) | Blockscout |
 
 Basket, stock-token and stablecoin addresses for each chain, plus smoke-test hashes, are in [evm/README.md](evm/README.md) and [`web/lib/deployments/`](web/lib/deployments).
 
@@ -83,7 +84,7 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 | Solana devnet | The Sheaf program: baskets, dollar orders, plans; Meteora launch markets | Mirrors of the 28 mainnet mints | Sheaf test dollar (Token-2022) |
 | Solana mainnet | Read only: prices, dividend multipliers, the tape | xStocks, PreStocks | – |
 | Robinhood Chain testnet | Factory, desk, 3 baskets (HOOD5, CHIPS, PRIME) | Robinhood's own test stock tokens | USDG (testnet) |
-| Tempo testnet | Factory, desk, 3 baskets; monthly plans through Tempo access keys with recurring spending limits | 8 labelled mirrors | AlphaUSD (TIP-20) |
+| Tempo testnet | Factory, v1 and v2 desks, 3 baskets; monthly plans on PlanDesk through Tempo access keys, with a recurring spending limit and the price cap on chain | 8 labelled mirrors | AlphaUSD (TIP-20) |
 | Ethereum Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
 | Arbitrum Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
 | Base Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
@@ -101,7 +102,7 @@ Full breakdown with sources: [/business](https://sheaf-index.vercel.app/business
 | Sheaf and the creator | Launch-market curve fees: Meteora keeps 20%, then 50/50, so 40% each. A 25% anti-snipe fee decays to 1% over 600 seconds. | `web/lib/meteora-preset.json` |
 | Sheaf | A 1% migration fee at graduation, the 1% of launch-token supply left over after the curve, and half the fees of the graduated pool's locked LP. | `web/lib/meteora-preset.json` |
 
-Holding a share costs nothing a year; there is no management fee. Monthly plans are free; each run pays the same fees as a dollar order. The first customers are platforms that already sell tokenized stocks to non-US retail and add baskets and monthly plans as a module for a revenue share.
+Holding a share costs nothing a year; there is no management fee. Monthly plans are free; each run pays the same fees as a dollar order. The first customers are non-custodial wallets and front ends that already list xStocks, adding baskets and monthly plans as a module; no platform has signed yet.
 
 ## Run it yourself
 
@@ -109,12 +110,14 @@ Holding a share costs nothing a year; there is no management fee. Monthly plans 
 # Program (Linux or WSL, Anchor 0.31.1)
 anchor test                      # 71 integration tests on a local validator
 cargo test -p sheaf --lib        # 14 unit tests
+anchor build                     # mainnet build: trusts only Backed's and PreStocks' issuer keys
+anchor build -- --features devnet  # devnet build: adds the house stand-in issuer used by the mirrors
 
 # Web app
 cd web && pnpm install && pnpm dev
 
 # EVM contracts
-cd evm && npm install && npx hardhat test    # 100 tests
+cd evm && npm install && npx hardhat test    # 158 tests
 ```
 
 The web app reads these variables (see [web/.env.example](web/.env.example); only names are listed here):
@@ -174,7 +177,7 @@ Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window op
 programs/sheaf   the Solana program (Anchor, Token-2022)
 tests            71 integration tests
 web              Next.js app: pages, the house keeper, the RPC proxy, share images
-evm              Solidity vaults, desk and mirrors for EVM chains, 100 tests
+evm              Solidity vaults, desks, plans and mirrors for EVM chains, 158 tests
 scripts          devnet setup, the reference filler, Meteora lifecycle scripts
 docs             program reference, Meteora, Panta, Solami
 ```

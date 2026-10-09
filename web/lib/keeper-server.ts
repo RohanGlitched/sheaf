@@ -13,9 +13,14 @@ import {
 import { createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction } from "@solana/spl-token";
 import { WRITE_RPC } from "./config";
 import { faucetKeypair } from "./faucet-server";
-import { fetchBaskets, tokenAccount, TOKEN_2022_PROGRAM_ID, type Basket } from "./sheaf";
+import { fetchBaskets, redeemSharesInstruction, tokenAccount, TOKEN_2022_PROGRAM_ID, type Basket } from "./sheaf";
 import {
   fetchOrders,
+  fetchSellOrders,
+  fillSellOrderIx,
+  cancelSellOrderIx,
+  requiredCash,
+  type SellOrder,
   fetchPlans,
   fillOrderIx,
   runPlanIx,
@@ -41,7 +46,12 @@ import { ALT_MIN_COMPONENTS, ensureAlt } from "./alt";
  *      margin. On devnet the filler mints the mirror stocks it delivers; on
  *      mainnet a filler would buy them. Other fillers are free to beat it to any
  *      order.
- *   2. Return the dollars of orders whose auction ended unfilled.
+ *      It buys on the dollar exit too: a holder's sell order is filled once the
+ *      cash it asks has decayed to the shares' fair value less the same margin,
+ *      and the shares are redeemed in kind in the same transaction, so the house
+ *      ends up holding the stocks, never the shares.
+ *   2. Return the dollars of orders whose auction ended unfilled, and the shares
+ *      of sell orders that found no buyer.
  *   3. Run every monthly plan that is due. run_plan is permissionless; the
  *      keeper pays the order's rent and gets it back when the order fills.
  *
@@ -81,9 +91,14 @@ const MAX_JOBS_PER_BUYER = 3;
 const MAX_WAIT_SECS = 30;
 
 type Fill = { order: string; shares: string; cash: string; marginBps: number };
+/** A sell order the house bought: shares taken, dollars paid, and the discount to fair it got. */
+type SellFill = { order: string; shares: string; cash: string; discountBps: number };
 export type Report = {
   plansRun: string[];
   ordersFilled: Fill[];
+  sellsFilled: SellFill[];
+  /** Expired sell orders whose shares the house sent back to their seller. */
+  sellsReturned: string[];
   refunded: string[];
   skipped: string[];
   errors: string[];
@@ -134,7 +149,7 @@ function maxShares(cash: number, basket: Basket, nav: number): bigint {
  * line itself: required(t) = start − ⌊(start − end)·(t − startTs) / span⌋.
  * Null when even the auction's end asks for more.
  */
-function firstSecondAtOrBelow(order: Order, target: bigint): number | null {
+function firstSecondAtOrBelow(order: Pick<Order, "startShares" | "endShares" | "startTs" | "endTs">, target: bigint): number | null {
   if (order.startShares <= target) return order.startTs;
   if (order.endShares > target) return null;
   const drop = order.startShares - order.endShares;
@@ -239,9 +254,56 @@ async function fill(connection: Connection, order: Order, basket: Basket, gross:
   return send(connection, [fillOrderIx({ filler: keeper.publicKey, order, basket })], table);
 }
 
+/**
+ * Buy a sell order's shares and redeem them for the stocks in the same
+ * transaction. The house pays in test dollars it mints for itself if it is short
+ * (it holds the test dollar's mint authority on devnet; on mainnet a filler pays
+ * from its own float). `cashUpper` is the most the fill can cost: the cash owed
+ * only decays.
+ */
+async function fillSell(connection: Connection, order: SellOrder, basket: Basket, cashUpper: bigint) {
+  const keeper = faucetKeypair()!;
+  const componentProgram = new PublicKey(basket.tokenProgram);
+  const shareMint = new PublicKey(basket.shareMint);
+  const cashMint = new PublicKey(order.cashMint);
+  const cashProgram = new PublicKey(order.cashTokenProgram);
+  const cashAta = tokenAccount(cashMint, keeper.publicKey, cashProgram);
+  const shareAta = tokenAccount(shareMint, keeper.publicKey, TOKEN_2022_PROGRAM_ID);
+  const componentAtas = basket.components.map((c) => tokenAccount(new PublicKey(c.mint), keeper.publicKey, componentProgram));
+  const infos = await connection.getMultipleAccountsInfo([cashAta, shareAta, ...componentAtas]);
+  const prep: TransactionInstruction[] = [];
+  const held = infos[0] && infos[0].data.length >= 72 ? Buffer.from(infos[0].data).readBigUInt64LE(64) : 0n;
+  if (!infos[0]) prep.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, cashAta, keeper.publicKey, cashMint, cashProgram));
+  if (held < cashUpper) prep.push(createMintToInstruction(cashMint, cashAta, keeper.publicKey, cashUpper - held, [], cashProgram));
+  if (!infos[1]) prep.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, shareAta, keeper.publicKey, shareMint, TOKEN_2022_PROGRAM_ID));
+  basket.components.forEach((c, i) => {
+    if (!infos[i + 2]) prep.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, componentAtas[i], keeper.publicKey, new PublicKey(c.mint), componentProgram));
+  });
+  const table = basket.components.length >= ALT_MIN_COMPONENTS ? await ensureAlt(connection, keeper, basket) : null;
+  for (let i = 0; i < prep.length; i += 6) await send(connection, prep.slice(i, i + 6), table);
+  const take = fillSellOrderIx({ filler: keeper.publicKey, sellOrder: order, basket });
+  const redeem = redeemSharesInstruction({
+    basket: new PublicKey(basket.address),
+    shareMint,
+    owner: keeper.publicKey,
+    components: basket.components.map((c) => ({ mint: new PublicKey(c.mint) })),
+    shares: order.shares,
+    componentTokenProgram: componentProgram,
+  });
+  try {
+    return await send(connection, [take, redeem], table);
+  } catch (err) {
+    // Too big for one packet: buy first, then redeem on its own.
+    if (!/too large|overruns|exceeds/i.test((err as Error).message)) throw err;
+    const sig = await send(connection, [take], table);
+    await send(connection, [redeem], table);
+    return sig;
+  }
+}
+
 export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Report> {
   const started = Date.now();
-  const report: Report = { plansRun: [], ordersFilled: [], refunded: [], skipped: [], errors: [], marginUsd: 0 };
+  const report: Report = { plansRun: [], ordersFilled: [], sellsFilled: [], sellsReturned: [], refunded: [], skipped: [], errors: [], marginUsd: 0 };
   const keeper = faucetKeypair();
   if (!keeper) {
     report.errors.push("No keeper key on this deployment.");
@@ -337,7 +399,71 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       openOrders.delete(job.order.address);
       budget--;
     } catch (err) {
-      report.errors.push(`order ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      // Another filler got there first: that is the auction working, not an error.
+      if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
+        report.skipped.push(`${job.order.address.slice(0, 6)}: filled by another filler first`);
+        openOrders.delete(job.order.address);
+      } else report.errors.push(`order ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+    }
+  }
+
+  // The dollar exit. A sell order's cash only decays, from what the seller asks to
+  // their floor; the house buys once it is at most the shares' fair value less
+  // its margin, priced in closed form like the buy side, soonest first and a few
+  // per seller, within what is left of the fill slice and the action budget.
+  // Sell orders under $5 at their floor are left to other buyers.
+  const everySell = lowOnSol ? [] : await fetchSellOrders(connection).catch(() => [] as SellOrder[]);
+  const sells = everySell.filter((o) => o.cashMint === CASH_MINT && known.has(o.basket));
+  const liveSells = sells
+    .filter((o) => o.endTs >= now + 2 && o.endCash >= HOUSE_MIN_CASH && o.seller !== keeperKey)
+    .sort((x, y) => y.createdAt - x.createdAt)
+    .slice(0, MAX_PRICED);
+  const asLine = (o: SellOrder) => ({ startShares: o.startCash, endShares: o.endCash, startTs: o.startTs, endTs: o.endTs });
+  const sellPriced: { order: SellOrder; basket: Basket; fair: number; at: number }[] = [];
+  let sellNever = 0;
+  for (const order of liveSells) {
+    const basket = byAddress.get(order.basket)!;
+    const nav = await navOf(basket);
+    if (nav == null) continue;
+    const fair = (Number(order.shares) / Number(ONE_SHARE)) * nav;
+    const maxCash = BigInt(Math.floor(fair * (1 - FILL_MARGIN_BPS / 10_000) * 1e6));
+    const at = firstSecondAtOrBelow(asLine(order), maxCash);
+    if (at == null) sellNever++;
+    else if (at - now <= MAX_WAIT_SECS) sellPriced.push({ order, basket, fair, at });
+  }
+  if (sellNever) report.skipped.push(`${sellNever} sell orders whose floor is above the house's price`);
+  sellPriced.sort((x, y) => x.at - y.at);
+  const perSeller = new Map<string, number>();
+  const sellJobs = sellPriced
+    .filter((j) => {
+      const n = perSeller.get(j.order.seller) ?? 0;
+      perSeller.set(j.order.seller, n + 1);
+      return n < MAX_JOBS_PER_BUYER;
+    })
+    .slice(0, MAX_JOBS);
+  for (const job of sellJobs) {
+    if (budget <= 0) break;
+    const wait = (job.at - clock()) * 1000;
+    if (wait > 0 && Date.now() + wait > fillDeadline) {
+      report.skipped.push(`sell ${job.order.address.slice(0, 6)}: house price in ${Math.round(wait / 1000)}s`);
+      continue;
+    }
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const cash = requiredCash(job.order, clock());
+    const discount = (1 - Number(cash) / 1e6 / job.fair) * 10_000;
+    if (discount < FILL_MARGIN_BPS - 0.01) {
+      report.skipped.push(`sell ${job.order.address.slice(0, 6)}: discount ${discount.toFixed(1)} bps, under ${FILL_MARGIN_BPS}`);
+      continue;
+    }
+    try {
+      await fillSell(connection, job.order, job.basket, cash);
+      report.sellsFilled.push({ order: job.order.address, shares: (Number(job.order.shares) / 1e6).toFixed(6), cash: (Number(cash) / 1e6).toFixed(2), discountBps: Math.round(discount * 10) / 10 });
+      report.marginUsd += job.fair - Number(cash) / 1e6;
+      budget--;
+    } catch (err) {
+      if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
+        report.skipped.push(`sell ${job.order.address.slice(0, 6)}: bought by another filler first`);
+      } else report.errors.push(`sell ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
     }
   }
   report.marginUsd = Math.round(report.marginUsd * 100) / 100;
@@ -385,6 +511,28 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       report.errors.push(`refund ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
     }
     strike(order);
+  }
+
+  // Expired sell orders: the shares go back to the seller's canonical share
+  // account, the only place a third party may send them. The seller always paid
+  // the rent, so the house waits out the same ten minutes, and shares the same
+  // attempt cap and deadline.
+  const expiredSellsAll = sells.filter((o) => o.endTs < now - REFUND_GRACE_SECS && o.endCash >= MIN_REFUND_CASH).sort((x, y) => x.endTs - y.endTs).slice(0, 100);
+  const shareAtas = expiredSellsAll.map((o) => tokenAccount(new PublicKey(byAddress.get(o.basket)!.shareMint), new PublicKey(o.seller), TOKEN_2022_PROGRAM_ID));
+  const shareInfos = shareAtas.length ? await connection.getMultipleAccountsInfo(shareAtas).catch(() => shareAtas.map(() => null)) : [];
+  const expiredSells = expiredSellsAll.filter((_, i) => shareInfos[i]);
+  if (expiredSellsAll.length > expiredSells.length) {
+    report.skipped.push(`${expiredSellsAll.length - expiredSells.length} expired sell orders whose seller has no share account; only the seller can cancel them`);
+  }
+  for (const order of expiredSells) {
+    if (attempts >= REFUND_ATTEMPTS || Date.now() > refundDeadline) break;
+    attempts++;
+    try {
+      await send(connection, [cancelSellOrderIx({ caller: keeper.publicKey, sellOrder: order, basket: byAddress.get(order.basket)! })]);
+      report.sellsReturned.push(order.address);
+    } catch (err) {
+      report.errors.push(`sell refund ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+    }
   }
 
   // 3. Plans that are due. Only plans the house would sensibly run: Sheaf's test
