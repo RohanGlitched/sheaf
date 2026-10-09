@@ -61,6 +61,12 @@ export function deedsOf(entries: LedgerEntry[], symbolOf: (basket: string) => st
       case "planRun":
         add(`ran|*`, e);
         break;
+      case "sold":
+        add(`sold|${b}`, e, e.cash ?? 0);
+        break;
+      case "sellOrdered":
+        add(`offered|${b}`, e, e.shares ?? 0);
+        break;
     }
   }
 
@@ -85,7 +91,11 @@ export function deedsOf(entries: LedgerEntry[], symbolOf: (basket: string) => st
                   ? `put stocks in for ${quantity(g.amount, 2)} ${sym} ${plural(g.amount, "share")}`
                   : kind === "redeemed"
                     ? `redeemed ${quantity(g.amount, 2)} ${sym} ${plural(g.amount, "share")} for the stocks`
-                    : `ran ${g.n} scheduled ${plural(g.n, "plan order")} for other people`;
+                    : kind === "sold"
+                      ? `sold ${sym} shares for ${money(g.amount)}`
+                      : kind === "offered"
+                        ? `offered ${quantity(g.amount, 2)} ${sym} ${plural(g.amount, "share")} for dollars`
+                        : `ran ${g.n} scheduled ${plural(g.n, "plan order")} for other people`;
     deeds.push({ text, signature: g.signature, time: g.time });
   }
   return deeds.sort((a, b) => b.time - a.time);

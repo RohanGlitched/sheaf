@@ -92,6 +92,12 @@ export const SOURCES = {
     href: "https://www.ici.org/news-release/mutual-fund-and-etf-fees-remained-near-historic-lows-in-2025",
   },
   jupRecurring: { label: "Jupiter, recurring orders", href: "https://developers.jup.ag/docs/recurring" },
+  jupMinimums: { label: "Jupiter, recurring order minimums", href: "https://developers.jup.ag/docs/recurring/best-practices" },
+  jupIntegrator: { label: "Jupiter, adding integrator fees", href: "https://developers.jup.ag/docs/ultra/add-fees-to-ultra" },
+  krakenBundles: { label: "Kraken, Crypto + xStocks Bundles", href: "https://blog.kraken.com/product/bundles/introducing-crypto-xstocks-bundles" },
+  bitgetBasket: { label: "Bitget Wallet, Basket", href: "https://web3.bitget.com/wallet/basket-wallet" },
+  weave: { label: "HackQuest, Weave", href: "https://hackquest.io/projects/Weave" },
+  basketSol: { label: "Basket", href: "https://basketsolana.xyz/" },
   jupStocks: { label: "Jupiter, tokenized stocks", href: "https://docs.jup.ag/user-docs/trade/spot/tokenized-stocks" },
   phantom: {
     label: "Altcoin Buzz, Phantom adds xStocks",
@@ -150,10 +156,10 @@ export function Sources({ keys, note }: { keys: SourceKey[]; note?: React.ReactN
 /** Four numbers that say the whole model. */
 export function FeeHeadline() {
   const items = [
-    { value: pct(PROTOCOL_FEE_BPS), label: "of every share created, to Sheaf", note: `Solana baskets created since ${PROTOCOL_FEE_SINCE}, fixed for good` },
+    { value: pct(PROTOCOL_FEE_BPS), label: "of every share created, to Sheaf", note: `Solana baskets created since ${PROTOCOL_FEE_SINCE}, and dollar fills on the EVM v2 desk` },
     { value: `0–${pct(MAX_CREATOR_FEE_BPS)}`, label: "to the basket's creator", note: `the composer suggests ${pct(DEFAULT_CREATOR_FEE_BPS)}` },
     { value: pct(HOUSE_FILLER_MARGIN_BPS), label: "what Sheaf's filler waits for", note: `any filler may fill anywhere inside the ±${pct(AUCTION_BAND_BPS)} band the buyer signs` },
-    { value: "0%", label: "to hold or redeem", note: "no yearly fee; redeeming hands back the stocks" },
+    { value: "0%", label: "protocol fee to hold, redeem or sell", note: "no yearly fee; redeem for the stocks or sell for dollars" },
   ];
   return (
     <ul className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
@@ -186,7 +192,7 @@ export const FEE_ROWS: FeeRow[] = [
     payer: "Whoever creates shares: in kind, by dollar order or by a plan run",
     receiver: "Sheaf's treasury",
     how: "Minted as new shares and accrued in the basket; anyone can send the claim, which pays only the treasury. The vault still receives the full recipe, so what a share redeems for is unchanged. Written into the basket when it is created and can never change.",
-    status: `Live on devnet since ${PROTOCOL_FEE_SINCE} for baskets created from then on. Baskets created before it carry none, for good. On EVM, the v2 desk runs the same auction with a 0.10% protocol fee on fills; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable.`,
+    status: `Live on devnet since ${PROTOCOL_FEE_SINCE} for Solana baskets created from then on; baskets created before it carry none, for good. On EVM, dollar orders and plan runs through the v2 desk pay 0.10%; in-kind EVM mints carry none, because the v1 baskets are immutable.`,
   },
   {
     line: "Creator fee",
@@ -225,8 +231,16 @@ export const FEE_ROWS: FeeRow[] = [
     rate: "Free",
     payer: "—",
     receiver: "—",
-    how: "No yearly fee and no exit fee. Redeeming burns shares and returns the stocks themselves, rounded down, for Solana's network fee. There is no sell-for-dollars path yet: selling the stocks afterwards is up to you.",
+    how: "No yearly fee and no exit fee. Redeeming burns shares and returns the stocks themselves, rounded down, for Solana's network fee.",
     status: "Live. No yearly fee will be added without legal advice first.",
+  },
+  {
+    line: "Selling for dollars",
+    rate: `No protocol fee. Any filler: anywhere inside the seller's ±${pct(AUCTION_BAND_BPS)} band. Sheaf's filler pays fair less ${pct(HOUSE_FILLER_MARGIN_BPS)}.`,
+    payer: "The seller, through the auction",
+    receiver: "Whichever filler takes the shares first",
+    how: `A sell order is the dollar order run backwards: the dollars offered start ${pct(AUCTION_BAND_BPS)} above fair and fall to the seller's floor over 90 seconds. The filler redeems the shares for the stocks and sells them.`,
+    status: "Live on devnet since 9 Oct 2026.",
   },
 ];
 
@@ -456,6 +470,13 @@ export async function HolderCost() {
       ours: true,
     },
     {
+      route: "Sheaf, selling a share for dollars",
+      each: `up to ${pct(HOUSE_FILLER_MARGIN_BPS)}`,
+      yearly: "0%",
+      note: `No protocol fee. Sheaf's filler pays fair less ${pct(HOUSE_FILLER_MARGIN_BPS)}; any filler may pay more. Or redeem for the stocks themselves, free.`,
+      ours: true,
+    },
+    {
       route: "smallcase, a ₹500 SIP",
       each: `${pctOf(smallcaseFee(500, SMALLCASE_SIP_FEE), 500)} every run`,
       yearly: "0%",
@@ -486,10 +507,16 @@ export async function HolderCost() {
       note: "Cheaper than Sheaf for a broad index. If that is what you want, buy it; a Sheaf basket can hold SPYx too.",
     },
     {
+      route: "Five tokens on Jupiter's recurring orders",
+      each: "0.1% of what you spend",
+      yearly: "0%",
+      note: "Cheaper than Sheaf per run. But each order needs at least $50 and each plan $100 in total, so five stocks a month start at $250; a Sheaf plan starts at $5. You hold five positions and keep the weights yourself.",
+    },
+    {
       route: "Five tokens bought by hand on Jupiter",
       each: `about ${(MEASURED_ROUTE[0].roundTripBps / 200).toFixed(2)}% + network fees`,
       yearly: "0%",
-      note: "Cheapest on paper. You hold five positions and keep the weights yourself, and a monthly plan is five orders a month (Jupiter's recurring orders take 0.1% each).",
+      note: "Cheapest of all. Five positions to keep in balance yourself.",
     },
   ];
   return (
@@ -499,7 +526,7 @@ export async function HolderCost() {
           <li key={row.route} className={`px-4 py-4 text-sm leading-relaxed ${row.ours ? "bg-raised" : ""}`}>
             <p className={row.ours ? "text-bind" : "text-ink"}>{row.route}</p>
             <p className="tnum mt-1 text-ink">
-              {row.each} each buy · {row.yearly} a year
+              {row.each} · {row.yearly} a year
             </p>
             <p className="mt-1 text-xs text-ink-3">{row.note}</p>
           </li>
@@ -510,7 +537,7 @@ export async function HolderCost() {
           <thead>
             <tr className="bg-surface text-left text-xs text-ink-3">
               <th className="px-4 py-3 font-normal">Route</th>
-              <th className="px-4 py-3 text-right font-normal">Each buy</th>
+              <th className="px-4 py-3 text-right font-normal">Each buy or sale</th>
               <th className="px-4 py-3 text-right font-normal">Each year</th>
               <th className="px-4 py-3 font-normal">What is in it</th>
             </tr>
@@ -540,7 +567,7 @@ export async function HolderCost() {
         </p>
       </div>
       <Sources
-        keys={["smallcaseFees", "arkk", "botz", "ici", "jupRecurring", "vdaTax", "usTax", "fx"]}
+        keys={["smallcaseFees", "arkk", "botz", "ici", "jupRecurring", "jupMinimums", "vdaTax", "usTax", "fx"]}
         note={`Rupees at ${fxNote(fx)}. Fees only: none of these counts taxes, the token's premium to the listed share, or a broker's own charges.`}
       />
     </div>
@@ -574,12 +601,17 @@ export function ShareFacts() {
 const PER_MILLION = 1_000_000;
 
 /**
- * Monthly shares created at which Sheaf's own take covers a team of four
- * (about $41.5k a month all-in), from the private model's month-36 lean case:
- * $11.6M with ten platforms paying their minimum, $22.4M with none. Arithmetic
- * on code-fixed rates and a cost base, not a forecast.
+ * What covers a team of four at the fees live today (private model v3, month 36):
+ * $17.8M of shares created a month with platform fees, $24.6M with none. Held in
+ * baskets, that is about $150M while money is still coming in at the base case's
+ * pace (creations ~11.6% of assets a month) and $590–820M at steady state, when
+ * creations only replace the ~3% a month that leaves. Arithmetic, not a forecast.
  */
-export const BREAK_EVEN_FLOW = { low: 12, high: 22 } as const;
+export const BREAK_EVEN_FLOW = { low: 18, high: 25 } as const;
+export const BREAK_EVEN_AUM = { growing: 150, steadyLow: 590, steadyHigh: 820 } as const;
+/** Distributed value of xStocks, the one listed-stock issuer the mainnet build accepts, and of all tokenized stocks (rwa.xyz, 9 Oct 2026), $M. */
+export const XSTOCKS_SUPPLY_M = 588;
+export const TOKENIZED_STOCKS_M = 3240;
 
 /** What Sheaf earns on $1M of shares created, by who created the basket and who filled. */
 export function UnitEconomics() {
@@ -592,16 +624,31 @@ export function UnitEconomics() {
     { name: "Dollars, someone else's basket, another filler", protocol, filler: 0, creator: 0 },
     { name: "Dollars, someone else's basket, Sheaf fills", protocol, filler: fillerNet, creator: 0 },
     { name: "Dollars, Sheaf's own basket, Sheaf fills", protocol, filler: fillerNet, creator },
+    { name: "Sold back for dollars, Sheaf fills", protocol: 0, filler: fillerNet, creator: 0 },
   ];
   const usd = (v: number) => (v === 0 ? "—" : `$${Math.round(v).toLocaleString("en-US")}`);
   const flows = [1e6, 1e7, 1e8];
-  // An illustration, not a forecast: protocol fee on all of it, Sheaf filling seven in ten dollar orders.
-  const blended = protocol + 0.7 * fillerNet;
+  // An illustration, not a forecast: protocol fee on all of it, four in five bought with dollars, Sheaf filling seven in ten of those.
+  const blended = protocol + 0.8 * 0.7 * fillerNet;
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
       <div className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
-        <p className="border-b border-line px-5 py-4 text-sm text-ink-2">Sheaf&rsquo;s take on $1M of shares created</p>
-        <div className="overflow-x-auto">
+        <p className="border-b border-line px-5 py-4 text-sm text-ink-2">Sheaf&rsquo;s take on $1M of shares created, or sold back</p>
+        {/* A phone gets one row per path, with the answer first; five columns do not fit at 390 px. */}
+        <ul className="divide-y divide-line text-sm sm:hidden">
+          {cases.map((c) => (
+            <li key={c.name} className="px-5 py-3">
+              <p className="flex items-baseline justify-between gap-3">
+                <span className="text-ink-2">{c.name}</span>
+                <span className="tnum shrink-0 text-ink">{usd(c.protocol + c.filler + c.creator)}</span>
+              </p>
+              <p className="tnum mt-1 text-xs text-ink-3">
+                protocol {usd(c.protocol)} · filler {usd(c.filler)} · creator {usd(c.creator)}
+              </p>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[520px] border-collapse text-sm">
             <thead>
               <tr className="text-left text-xs text-ink-3">
@@ -639,14 +686,20 @@ export function UnitEconomics() {
             ${BREAK_EVEN_FLOW.low}–{BREAK_EVEN_FLOW.high}M
           </p>
           <p className="mt-2 text-sm leading-relaxed text-ink-2">
-            of shares created a month pays for a team of four at these rates, depending on how many platforms pay a service
-            fee. That is about 0.1% of the $15.6B traded onchain in September. Arithmetic on fixed rates, not a forecast.
+            of shares created a month pays for a team of four at the fees live today, depending on how much platforms pay.
           </p>
+          <p className="mt-3 text-sm leading-relaxed text-ink-2">
+            Held in baskets, that is about ${BREAK_EVEN_AUM.growing}M while new money keeps arriving, and ${BREAK_EVEN_AUM.steadyLow}–
+            {BREAK_EVEN_AUM.steadyHigh}M once creations only replace holders who leave. All the xStocks in existence today come to
+            ${XSTOCKS_SUPPLY_M}M. So Sheaf only works as a standard across several issuers and chains, not on one
+            issuer&rsquo;s catalogue.
+          </p>
+          <p className="mt-3 text-xs leading-relaxed text-ink-3">Arithmetic on fixed rates and a lean cost base, not a forecast.</p>
         </div>
         <div className="rounded-[var(--radius-panel)] border border-line bg-raised p-5 sm:p-6">
           <p className="text-sm text-ink">At different sizes, illustrated</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-3">
-            Protocol fee on every creation, and Sheaf filling seven in ten dollar orders.
+            Protocol fee on every creation, four in five bought with dollars, and Sheaf filling seven in ten of those.
           </p>
           <dl className="mt-4 divide-y divide-line text-sm">
             {flows.map((f) => (
@@ -716,6 +769,14 @@ export type LedgerStats = {
   outsidePlan: FillStats;
   /** Who delivered the fills. */
   byFiller: { house: number | null; second: number | null; outside: number | null };
+  /** Sell orders for dollars. */
+  sells: number | null;
+  sellFills: number | null;
+  sellFillRate: number | null;
+  medianSecsToSell: number | null;
+  /** What buyers and sellers actually paid Sheaf's filler over fair, in bps, once the ledger reports it. */
+  realizedMarginBps: number | null;
+  realizedSellMarginBps: number | null;
   asOf: number | null;
 };
 
@@ -764,6 +825,12 @@ export function readLedgerStats(json: unknown): LedgerStats {
     outsideDollar: fillStats(outside.dollar),
     outsidePlan: fillStats(outside.plan),
     byFiller: { house: num(byFiller.house), second: num(byFiller.second), outside: num(byFiller.outside) },
+    sells: num(s.sells),
+    sellFills: num(s.sellFills),
+    sellFillRate: ratio(s.sellFillRate),
+    medianSecsToSell: num(s.medianSecsToSell),
+    realizedMarginBps: num(s.realizedMarginBps) ?? num(obj(s.realizedMargin).buyBps) ?? num(obj(s.realizedMargin).bps),
+    realizedSellMarginBps: num(s.realizedSellMarginBps) ?? num(obj(s.realizedMargin).sellBps),
     asOf: num(root.asOf),
   };
 }
@@ -793,7 +860,7 @@ export function readLaunchStats(json: unknown): LaunchStats {
   return {
     onCurve: real.filter((l) => !grad(l)).length,
     graduated: real.filter(grad).length,
-    solIn: real.reduce((a, l) => a + n0(l.raisedSol ?? l.raised), 0),
+    solIn: real.filter((l) => l.graduated !== true && l.migrated !== true).reduce((a, l) => a + n0(l.raisedSol ?? l.raised), 0),
     unclaimedTreasurySol: real.reduce((a, l) => a + n0(l.partnerFeesUnclaimedSol ?? l.partnerFeesSol ?? l.treasuryFeesSol), 0),
     outsideCreators:
       num(root.outsideLaunches) ??
@@ -852,19 +919,33 @@ export async function LiveNumbers() {
       ? {
           label: "Fills by another filler",
           value: whole(l.outsideFills),
-          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by the open reference filler`,
+          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by our second filler, which runs the published code with its own key`,
         }
       : {
           label: "Orders filled, by filler",
           value: whole(fillerTotal),
-          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by the open reference filler; any filler may compete`,
+          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by our second filler, which runs the published code with its own key; any filler may compete`,
         },
+    {
+      label: "Sold back for dollars",
+      value: rate(l.sellFillRate),
+      note: `filled, ${whole(l.sellFills)} of ${whole(l.sells)} sell orders; median ${secs(l.medianSecsToSell)} on a 90-second auction`,
+    },
+    {
+      label: "What buyers paid Sheaf's filler over fair",
+      value: l.realizedMarginBps == null ? dash : `${(l.realizedMarginBps / 100).toFixed(2)}%`,
+      note:
+        l.realizedMarginBps == null
+          ? `policy ${pct(HOUSE_FILLER_MARGIN_BPS)}; the measured average appears here once the ledger reports it`
+          : `average over recent fills, against a policy of ${pct(HOUSE_FILLER_MARGIN_BPS)}${l.realizedSellMarginBps != null ? `; sellers: ${(l.realizedSellMarginBps / 100).toFixed(2)}%` : ""}`,
+    },
     { label: "Actions on the program", value: whole(l.actions), note: "in test dollars on devnet" },
   ];
+  const teamOnly = l.outsideWallets === 0;
   const launchCells: { label: string; value: string }[] = [
     { label: "Launch markets on the curve", value: launches ? String(launches.onCurve) : dash },
     { label: "Graduated to a locked pool", value: launches ? String(launches.graduated) : dash },
-    { label: "SOL in the curves", value: launches ? launches.solIn.toFixed(3) : dash },
+    { label: "SOL on open curves", value: launches ? launches.solIn.toFixed(3) : dash },
     { label: "Treasury fees not yet claimed, SOL", value: launches ? launches.unclaimedTreasurySol.toFixed(4) : dash },
     ...(launches && launches.outsideCreators > 0 ? [{ label: "Launches opened by people outside the team", value: String(launches.outsideCreators) }] : []),
     ...(launches && above(launches.outsideTraders) ? [{ label: "Launch traders outside the team", value: String(launches.outsideTraders) }] : []),
@@ -872,6 +953,12 @@ export async function LiveNumbers() {
 
   return (
     <div>
+      {teamOnly ? (
+        <p className="mb-4 max-w-[80ch] rounded-[var(--radius-control)] border border-line-strong bg-raised px-4 py-3 text-sm leading-relaxed text-ink">
+          All of this is Sheaf&rsquo;s own test activity so far: the team&rsquo;s wallets, our demo plan and our QA runs. No
+          wallet outside the team has used Sheaf yet; figures about outside users appear here, first, once there are any.
+        </p>
+      ) : null}
       <ul
         className={`grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line ${
           cells.length === 5 ? "lg:grid-cols-5" : cells.length === 6 ? "lg:grid-cols-3" : "lg:grid-cols-4"
@@ -929,7 +1016,9 @@ type BasketRow = { address: string; name?: string; symbol?: string; creator?: st
  * linked to its transaction.
  */
 export async function ProtocolFeeReceipts() {
-  const [basketsJson, receipts] = await Promise.all([getJson("/api/baskets", 9000), readReceipts()]);
+  const [basketsJson, receipts, ledgerJson] = await Promise.all([getJson("/api/baskets", 9000), readReceipts(), getJson("/api/ledger", 9000)]);
+  const ledger = readLedgerStats(ledgerJson);
+  const houseFlow = ledger.outsideWallets === 0;
   const baskets = Array.isArray(basketsJson) ? (basketsJson as BasketRow[]) : null;
   const carrying = (baskets ?? []).filter((b) => (b.protocolFeeBps ?? 0) > 0 && !isTestBasket({ address: b.address, name: b.name, symbol: b.symbol, creator: b.creator }));
   const accrued = carrying.reduce((a, b) => a + Number(b.protocolFeeAccrued ?? 0), 0) / 10 ** SHARE_DECIMALS;
@@ -969,6 +1058,7 @@ export async function ProtocolFeeReceipts() {
                   {c.signature.slice(0, 8)}…{c.signature.slice(-6)} ↗
                 </a>
                 <span className="tnum text-ink">{shares(c.shares)} shares</span>
+                {houseFlow ? <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs text-ink-3">house test flow</span> : null}
                 <span className="text-xs text-ink-3">{when(c.at)}</span>
               </li>
             ))}
@@ -989,7 +1079,10 @@ export async function ProtocolFeeReceipts() {
             </>
           ) : null}
           Baskets created before {PROTOCOL_FEE_SINCE} carry no protocol fee, for good, so the older baskets you see on the site
-          pay the creator fee alone. Devnet shares, worth nothing.
+          pay the creator fee alone. Devnet shares, worth nothing.{" "}
+          {houseFlow
+            ? "Every fee share so far came from Sheaf's own test flow, our demo plan buying into the basket, so it proves the mechanism, not demand."
+            : null}
         </p>
       </div>
     </div>
@@ -1001,8 +1094,9 @@ export async function ProtocolFeeReceipts() {
 export const MARKET_FACTS: { value: string; label: string; source: SourceKey }[] = [
   { value: "$3.24B", label: "of tokenized stocks held onchain, up 10.7% in 30 days, across 4.33M holders", source: "rwa" },
   { value: "$15.6B", label: "of onchain tokenized-equity trading in September 2026, a record", source: "coindesk" },
-  { value: "42%", label: "of that went through Robinhood ($6.57B); bStocks on BNB Chain did $5.42B, xStocks $2.11B", source: "forkast" },
-  { value: "$4.4B", label: "of tokenized-stock trading on Solana in September, a record for the chain (reported, not yet independently checked)", source: "solVolume" },
+  { value: "42%", label: "of that went through Robinhood ($6.57B); bStocks on BNB Chain did $5.42B, xStocks $2.11B", source: "coindesk" },
+  { value: "$4.4B", label: "of tokenized-stock trading on Solana in September, as reported; not yet independently checked", source: "solVolume" },
+  { value: "18%", label: "of tokenized stocks held are xStocks ($588M of $3.24B), the one listed-stock issuer Sheaf's mainnet build accepts", source: "rwa" },
   { value: "$684M", label: "of tokenized equity on Solana by mid-September, in more than 900,000 wallets", source: "solSupply" },
   { value: "₹32,297 cr", label: "into Indian SIPs in August 2026, from 10.02 crore accounts: the monthly habit, at scale", source: "sip" },
 ];
@@ -1030,8 +1124,8 @@ export async function MarketFacts() {
         <p className="max-w-[62ch] text-sm leading-relaxed text-ink-2">
           Trading has spread across chains. Robinhood led September, BNB Chain&rsquo;s bStocks came second and Solana carried
           a little over a quarter. A basket standard has to sit where the stocks trade, which is why the same vault already runs on
-          Robinhood Chain&rsquo;s testnet and four other EVM chains beside the Solana program. Today the protocol fee is on
-          Solana only.
+          Robinhood Chain&rsquo;s testnet and four other EVM chains beside the Solana program. On Solana every creation pays the
+          0.10% protocol fee; on EVM, dollar orders and plan runs through the v2 desk pay it, and in-kind mints don&rsquo;t.
         </p>
         <p className="max-w-[62ch] text-sm leading-relaxed text-ink-2">
           The SIP figure shows the habit, not a market Sheaf can reach today. India&rsquo;s fund route to US stocks is capped:
@@ -1054,7 +1148,7 @@ export function Beachhead() {
   const gets = [
     ["Themes its users hold themselves", "It lists single tokens today. With Sheaf it can offer a theme as one backed token in the user's own wallet, created and redeemed onchain, which is the thing a wallet cannot fake with a database row."],
     ["Monthly plans", "A plan into a basket in one approval, run by anyone when due, filled by competing fillers. The habit of investing every month, pointed at US stocks."],
-    ["A revenue share with no invoice", "It creates the baskets, sets the creator fee (0–1%) and keeps it on every share created in them, paid by the program."],
+    ["A revenue share with no invoice", "It creates the baskets, sets the creator fee (0–1%) and keeps it on every share created in them, paid by the program. A planned integrator fee field adds a fee on its users' orders, 80% to the wallet."],
     ["Fills it doesn't have to run", "Sheaf's filler fills its users' orders at up to 0.15% over fair, inside the band each buyer signs. It can run its own filler or bring a market maker instead."],
   ];
   return (
@@ -1072,9 +1166,15 @@ export function Beachhead() {
           Sheaf&rsquo;s vaults cannot hold today.
         </p>
         <p>
-          Sheaf earns the {pct(PROTOCOL_FEE_BPS)} protocol fee on every share created, the filler margin where its filler
-          fills, and a service fee for running the filler, the plan keeper and the pages, priced with the first pilot. Sheaf
-          has no agreement with any platform yet.
+          Sheaf earns the {pct(PROTOCOL_FEE_BPS)} protocol fee on every share created and the filler margin where its filler
+          fills. The planned way a wallet earns more is an integrator fee field: the wallet sets its own fee on its users&rsquo;
+          orders and keeps 80% of it, and Sheaf keeps 20%, the split Jupiter uses for integrators. A monthly license applies
+          only where Sheaf runs the pages and the plan keeper for a partner. Not built yet, and no agreement with any platform
+          yet.
+        </p>
+        <p>
+          The issuer is a partner too: every Sheaf share created is demand for the tokens in its vault, bought on the
+          issuer&rsquo;s own markets.
         </p>
       </div>
       <div className="space-y-4">
@@ -1086,7 +1186,7 @@ export function Beachhead() {
             </li>
           ))}
         </ul>
-        <Sources keys={["phantom", "jupStocks", "solflare", "mudrex", "bstocks"]} />
+        <Sources keys={["phantom", "jupStocks", "solflare", "mudrex", "bstocks", "jupIntegrator"]} />
       </div>
     </div>
   );
@@ -1127,11 +1227,13 @@ export function CreatorSide() {
 /* ------------------------------------------------- what has to be proven -- */
 
 export const PROVE_NEXT: { what: string; target: string; how: string }[] = [
-  { what: "The fee, charged", target: "A fee-carrying basket with fee shares accrued and one treasury claim", how: "Shown above with its transaction, and on the ledger." },
+  { what: "The fee, paid by someone else", target: "Fee shares accrued from wallets outside the team, and a claim of them", how: "The first claim is shown above with its transaction; it came from our own test flow." },
   { what: "People using it", target: "30 wallets outside the team by 18 October; 350 in eight weeks", how: "Counted on the ledger, with every team wallet left out." },
   { what: "They come back", target: "110 wallets with two actions a week apart, in eight weeks", how: "Retention, not sign-ups. A plan with two filled runs counts." },
   { what: "Plans that keep running", target: "50 plans from outside the team with at least two filled runs", how: "Read from plan runs and fills on the ledger." },
-  { what: "Fills that land", target: `95% or more of orders of $${HOUSE_MIN_DOLLARS} or more filled; one-off orders in under 60 seconds`, how: "Plan runs are measured separately: their 30-minute auction is slower by design." },
+  { what: "Fills that land", target: `95% or more of orders of ${HOUSE_MIN_DOLLARS} or more filled; one-off orders in under 60 seconds`, how: "Plan runs are measured separately: their 30-minute auction is slower by design." },
+  { what: "The margin, published", target: `What buyers and sellers actually paid Sheaf's filler, near its ${pct(HOUSE_FILLER_MARGIN_BPS)} policy`, how: "Read from the fills against fair at the moment of filling, shown under Numbers so far." },
+  { what: "More than one issuer", target: "Ondo accepted beside xStocks, so a basket can mix issuers", how: "Today the mainnet build covers about 18% of tokenized stocks held." },
   { what: "One platform", target: "A written reply from a wallet or front end that lists xStocks", how: "Even \"send the SDK\". It is the payer the model depends on." },
   { what: "Fill cost at size, on mainnet prices", target: "Under 0.25% round trip at $5,000 for liquid baskets", how: `Measured today at ${(MEASURED_ROUTE[2].roundTripBps / 100).toFixed(3)}% for five big US names.` },
   { what: "Safe to hold real money", target: "Audit, multisig upgrade authority, legal opinion", how: "Before any real token sits in a vault. Not before." },
@@ -1150,6 +1252,62 @@ export function ProveNext() {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/* --------------------------------------------------- nearby products -- */
+
+/** Baskets that already exist near Sheaf, from each one's own page, and where Sheaf differs. */
+export const NEARBY: { name: string; what: string; differs: string; source: SourceKey }[] = [
+  {
+    name: "Kraken, Crypto + xStocks Bundles",
+    what: "Themes such as Big Tech + Crypto inside Kraken's app, rebalanced automatically, no trading fee for Kraken+ members. Kraken owns Backed, the xStocks issuer.",
+    differs: "A Sheaf share is one token in the holder's own wallet, redeemable by anyone for the stocks, across issuers. Kraken and Backed are a natural partner: every Sheaf share created is demand for xStocks.",
+    source: "krakenBundles",
+  },
+  {
+    name: "Bitget Wallet, Basket",
+    what: "A self-custody basket interface on Solana and Robinhood's chain, with recurring buys; themed memecoin baskets today.",
+    differs: "Bitget's basket is a screen over swaps. A Sheaf share is backed in kind in its own vault and can be redeemed or sold for dollars by auction.",
+    source: "bitgetBasket",
+  },
+  {
+    name: "Weave",
+    what: "Thematic stock baskets on Robinhood Chain's testnet, with creators paid about 80% of a management fee.",
+    differs: "Sheaf charges no yearly fee, runs buy and sell auctions and monthly plans, and is live on Solana and five EVM testnets. Weave's recurring creator income is a stronger hook for creators.",
+    source: "weave",
+  },
+  {
+    name: "Basket (basketsolana.xyz)",
+    what: "One redeemable token over several Solana crypto tokens, with fixed or drifting weights.",
+    differs: "Same idea of one backed token, applied to crypto tokens. Sheaf does it for tokenized stocks, with issuer powers checked and dollar orders that read no oracle.",
+    source: "basketSol",
+  },
+];
+
+export function NearbyProducts() {
+  return (
+    <div>
+      <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface">
+        {NEARBY.map((n) => (
+          <li key={n.name} className="grid gap-2 px-5 py-4 text-sm leading-relaxed lg:grid-cols-[14rem_minmax(0,1fr)_minmax(0,1fr)] lg:gap-6">
+            <a href={SOURCES[n.source].href} target="_blank" rel="noreferrer" className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2">
+              {n.name} ↗
+            </a>
+            <p className="text-ink-2">{n.what}</p>
+            <p className="text-ink-3">{n.differs}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 max-w-[90ch] text-xs leading-relaxed text-ink-3">
+        From each product&rsquo;s own page, read {CHECKED}. Where Sheaf sits: the self-custody, multi-issuer version, one backed
+        token per basket, no yearly fee. Cesto, Peaks, Symmetry and issuer ETF tokens are compared on{" "}
+        <Link href="/method#compare" className={linkClass}>
+          How it works
+        </Link>
+        .
+      </p>
     </div>
   );
 }
@@ -1173,7 +1331,12 @@ export function TrustStance() {
           On mainnet, licensed market makers and partner platforms fill the orders and carry the license. Sheaf runs the
           protocol.
         </p>
-        <Sources keys={["kraken"]} />
+        <p className="max-w-[64ch] text-base leading-relaxed text-ink-2">
+          Today the mainnet build accepts two issuers&rsquo; keys: xStocks and PreStocks, and PreStocks stay out of a first
+          mainnet release. That is about 18% of tokenized stocks held (xStocks, $588M of $3.24B). Ondo, the largest issuer, is
+          next. Until then, an xStocks freeze would pause redemption of every basket holding the frozen token.
+        </p>
+        <Sources keys={["kraken", "rwa"]} />
       </div>
       <dl className="divide-y divide-line self-start overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface text-sm">
         {[
@@ -1183,6 +1346,7 @@ export function TrustStance() {
           ["Who fills, on mainnet", "Licensed market makers and partner platforms"],
           ["Price oracle", "None, for creating, redeeming or buying"],
           ["Issuer powers", "Accepted only from known issuers; disclosed"],
+          ["Issuers accepted, mainnet build", "xStocks and PreStocks; Ondo next"],
           ["Fees after creation", "Fixed per basket; no instruction changes them"],
         ].map(([term, value]) => (
           <div key={term} className="grid gap-1 px-5 py-3.5 sm:grid-cols-[10rem_1fr] sm:gap-4">

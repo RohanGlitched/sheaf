@@ -45,7 +45,11 @@ export type LedgerEntry = {
     /** A filler paid for them. */
     | "sold"
     /** Nobody bought in time, or the seller withdrew: the shares went back. */
-    | "sellReturned";
+    | "sellReturned"
+    /** The protocol's fee shares accrued on a creation or fill (owed to the treasury, not yet minted). */
+    | "feeAccrued"
+    /** The treasury claimed the accrued fee shares. */
+    | "feeClaimed";
   basket: string;
   /** The creator, depositor or redeemer. */
   actor: string;
@@ -69,6 +73,11 @@ export type LedgerEntry = {
   plan?: string;
   /** Who delivered the stocks on a fill, or paid the dollars on a sale. */
   filler?: string;
+  /** On a creation: the basket's fee terms, from BasketFeeTerms. */
+  creatorFeeBps?: number;
+  protocolFeeBps?: number;
+  /** On a fee accrual: the running total owed to the treasury, in whole shares. */
+  accrued?: number;
   /** On a sell order: the dollars the seller asks for at the start, and their floor at the end. */
   startCash?: number;
   endCash?: number;
@@ -93,6 +102,9 @@ const EVENT_PLAN_OPENED = [180, 40, 139, 132, 248, 34, 213, 58];
 const EVENT_SELL_PLACED = [102, 129, 44, 158, 235, 219, 216, 128];
 const EVENT_SELL_FILLED = [119, 36, 160, 142, 108, 196, 88, 104];
 const EVENT_SELL_CANCELLED = [182, 0, 198, 165, 128, 233, 74, 99];
+const EVENT_FEE_ACCRUED = [28, 67, 46, 110, 88, 175, 215, 194];
+const EVENT_FEE_CLAIMED = [169, 107, 23, 223, 26, 230, 194, 184];
+const EVENT_FEE_TERMS = [174, 145, 144, 99, 79, 119, 99, 247];
 const CASH = 1_000_000;
 const ONE_SHARE = 1_000_000;
 const PREFIX = "Program data: ";
@@ -248,6 +260,19 @@ export function decodeEvent(
       const shares = Number(r.u64()) / ONE_SHARE;
       return { kind: "sellReturned", basket, actor, shares, order };
     }
+    if (matches(data, EVENT_FEE_ACCRUED)) {
+      const basket = r.pubkey();
+      const shares = Number(r.u64()) / ONE_SHARE;
+      const accrued = Number(r.u64()) / ONE_SHARE;
+      // The event names no wallet; entriesOf credits it to whoever made the transaction.
+      return { kind: "feeAccrued", basket, actor: basket, shares, accrued };
+    }
+    if (matches(data, EVENT_FEE_CLAIMED)) {
+      const basket = r.pubkey();
+      const actor = r.pubkey(); // the treasury's share account
+      const shares = Number(r.u64()) / ONE_SHARE;
+      return { kind: "feeClaimed", basket, actor, shares };
+    }
   } catch {
     // A log line that is not one of ours, or a truncated one. Skip it.
   }
@@ -309,12 +334,25 @@ export function entriesOf(
   blockTime?: number | null,
 ): LedgerEntry[] {
   const entries: LedgerEntry[] = [];
+  let terms: { creatorFeeBps: number; protocolFeeBps: number } | null = null;
   for (const line of logs ?? []) {
     if (!line.startsWith(PREFIX)) continue;
-    const event = decodeEvent(fromBase64(line.slice(PREFIX.length)));
+    const data = fromBase64(line.slice(PREFIX.length));
+    // BasketFeeTerms is not a row of its own: it belongs on the creation it came with.
+    if (matches(data, EVENT_FEE_TERMS) && data.length >= 8 + 32 + 4) {
+      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      terms = { creatorFeeBps: view.getUint16(40, true), protocolFeeBps: view.getUint16(42, true) };
+      continue;
+    }
+    const event = decodeEvent(data);
     if (!event) continue;
     entries.push({ signature: info.signature, time: info.blockTime ?? blockTime ?? 0, slot: info.slot, ...event });
   }
+  const created = entries.find((e) => e.kind === "created");
+  if (terms && created) Object.assign(created, terms);
+  // A fee accrual is credited to whoever made the transaction (the depositor, or the buyer of a fill).
+  const maker = entries.find((e) => e.kind !== "feeAccrued" && e.kind !== "feeClaimed");
+  for (const e of entries) if (e.kind === "feeAccrued" && maker) e.actor = maker.actor;
   // A fill also emits the share mint's own event; the fill row says it all.
   return entries.some((e) => e.kind === "filled") ? entries.filter((e) => e.kind !== "minted") : entries;
 }
@@ -483,6 +521,12 @@ export type LedgerStats = {
   outside: { dollar: FillStats; plan: FillStats };
   /** Who delivered: the house filler, the second (reference-code) filler, and anyone else. */
   fillsByFiller: { house: number; second: number; outside: number; otherOurs: number };
+  /** Fill rate over finished orders of at least $5, the house's minimum, by cause too. */
+  fillRateAtLeast5: number | null;
+  fillRateAtLeast5ByCause: { dollar: number | null; plan: number | null };
+  /** Protocol fee shares accrued to the treasury, and claimed by it, in whole shares. */
+  protocolFeeAccrued: number;
+  protocolFeeClaimed: number;
   /** The dollar exit: sell orders placed, filled and returned, and the dollars paid out to sellers. */
   sells: number;
   sellFills: number;
@@ -520,13 +564,22 @@ function fillStats(entries: LedgerEntry[], placedAt: Map<string, number>): FillS
   };
 }
 
+/** Fills over finished orders of at least $5 (a fill or a refund carries the order's dollars). */
+function rateAtLeast5(xs: LedgerEntry[]): number | null {
+  const fills = xs.filter((e) => e.kind === "filled" && (e.cash ?? 0) >= 5).length;
+  const returned = xs.filter((e) => e.kind === "returned" && (e.cash ?? 0) >= 5).length;
+  return fills + returned > 0 ? Math.round((fills / (fills + returned)) * 1000) / 1000 : null;
+}
+
 /** The numbers behind a set of events. `isOurs` tells a team wallet from anyone else's. */
 export function ledgerStats(
   entries: LedgerEntry[],
   isOurs: (wallet: string) => boolean,
   fillers: { house?: string; second?: string } = {},
 ): LedgerStats {
-  const wallets = new Set(entries.map((e) => e.actor));
+  // Fee rows are bookkeeping, not anyone's action: they stay out of the activity counts.
+  const acts = entries.filter((e) => e.kind !== "feeAccrued" && e.kind !== "feeClaimed");
+  const wallets = new Set(acts.map((e) => e.actor));
   let outsideWallets = 0;
   for (const w of wallets) if (!isOurs(w)) outsideWallets++;
   const placedAt = new Map<string, number>();
@@ -549,10 +602,10 @@ export function ledgerStats(
     otherOurs: xs.filter((f) => f.filler != null && isOurs(f.filler) && f.filler !== fillers.house && f.filler !== fillers.second).length,
   });
   return {
-    actions: entries.length,
+    actions: acts.length,
     wallets: wallets.size,
     outsideWallets,
-    outsideActions: entries.filter((e) => !isOurs(e.actor)).length,
+    outsideActions: acts.filter((e) => !isOurs(e.actor)).length,
     baskets: entries.filter((e) => e.kind === "created").length,
     outsideBaskets: entries.filter((e) => e.kind === "created" && !isOurs(e.actor)).length,
     plans: entries.filter((e) => e.kind === "planOpened").length,
@@ -576,6 +629,10 @@ export function ledgerStats(
       sold.map((e) => (e.order && sellPlacedAt.has(e.order) ? e.time - sellPlacedAt.get(e.order)! : -1)).filter((w) => w >= 0),
     ),
     sellFillsByFiller: byFiller(sold),
+    fillRateAtLeast5: rateAtLeast5(orderish),
+    fillRateAtLeast5ByCause: { dollar: rateAtLeast5(dollar), plan: rateAtLeast5(plan) },
+    protocolFeeAccrued: Math.round(entries.filter((e) => e.kind === "feeAccrued").reduce((a, e) => a + (e.shares ?? 0), 0) * 1e6) / 1e6,
+    protocolFeeClaimed: Math.round(entries.filter((e) => e.kind === "feeClaimed").reduce((a, e) => a + (e.shares ?? 0), 0) * 1e6) / 1e6,
     since: entries.reduce<number | null>((a, e) => (e.time > 0 && (a == null || e.time < a) ? e.time : a), null),
   };
 }

@@ -16,6 +16,12 @@
  * a transaction ever appearing: the mint's multiplier rises and every balance is
  * restated. Read the raw balance and divide by 10^decimals, as most apps do, and
  * you understate what somebody owns.
+ *
+ * When Jupiter does not answer for a token, its price comes from GeckoTerminal's
+ * keyless on-chain price for the same mint (an independent indexer of the same
+ * Solana pools), and failing that from the last snapshot that came back whole
+ * (lib/price-snapshot.ts, at most six hours old). Each quote says which source it
+ * came from, so a filler can ask for a wider margin on a fallback price.
  */
 
 import { XSTOCKS, BY_MINT, type XStock } from "./universe";
@@ -23,6 +29,7 @@ import { PRESTOCKS, PRESTOCK_SYMBOLS, asXStock } from "./prestocks";
 
 const JUP_PRICE = "https://lite-api.jup.ag/price/v3";
 const JUP_SEARCH = "https://lite-api.jup.ag/tokens/v2/search";
+const GECKO = "https://api.geckoterminal.com/api/v2/simple/networks/solana/token_price";
 
 type JupPrice = {
   usdPrice?: number;
@@ -57,6 +64,8 @@ type JupToken = {
 
 /** One tile of the market mosaic. */
 export type Quote = {
+  /** Where the price came from: Jupiter, GeckoTerminal as the fallback, or the last good snapshot. */
+  source?: "jupiter" | "geckoterminal" | "snapshot";
   symbol: string;
   base: string;
   company: string;
@@ -186,6 +195,7 @@ function buildQuote(
       : null;
 
   return {
+    source: "jupiter",
     symbol: stock.symbol,
     base: stock.base,
     company: stock.company,
@@ -211,8 +221,54 @@ function buildQuote(
   };
 }
 
-/** Read the whole universe. Two calls, no key, no cache. */
+/** GeckoTerminal's USD price per token for each mint, 30 to a call, keyless. */
+async function geckoPrices(stocks: XStock[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < stocks.length; i += 30) {
+    const chunk = stocks.slice(i, i + 30);
+    const res = await getJson<{ data?: { attributes?: { token_prices?: Record<string, string | null> } } }>(
+      `${GECKO}/${chunk.map((s) => s.mint).join(",")}`,
+    );
+    const prices = res?.data?.attributes?.token_prices ?? {};
+    for (const stock of chunk) {
+      const price = Number(prices[stock.mint]);
+      if (Number.isFinite(price) && price > 0) out.set(stock.symbol, price);
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the whole universe. Two calls, no key, no cache; a token Jupiter misses is
+ * priced from GeckoTerminal, then from the last good snapshot.
+ */
 export async function fetchMarket(): Promise<MarketSnapshot> {
+  const snapshot = await fetchJupiter();
+  if (typeof window !== "undefined") return snapshot;
+  const { lastGoodQuote, saveLastGood } = await import("./price-snapshot");
+  if (snapshot.missing.length === 0) {
+    await saveLastGood(snapshot).catch(() => undefined);
+    return snapshot;
+  }
+  const missingStocks = UNIVERSE.filter((s) => snapshot.missing.includes(s.symbol));
+  const second = await geckoPrices(missingStocks).catch(() => new Map<string, number>());
+  const quotes = [...snapshot.quotes];
+  const missing: string[] = [];
+  for (const stock of missingStocks) {
+    const last = await lastGoodQuote(stock.symbol);
+    const price = second.get(stock.symbol);
+    if (price != null) {
+      // A live price, with what the last good snapshot knew about the token (its multiplier above all).
+      const base = last ?? buildQuote(stock, { usdPrice: price }, undefined)!;
+      quotes.push({ ...base, price, source: "geckoterminal" });
+    } else if (last) quotes.push(last);
+    else missing.push(stock.symbol);
+  }
+  quotes.sort((a, b) => b.liquidity - a.liquidity);
+  return { ...snapshot, quotes, missing };
+}
+
+async function fetchJupiter(): Promise<MarketSnapshot> {
   const ids = mints.join(",");
   const [prices, tokens] = await Promise.all([
     getJson<Record<string, JupPrice>>(`${JUP_PRICE}?ids=${ids}`),

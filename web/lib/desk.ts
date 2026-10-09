@@ -81,6 +81,17 @@ export function planAddress(basket: PublicKey, owner: PublicKey, planId: bigint)
   return PublicKey.findProgramAddressSync([Buffer.from("plan"), basket.toBuffer(), owner.toBuffer(), le64(planId)], PROGRAM_ID)[0];
 }
 
+/** The trailing step the program suggests (open_plan takes any 0..5000; 0 = fixed bounds). */
+export const PLAN_STEP_BPS = 600;
+/** How far before it lands an order's auction may start (place_order / place_sell_order refuse more). */
+export const MAX_START_LAG_SECS = 60;
+/**
+ * The SPL Memo program. Pass it as a trailing remaining account to fill_order,
+ * cancel_order, fill_sell_order or cancel_sell_order when the account being
+ * paid requires incoming memos; the program then writes the memo itself.
+ */
+export const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
 /** A holder's sell order: `["sell", basket, seller, nonce]`. */
 export function sellOrderAddress(basket: PublicKey, seller: PublicKey, nonce: bigint): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("sell"), basket.toBuffer(), seller.toBuffer(), le64(nonce)], PROGRAM_ID)[0];
@@ -143,10 +154,17 @@ export type Plan = {
   legacy: boolean;
   /**
    * How far a fill may move the reference, in bps: after every fill the
-   * bounds become `ref × (1 ± step)`. 600 for plans opened since trailing
-   * bounds existed; 0 (the owner's bounds, fixed) for older plans.
+   * working bounds become `ref × (1 ± step)` intersected with the owner's
+   * hard limits. Chosen at open_plan (0 = fixed bounds); 0 for plans opened
+   * before trailing bounds existed.
    */
   trailStepBps: number;
+  /**
+   * The owner's hard limits, which no fill can move the reference past (set at
+   * open_plan and update_plan). Null on plans opened before they existed.
+   */
+  hardMinRef: bigint | null;
+  hardMaxRef: bigint | null;
 };
 
 export type SellOrder = {
@@ -259,11 +277,21 @@ export function decodePlan(address: PublicKey, data: Uint8Array): Plan | null {
           r.u8(); // bump
           const minRef = r.u64();
           const maxRef = r.u64();
-          // The trailing step sits in an 8-byte tail after the struct (byte 296).
-          const trailStepBps = data.length >= 298 ? r.u16() : 0;
-          return { minRef, maxRef, legacy: false, trailStepBps };
+          // The tail after the struct (byte 296): trail_step_bps u16, 6 reserved,
+          // then the owner's hard limits (u64, u64) on plans opened since they existed.
+          const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+          const trailStepBps = data.length >= 298 ? view.getUint16(296, true) : 0;
+          const hard = data.length >= 320;
+          return {
+            minRef,
+            maxRef,
+            legacy: false,
+            trailStepBps,
+            hardMinRef: hard ? view.getBigUint64(304, true) : null,
+            hardMaxRef: hard ? view.getBigUint64(312, true) : null,
+          };
         })()
-      : { minRef: null, maxRef: null, legacy: true, trailStepBps: 0 }),
+      : { minRef: null, maxRef: null, legacy: true, trailStepBps: 0, hardMinRef: null, hardMaxRef: null }),
   };
 }
 
@@ -327,19 +355,27 @@ export const requiredCash = (o: Pick<SellOrder, "startCash" | "endCash" | "start
 
 /**
  * A plan after a fill at `rate`, as the program's `apply_plan_fill` records
- * it: the rate is clamped into the bounds and becomes the reference; with a
- * trailing step the bounds then move to `rate × (1 ± step)` (floored, the
- * floor at least 1). Fixed-bound plans keep their bounds.
+ * it: the rate is clamped into the working bounds and becomes the reference;
+ * with a trailing step the working bounds then move to `rate × (1 ± step)`
+ * (floored), intersected with the owner's hard limits when the plan has them.
+ * Fixed-bound plans keep their bounds.
  */
-export function planAfterFill(plan: Pick<Plan, "minRef" | "maxRef" | "trailStepBps">, rate: bigint) {
+export function planAfterFill(
+  plan: Pick<Plan, "minRef" | "maxRef" | "trailStepBps"> & Partial<Pick<Plan, "hardMinRef" | "hardMaxRef">>,
+  rate: bigint,
+) {
   const lo = plan.minRef ?? 0n;
   const hi = plan.maxRef ?? rate;
   const ref = rate < lo ? lo : rate > hi ? hi : rate;
   if (!plan.trailStepBps) return { ref, minRef: lo, maxRef: hi };
   const step = BigInt(plan.trailStepBps);
-  const minRef = (ref * (10_000n - step)) / 10_000n;
-  const maxRef = (ref * (10_000n + step)) / 10_000n;
-  return { ref, minRef: minRef > 0n ? minRef : 1n, maxRef: maxRef > ref ? maxRef : ref };
+  let minRef = (ref * (10_000n - step)) / 10_000n;
+  let maxRef = (ref * (10_000n + step)) / 10_000n;
+  if (minRef < 1n) minRef = 1n;
+  if (maxRef < ref) maxRef = ref;
+  if (plan.hardMinRef != null && minRef < plan.hardMinRef) minRef = plan.hardMinRef;
+  if (plan.hardMaxRef != null && maxRef > plan.hardMaxRef) maxRef = plan.hardMaxRef;
+  return { ref, minRef: minRef < ref ? minRef : ref, maxRef: maxRef > ref ? maxRef : ref };
 }
 
 /** The plan's next order bounds, as run_plan sets them. */
@@ -510,9 +546,15 @@ export function openPlanIx(p: {
   refSharesPerCashE9: bigint;
   bandBps: number;
   auctionSecs: number;
-  /** The reference rate may never drift below or above these. */
+  /** The owner's hard limits: the reference can never leave them, trailing or not. */
   minRef: bigint;
   maxRef: bigint;
+  /**
+   * 0 (the default) keeps the bounds fixed at [minRef, maxRef]. A step (e.g.
+   * PLAN_STEP_BPS = 600) lets the plan follow the market inside those hard
+   * limits, moving at most that far per fill; give it wide hard limits then.
+   */
+  trailStepBps?: number;
 }) {
   const cashProgram = p.cashProgram ?? TOKEN_2022_PROGRAM_ID;
   const plan = planAddress(p.basket, p.owner, p.planId);
@@ -539,6 +581,7 @@ export function openPlanIx(p: {
         auction_secs: p.auctionSecs,
         min_ref_shares_per_cash_e9: p.minRef,
         max_ref_shares_per_cash_e9: p.maxRef,
+        trail_step_bps: p.trailStepBps ?? 0,
       },
     ),
   };

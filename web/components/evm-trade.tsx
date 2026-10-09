@@ -17,9 +17,11 @@ import {
   isTempo,
   mintAmounts,
   redeemAmounts,
+  auctionDeskVersion,
+  deskAddress,
+  publicClientFor,
   readDeskOrderV2,
   toShares,
-  v2Of,
 } from "@/lib/evm";
 import { money, quantity, shortAddress } from "@/lib/format";
 import { EvmConnect, StepList, type EvmWallet, type Step, type StepState } from "./evm-wallet";
@@ -39,7 +41,9 @@ const DRIP_CHAINS = new Set(["robinhoodTestnet", "arbitrumSepolia", "baseSepolia
 const MIRROR_FAUCET_SHARES = 2n * ONE_SHARE;
 const MIRROR_DOLLARS = 50_000_000n; // 50 test dollars, 6 decimals
 /**
- * A dollar order is a Dutch auction on the v2 desk, as on Solana: the escrow is the
+ * A dollar order is a Dutch auction on the newest auction desk (v3 where deployed:
+ * the same CreationDeskV2 code, its protocol fee going to a cold treasury), as on
+ * Solana: the escrow is the
  * shares' live value, and the count the buyer receives starts 2% above that and
  * falls to 2% below over ninety seconds. The house fills once the dollars cover the
  * stocks at fair plus 0.15%; any filler can fill sooner, for a better count.
@@ -74,7 +78,9 @@ export function EvmTradePanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [serverTxs, setServerTxs] = useState<{ label: string; hash: Hex }[]>([]);
   const [order, setOrder] = useState<{ id: number; keeper?: KeeperResult | null } | null>(null);
-  const v2 = v2Of(d);
+  // The newest auction desk: v3 (cold treasury) where deployed, else v2.
+  const deskVersion = auctionDeskVersion(d);
+  const desk = deskVersion ? deskAddress(d, deskVersion) : null;
 
   const user = reads?.user ?? null;
   const shares = toShares(amount);
@@ -191,19 +197,23 @@ export function EvmTradePanel({
   const feeBps = BigInt(basket.feeBps) + PROTOCOL_FEE_BPS;
   const atHouse = shares ? (((shares * (10_000n - feeBps)) / 10_000n) * 10_000n) / BigInt(10_000 + HOUSE_MARGIN_BPS) : null;
 
-  const cashSteps = (): Step[] => {
-    if (!shares || cashCost == null || !v2) return [];
+  const cashSteps = async (): Promise<Step[]> => {
+    if (!shares || cashCost == null || !desk || !wallet.address) return [];
     const list: Step[] = [];
-    if ((user?.deskAllowance ?? 0n) < cashCost) {
+    // Read the allowance for this desk itself: the page's reads may be for an older desk.
+    const allowance = await publicClientFor(d)
+      .readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [wallet.address, desk] })
+      .catch(() => 0n);
+    if (allowance < cashCost) {
       list.push({
         label: `Approve ${fromRaw(cashCost, d.stable.decimals).toFixed(2)} ${d.stable.symbol}`,
         to: d.stable.address as Address,
-        data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [v2.desk as Address, cashCost] }),
+        data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [desk, cashCost] }),
       });
     }
     list.push({
       label: `Auction for about ${amount} ${basket.symbol} on the desk`,
-      to: v2.desk as Address,
+      to: desk,
       data: encodeFunctionData({
         abi: DESK_V2_ABI,
         functionName: "placeAuction",
@@ -218,14 +228,14 @@ export function EvmTradePanel({
       const res = await fetch("/api/evm-keeper", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ network: d.network, order: id, version: 2 }),
+        body: JSON.stringify({ network: d.network, order: id, version: deskVersion }),
       });
       const json = (await res.json()) as { results?: KeeperResult[]; error?: string };
       const r = json.results?.[0];
       if (r && !(r.status === "skipped" && /^already filled/.test(r.reason ?? ""))) return r;
       if (json.error) return { status: "skipped", reason: json.error };
       // No longer open: a sweep or another participant filled it, or it ended.
-      const o = await readDeskOrderV2(d, id);
+      const o = await readDeskOrderV2(d, id, deskVersion ?? 2);
       if (o.status === "Filled") return { status: "filled", filler: o.filler };
       return { status: "skipped", reason: o.status === "Cancelled" ? "it ended unfilled and the dollars went back" : "the house filler did not pick it up" };
     } catch {
@@ -440,7 +450,7 @@ export function EvmTradePanel({
                     </dl>
                   )}
                   <p className="mt-2 text-xs leading-relaxed text-ink-3">
-                    The live value, held by the v2 desk while a Dutch auction runs for ninety seconds: the shares you receive start 2% above what
+                    The live value, held by the {deskVersion === 3 ? "v3" : "v2"} desk while a Dutch auction runs for ninety seconds: the shares you receive start 2% above what
                     it buys at fair and fall to 2% below. Any participant who delivers the components in kind can fill at the current count;
                     the house fills once the dollars cover the stocks at fair plus 0.15%, after the {basket.feeBps / 100}% creator fee and the
                     0.10% protocol fee. The shares are minted straight to you. Cancel any time before a fill; once the auction ends, anyone can
@@ -449,7 +459,7 @@ export function EvmTradePanel({
                 </div>
                 <ActionButton
                   className="mt-4"
-                  disabled={!ready || busy || !shares || cashCost == null || !v2 || (user ? user.stable < cashCost : true)}
+                  disabled={!ready || busy || !shares || cashCost == null || !desk || (user ? user.stable < cashCost : true)}
                   onClick={() => void run(cashSteps, afterOrder)}
                 >
                   {busy

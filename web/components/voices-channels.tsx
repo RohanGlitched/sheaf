@@ -82,14 +82,18 @@ function InviteMaker() {
 }
 
 export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: boolean }) {
-  const max = Math.max(1, ...refs.map((r) => r.opens));
+  const max = Math.max(1, ...refs.map((r) => r.signed));
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] lg:gap-12">
-      <div>
+      {/* First in the page order so a phone sees the link maker before the (often empty) table. */}
+      <div className="lg:order-2">
+        <InviteMaker />
+      </div>
+      <div className="lg:order-1">
         {refs.length === 0 ? (
           <p className="rounded-[var(--radius-panel)] border border-dashed border-line-strong/70 px-6 py-10 text-sm leading-relaxed text-ink-2">
             {open
-              ? "Make an invite link on the right and post it somewhere; each channel shows up here with its opens and signatures."
+              ? "Make an invite link and post it somewhere; each channel shows up here with the people who signed through it."
               : "Channels show up here once signing opens."}
           </p>
         ) : (
@@ -97,8 +101,8 @@ export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: bool
             <thead>
               <tr className="border-b border-line text-left text-xs text-ink-3">
                 <th className="px-4 py-3 font-normal sm:px-5">Invite code</th>
-                <th className="px-4 py-3 font-normal">Opened</th>
-                <th className="px-4 py-3 text-right font-normal sm:px-5">Signed</th>
+                <th className="px-4 py-3 font-normal">Signed and used Sheaf</th>
+                <th className="px-4 py-3 text-right font-normal text-ink-3 sm:px-5">Link opens</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -107,23 +111,24 @@ export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: bool
                   <td className="max-w-[14rem] truncate px-4 py-3 text-ink sm:px-5">{r.ref}</td>
                   <td className="px-4 py-3">
                     <span className="flex items-center gap-3">
-                      <span className="w-8 text-ink-2">{count(r.opens)}</span>
+                      <span className="w-8 text-ink">{count(r.signed)}</span>
                       <span aria-hidden className="hidden h-1.5 flex-1 overflow-hidden rounded-full bg-sunk sm:block">
-                        <span className="block h-full rounded-full bg-bind/70" style={{ width: `${(r.opens / max) * 100}%` }} />
+                        <span className="block h-full rounded-full bg-bind/70" style={{ width: `${(r.signed / max) * 100}%` }} />
                       </span>
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-ink sm:px-5">{count(r.signed)}</td>
+                  <td className="px-4 py-3 text-right text-xs text-ink-3 sm:px-5">{count(r.opens)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
         <p className="mt-3 max-w-[70ch] text-xs leading-relaxed text-ink-3">
-          An open is counted once per address per code per hour, and link previews from chat apps aren&rsquo;t counted. Team wallets never count as signed.
+          Only people listed above count as signed: outside the team, with a first action on Sheaf. Link opens are not people:
+          one is counted per address per code per hour, chat-app previews are skipped, and anyone can open a link twice from two
+          networks, so they only say whether a link is being clicked.
         </p>
       </div>
-      <InviteMaker />
     </div>
   );
 }

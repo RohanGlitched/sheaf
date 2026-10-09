@@ -3,15 +3,20 @@
  *
  * Tokens trade around the clock, but SPY's close-to-close change only exists at
  * US closes, so both sides of the comparison are read at the same two closes:
- * the regular-session close (16:00 New York time) on the first Friday at or
- * after trading opens, and on the Friday a week later, when the market ends.
- * Nothing of the measured week is known when trading opens. When a Friday is a
- * market holiday, the close used is the last one at or before it.
+ * the last NYSE regular-session close of the first week whose close is at or
+ * after trading opens, and of the week after, when the market ends. Closes come
+ * from the exchange calendar: normally Friday 16:00 New York, Thursday's close
+ * when Friday is a holiday, 13:00 on an early-close Friday. Nothing of the
+ * measured week is known when trading opens, and trading ends at the second
+ * close, so nobody trades a decided week.
  *
  * Shared by the market draft (lib/panta-server.ts), the NAV route's `?at=`
  * reader and the /predict page, so the rule, the window and the numbers can
  * never disagree.
  */
+
+import { parseSchedule, type Session } from "./clock";
+import { XSTOCKS } from "./universe";
 
 const NY = "America/New_York";
 export const CLOSE_HOUR_NY = 16;
@@ -57,24 +62,71 @@ export const dayOf = (p: { y: number; m: number; d: number }) => p.y * 10000 + p
 export const dayIso = (day: number) =>
   `${Math.floor(day / 10000)}-${String(Math.floor(day / 100) % 100).padStart(2, "0")}-${String(day % 100).padStart(2, "0")}`;
 
-/** Friday 16:00 New York on the week containing `unix` (or the next Friday if that one has passed). */
-function fridayCloseOnOrAfter(unix: number): number {
+/**
+ * The NYSE regular-session calendar, from the schedule Pyth publishes for SPY
+ * (captured in lib/universe.ts and parsed by lib/clock.ts): weekday hours plus
+ * dated overrides for holidays (`1225/C`) and early closes (`1127/0930-1300`).
+ * The overrides are month-day only and cover the year after the capture
+ * (Sept 2026 to Sept 2027); re-run scripts/gen-universe.mjs to extend them.
+ */
+const SPY = parseSchedule(XSTOCKS.find((s) => s.base === "SPY")?.schedule ?? null);
+
+/** The regular session on a New York calendar date, or null when the exchange is shut all day. */
+export function sessionOn(y: number, m: number, d: number): Session {
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  const md = `${String(m).padStart(2, "0")}${String(d).padStart(2, "0")}`;
+  if (SPY) {
+    if (SPY.overrides.has(md)) return SPY.overrides.get(md)!;
+    return SPY.week[(dow + 6) % 7];
+  }
+  // No schedule: weekdays 09:30-16:00.
+  return dow === 0 || dow === 6 ? null : { openMinute: 570, closeMinute: CLOSE_HOUR_NY * 60 };
+}
+
+const shift = (y: number, m: number, d: number, days: number) => {
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+};
+
+/** The actual close (unix) of the session on a date, or null if there is none. */
+function closeOnDate(y: number, m: number, d: number): number | null {
+  const s = sessionOn(y, m, d);
+  return s ? nyToUnix(y, m, d, Math.floor(s.closeMinute / 60), s.closeMinute % 60) : null;
+}
+
+/** The last session close on or before a date: a holiday Friday gives Thursday's (possibly early) close. */
+function lastCloseOnOrBefore(y: number, m: number, d: number): { day: number; close: number } {
+  for (let back = 0; back < 10; back++) {
+    const p = shift(y, m, d, -back);
+    const close = closeOnDate(p.y, p.m, p.d);
+    if (close != null) return { day: dayOf(p), close };
+  }
+  return { day: dayOf({ y, m, d }), close: nyToUnix(y, m, d, CLOSE_HOUR_NY) };
+}
+
+/**
+ * The week-ending close at or after `unix`: for the Friday of that week, the
+ * last session close on or before it (Thursday's on a holiday Friday, 13:00 on
+ * an early close). If that has already passed, the next week's.
+ */
+function weekCloseOnOrAfter(unix: number): { friday: { y: number; m: number; d: number }; close: number } {
   const p = nyParts(unix);
   const ahead = (5 - p.weekday + 7) % 7;
-  const on = (days: number) => {
-    const d = new Date(Date.UTC(p.y, p.m - 1, p.d + days));
-    return nyToUnix(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), CLOSE_HOUR_NY);
-  };
-  const close = on(ahead);
-  return close >= unix ? close : on(ahead + 7);
+  for (let week = 0; week < 4; week++) {
+    const friday = shift(p.y, p.m, p.d, ahead + 7 * week);
+    const { close } = lastCloseOnOrBefore(friday.y, friday.m, friday.d);
+    if (close >= unix) return { friday, close };
+  }
+  const friday = shift(p.y, p.m, p.d, ahead + 28);
+  return { friday, close: lastCloseOnOrBefore(friday.y, friday.m, friday.d).close };
 }
 
 export type MarketWindow = {
   /** When trading opens on Panta: at least an hour out, as Panta requires. */
   opens: number;
-  /** The Friday close the week is measured from. */
+  /** The week-ending close the week is measured from. */
   fromClose: number;
-  /** The Friday close it ends at: Panta's endTime. */
+  /** The week-ending close it ends at: Panta's endTime. */
   toClose: number;
   /** When it can be resolved: once history has refreshed after the close. Panta's resolutionTime. */
   resolves: number;
@@ -82,66 +134,86 @@ export type MarketWindow = {
 
 /**
  * The window for a market opened at `now`. The measured week starts at the
- * first Friday close at or after trading opens, and ends at the Friday close a
- * week later, so nothing of the week is known when the first share is bought:
- * a market opened on a Thursday waits for Friday's close, and one opened on a
- * Saturday waits six days. Trading runs from `opens` until the week ends.
+ * first week-ending close at or after trading opens, and ends at the next
+ * week's, so nothing of the week is known when the first share is bought.
+ * Both are real NYSE closes: a holiday Friday (Dec 25 2026, Jan 1 2027) uses
+ * Thursday's close, and an early-close Friday (Nov 27 2026) its 13:00 close.
+ * Panta's endTime is that close, so trading stops the moment the week is
+ * decided.
  */
 export function marketWindow(now = Math.floor(Date.now() / 1000)): MarketWindow {
   const opens = now + 2 * 3600;
-  const fromClose = fridayCloseOnOrAfter(opens);
-  // Noon a week later is safely on the next Friday whatever daylight saving did.
-  const after = nyParts(fromClose + 7 * 86_400 - 4 * 3600);
-  const toClose = nyToUnix(after.y, after.m, after.d, CLOSE_HOUR_NY);
-  return { opens, fromClose, toClose, resolves: toClose + CLOSE_SETTLE_S + 59 * 60 };
+  const from = weekCloseOnOrAfter(opens);
+  const nextFriday = shift(from.friday.y, from.friday.m, from.friday.d, 7);
+  const toClose = lastCloseOnOrBefore(nextFriday.y, nextFriday.m, nextFriday.d).close;
+  return { opens, fromClose: from.close, toClose, resolves: toClose + CLOSE_SETTLE_S + 59 * 60 };
 }
 
 /**
  * The trading day (YYYYMMDD, New York) of the last regular-session close at or
- * before `unix`, before holidays: a time before 16:00 on a weekday names the
- * previous weekday, a weekend names Friday. Holidays are resolved against the
- * price history, which has no row for them (the last day at or before wins).
+ * before `unix`, on the exchange calendar: holidays are skipped and early
+ * closes count from 13:00.
  */
 export function closeDayAtOrBefore(unix: number): number {
-  let p = nyParts(unix);
-  let t = unix;
-  const isClosed = (q: Parts) => q.weekday === 0 || q.weekday === 6 || q.hour < CLOSE_HOUR_NY;
-  // Step back a day at a time (from noon, clear of DST edges) until a weekday at or after its close.
-  if (isClosed(p)) {
-    for (let i = 0; i < 7; i++) {
-      t = nyToUnix(p.y, p.m, p.d, 12) - 86_400;
-      p = nyParts(t);
-      if (p.weekday !== 0 && p.weekday !== 6) break;
-    }
+  const p = nyParts(unix);
+  for (let back = 0; back < 10; back++) {
+    const q = shift(p.y, p.m, p.d, -back);
+    const close = closeOnDate(q.y, q.m, q.d);
+    if (close != null && close <= unix) return dayOf(q);
   }
   return dayOf(p);
 }
 
-/** The close (unix) on a YYYYMMDD trading day. */
-export const closeOn = (day: number) =>
-  nyToUnix(Math.floor(day / 10000), Math.floor(day / 100) % 100, day % 100, CLOSE_HOUR_NY);
+/** The close (unix) on a YYYYMMDD trading day: its real session close, 16:00 if the calendar has none. */
+export const closeOn = (day: number) => {
+  const y = Math.floor(day / 10000);
+  const m = Math.floor(day / 100) % 100;
+  const d = day % 100;
+  return closeOnDate(y, m, d) ?? nyToUnix(y, m, d, CLOSE_HOUR_NY);
+};
 
-export const fmtClose = (unix: number) =>
-  `${new Date(unix * 1000).toLocaleString("en-US", {
+export const fmtClose = (unix: number) => {
+  const p = nyParts(unix);
+  const date = new Date(unix * 1000).toLocaleString("en-US", {
     timeZone: NY,
     weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",
-  })}, 16:00 New York (${new Date(unix * 1000).toISOString().replace(".000Z", "Z")})`;
+  });
+  return `${date}, ${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")} New York (${new Date(unix * 1000).toISOString().replace(".000Z", "Z")})`;
+};
 
-/** The resolution rule, word for word as it is sent to Panta and shown on the page. */
+/** One holding of the recipe, as it is frozen into the rule. */
+export type RecipeLine = { base: string; unitsPerShare: string; decimals: number };
+
+/** "NVDA 0.1127068, AAPL 0.05857223": units of each listed share per basket share. */
+export const recipeText = (recipe: RecipeLine[]) =>
+  recipe
+    .map((r) => `${r.base} ${(Number(r.unitsPerShare) / 10 ** r.decimals).toFixed(r.decimals).replace(/\.?0+$/, "")}`)
+    .join(", ");
+
+/**
+ * The resolution rule, word for word as it is sent to Panta and shown on the
+ * page. With `recipe`, the units per share are written into the rule itself,
+ * so it can be resolved from public closes and mainnet multipliers alone, even
+ * if the devnet basket account it was read from is reset.
+ */
 export function resolutionRule(
   symbol: string,
   navUrl: string,
   w: Pick<MarketWindow, "fromClose" | "toClose" | "resolves">,
+  recipe?: RecipeLine[],
 ) {
   return (
     `YES if ${symbol}'s navPerShare.listed from ${navUrl}?at=${w.toClose} divided by navPerShare.listed from ${navUrl}?at=${w.fromClose} ` +
     `is greater than spy.adjClose divided the same way (the same two URLs). ` +
-    `Those times are the US regular-session closes on ${fmtClose(w.fromClose)} and ${fmtClose(w.toClose)}; ` +
-    `if either Friday is a market holiday, the last close before it is used, which the JSON states as closeDay. ` +
+    `Those times are the NYSE regular-session closes ending each week, on ${fmtClose(w.fromClose)} and ${fmtClose(w.toClose)}, ` +
+    `taken from the exchange calendar (a holiday Friday uses Thursday's close, an early close its 13:00 close); the JSON states the day used as closeDay. ` +
+    (recipe?.length
+      ? `navPerShare.listed is the sum over one ${symbol} share's fixed recipe (${recipeText(recipe)} shares) of units x that day's adjusted close x the token's Token-2022 multiplier on Solana mainnet; anyone can recompute it from those units without the page. `
+      : "") +
     `Both URLs are read at or after the resolution time, ${new Date(w.resolves * 1000).toISOString().replace(".000Z", "Z")}, so both closes use the same data. ` +
-    `NO otherwise, including a tie. Both values are recomputable from the inputs the JSON lists.`
+    `NO otherwise, including a tie. Every input is listed in the JSON.`
   );
 }

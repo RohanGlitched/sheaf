@@ -130,8 +130,12 @@ function merge(proofs: Map<string, Proof>) {
  * depends on first (slot freshness, just-landed transactions, reads answered,
  * block to screen), and the raw round trip stated plainly in the note.
  */
-export function LiveTape() {
-  const { bySymbol } = useMarket();
+export function LiveTape({ openDetails = false }: { openDetails?: boolean } = {}) {
+  const { bySymbol, snapshot } = useMarket();
+  // The read that matters most to the product: every basket's value, and every
+  // Panta resolution, use the dividend multipliers read through this RPC.
+  const chain = snapshot?.chain ?? null;
+  const mintCount = snapshot?.quotes.length ?? 0;
   const [tape, setTape] = useState<Tape | null>(null);
   const [rows, setRows] = useState<Print[]>([]);
   const [seed, setSeed] = useState<Seed | null>(null);
@@ -165,16 +169,20 @@ export function LiveTape() {
 
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
+      let soon = false;
       try {
         const res = await fetch("/api/tape", { cache: "no-store" });
         if (res.ok) {
           const t = (await res.json()) as Tape;
           if (!live) return;
-          // A cold server instance still backfilling: nothing to show yet, and
-          // the seed stays on screen. Ask again soon.
+          // A cold server instance still backfilling: show whatever rows it has
+          // decoded so far (the seed stays under them), and ask again soon.
           if (t.warming) {
-            timer = setTimeout(tick, 2_500);
-            return;
+            soon = true;
+            if (!t.prints.length) {
+              timer = setTimeout(tick, 2_500);
+              return;
+            }
           }
           const first = known.current.size === 0;
           const at = Date.now();
@@ -191,7 +199,7 @@ export function LiveTape() {
           // Only a newer server tape replaces the header line, so an older cached
           // answer cannot move the slot backwards.
           setTape((prev) => (!prev || t.slot >= prev.slot ? t : prev));
-          if (t.proof?.instance) {
+          if (t.proof?.instance && !t.warming) {
             const prev = proofs.current.get(t.proof.instance);
             // A CDN copy can be older than one already seen from the same instance.
             if (!prev || t.proof.compare.upstreams.reads.wanted >= prev.compare.upstreams.reads.wanted) {
@@ -214,7 +222,7 @@ export function LiveTape() {
       } catch {
         // Keep the last good tape on screen; the next tick tries again.
       }
-      if (live) timer = setTimeout(tick, document.hidden ? 15_000 : 4_000);
+      if (live) timer = setTimeout(tick, document.hidden ? 15_000 : soon ? 2_500 : 4_000);
     };
     tick();
     const clock = setInterval(() => setNow(Date.now()), 1000);
@@ -369,7 +377,7 @@ export function LiveTape() {
             aria-hidden
           />
           <span className="tnum">
-            {tape ? `Slot ${tape.slot.toLocaleString("en-US")}` : "Connecting to mainnet"}
+            {tape && tape.slot > 0 ? `Slot ${tape.slot.toLocaleString("en-US")}` : "Reading mainnet through Solami"}
           </span>
           {tape && (
             <span>
@@ -379,6 +387,21 @@ export function LiveTape() {
           )}
         </p>
         {tape?.fallback && <p className="mt-2 max-w-[48ch] text-xs leading-relaxed text-ink-3">{tape.fallback}.</p>}
+        <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-ink-2">
+          {chain ? (
+            <>
+              Every basket&apos;s value and every Panta resolution read their dividend multipliers through{" "}
+              {chain.via === "solami" ? "Solami" : "a public RPC (Solami was unavailable)"} too: the Token-2022
+              config on all {mintCount || 28} stock mints, in one call, at slot{" "}
+              <span className="tnum">{chain.slot.toLocaleString("en-US")}</span>.
+            </>
+          ) : (
+            <>
+              Every basket&apos;s value and every Panta resolution read their dividend multipliers through
+              Solami too: the Token-2022 config on every stock mint, in one call.
+            </>
+          )}
+        </p>
       </div>
 
       <div className="order-first min-w-0 self-start lg:order-none">
@@ -391,7 +414,7 @@ export function LiveTape() {
             />
             <span>Solana mainnet</span>
             <span>· read through {tape?.via === "public" ? "a public RPC" : "Solami"}</span>
-            <span className="tnum">· {tape ? `slot ${tape.slot.toLocaleString("en-US")}` : "connecting"}</span>
+            <span className="tnum">· {tape && tape.slot > 0 ? `slot ${tape.slot.toLocaleString("en-US")}` : "reading"}</span>
           </p>
           <div className={`${grid} border-b border-line py-3 text-xs text-ink-3`}>
             <span>When</span>
@@ -431,7 +454,7 @@ export function LiveTape() {
         </div>
 
         {tape && (
-          <details className="group mt-4 text-sm">
+          <details className="group mt-4 text-sm" open={openDetails || undefined}>
             <summary className="flex cursor-pointer list-none items-center gap-2 text-ink-2 hover:text-ink">
               <span aria-hidden className="text-ink-3 transition-transform group-open:rotate-90">
                 ›
@@ -439,6 +462,11 @@ export function LiveTape() {
               What Solami does for this tape, against the public RPC
             </summary>
             <dl className="mt-3 grid grid-cols-1 gap-px border border-line bg-line sm:grid-cols-2">
+              {cell(
+                "Dividend multipliers behind every basket",
+                chain ? `slot ${chain.slot.toLocaleString("en-US")} via ${chain.via === "solami" ? "Solami" : "public RPC"}` : "—",
+                `${mintCount || 28} Token-2022 mints in one getMultipleAccounts. These set each basket's value and every Panta resolution (/api/nav sources.multipliers).`,
+              )}
               {cell(
                 "Mainnet reads Solami served",
                 reads?.wanted

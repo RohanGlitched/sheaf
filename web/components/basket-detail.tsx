@@ -469,7 +469,8 @@ function Composition({
         >
           {shortAddress(basket.address, 6, 6)}
         </a>{" "}
-        · creator fee {percent(basket.creatorFeeBps / 100)} of shares created
+        · creator fee {percent(basket.creatorFeeBps / 100)} of shares created · protocol fee{" "}
+        {basket.protocolFeeBps > 0 ? percent(basket.protocolFeeBps / 100) : "none (created before Oct 9)"}
       </p>
     </section>
   );
@@ -677,12 +678,13 @@ function Command({
 
 type Mode = "create" | "redeem" | "cash" | "sell" | "plan";
 
-const TABS: { mode: Mode; label: string }[] = [
-  { mode: "cash", label: "Buy with dollars" },
-  { mode: "sell", label: "Sell for dollars" },
-  { mode: "plan", label: "Monthly plan" },
-  { mode: "create", label: "Create in kind" },
-  { mode: "redeem", label: "Redeem" },
+/** Short labels so five tabs sit on one line at any width; the full name is each tab's accessible name and tooltip. */
+const TABS: { mode: Mode; label: string; full: string }[] = [
+  { mode: "cash", label: "Buy", full: "Buy with dollars" },
+  { mode: "sell", label: "Sell", full: "Sell for dollars" },
+  { mode: "plan", label: "Monthly", full: "Monthly plan" },
+  { mode: "create", label: "In kind", full: "Create in kind" },
+  { mode: "redeem", label: "Redeem", full: "Redeem for the stocks" },
 ];
 
 function TradePanel({
@@ -795,12 +797,14 @@ function TradePanel({
               type="button"
               role="tab"
               aria-selected={mode === tab.mode}
+              aria-label={tab.full}
+              title={tab.full}
               onClick={() => {
                 setMode(tab.mode);
                 setSignature(null);
                 setError(null);
               }}
-              className={`rounded-[calc(var(--radius-control)-2px)] px-1.5 py-2 text-[13px] leading-tight transition-all ${
+              className={`whitespace-nowrap rounded-[calc(var(--radius-control)-2px)] px-1 py-2 text-[13px] leading-tight transition-all ${
                 mode === tab.mode ? "bg-surface text-ink shadow-[0_1px_3px_rgb(20_37_28/0.15)]" : "text-ink-3 hover:text-ink"
               }`}
             >

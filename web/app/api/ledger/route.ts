@@ -7,6 +7,7 @@ import { decodeBasket } from "@/lib/sheaf";
 import { historyEntries, syncLedgerHistory } from "@/lib/server-ledger-history";
 import { isTeamWallet } from "@/lib/team-wallets";
 import { filler2Address } from "@/lib/server-keys";
+import { readFillLog, realizedMargins } from "@/lib/server-fill-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,7 +31,14 @@ const TTL_MS = 30_000;
 const DEFAULT_LIMIT = 600;
 const MAX_LIMIT = 5_000;
 
-type Answer = Ledger & { complete: boolean; stats: LedgerStats; asOf: number };
+type Answer = Ledger & {
+  complete: boolean;
+  stats: LedgerStats & {
+    /** Median margin each of the site's fillers realized per fill, at its own prices, fees included (from its fill log). */
+    realizedMarginBps: ReturnType<typeof realizedMargins>;
+  };
+  asOf: number;
+};
 
 /** Answers per basket, least recently used out first. */
 const LRU_SIZE = 64;
@@ -110,10 +118,15 @@ export async function GET(request: Request) {
       total: view.total,
       truncated: view.entries.length > limit,
       complete: view.complete,
-      stats: ledgerStats(view.entries, isTeamWallet, {
-        house: faucetKeypair()?.publicKey.toBase58(),
-        second: filler2Address() ?? undefined,
-      }),
+      stats: {
+        ...ledgerStats(view.entries, isTeamWallet, {
+          house: faucetKeypair()?.publicKey.toBase58(),
+          second: filler2Address() ?? undefined,
+        }),
+        realizedMarginBps: realizedMargins(
+          (await readFillLog().catch(() => [])).filter((f) => !basket || view.entries.some((e) => e.order === f.order)),
+        ),
+      },
       asOf: Date.now(),
     };
     remember(cacheKey, answer);

@@ -3,7 +3,7 @@ import { WRITE_RPC } from "@/lib/config";
 import { faucetKeypair } from "@/lib/faucet-server";
 import { fetchBasketAt } from "@/lib/sheaf";
 import { buildLaunch, solUsd } from "@/lib/launch";
-import { findLaunch } from "@/lib/dbc";
+import { resolveLaunch } from "../../launch/anchor";
 import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint } from "@/lib/mirror";
 import preset from "@/lib/meteora-preset.json";
@@ -38,6 +38,9 @@ export async function POST(req: Request) {
     nav += (Number(c.unitsPerShare) / 10 ** c.decimals) * q.price * (q.multiplier ?? 1);
   }
   const connection = new Connection(WRITE_RPC, "confirmed");
+  const origin = new URL(req.url).origin;
+  // Pools the anchor check refused count as used slots, not as the launch.
+  const { rejected } = await resolveLaunch(connection, origin, basket);
   // Idempotent: buildLaunch refuses a basket that already has an official
   // launch, and skips any slot a squatter has taken.
   let tx;
@@ -47,6 +50,7 @@ export async function POST(req: Request) {
       creator: keeper.publicKey,
       basket: { address: basket.address, name: basket.name, symbol: basket.symbol },
       navSol: nav / sol,
+      rejected,
     });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Could not build the launch." }, { status: 409 });
@@ -55,7 +59,7 @@ export async function POST(req: Request) {
   tx.partialSign(keeper);
   const sig = await connection.sendRawTransaction(tx.serialize());
   await connection.confirmTransaction(sig, "confirmed");
-  const { launch } = await findLaunch(connection, { ...basket, creator: keeper.publicKey.toBase58() });
+  const { launch, anchor } = await resolveLaunch(connection, origin, basket);
   return Response.json({
     basket: basket.address,
     navUsd: nav,
@@ -65,5 +69,6 @@ export async function POST(req: Request) {
     pubkey: new PublicKey(keeper.publicKey).toBase58(),
     pool: launch?.info.pool ?? null,
     slot: launch?.info.slot ?? null,
+    anchor,
   });
 }

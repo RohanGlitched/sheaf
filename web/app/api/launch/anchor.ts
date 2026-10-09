@@ -1,5 +1,13 @@
 import type { Connection } from "@solana/web3.js";
-import type { DbcState } from "@/lib/dbc";
+import {
+  pickLaunch,
+  readDbcState,
+  scanLaunch,
+  type DbcPoolInfo,
+  type DbcState,
+  type FoundLaunch,
+  type LaunchBasket,
+} from "@/lib/dbc";
 import { LAUNCH_METADATA_SITE, OPEN_MULTIPLE } from "@/lib/launch";
 
 /**
@@ -14,12 +22,14 @@ import { LAUNCH_METADATA_SITE, OPEN_MULTIPLE } from "@/lib/launch";
  *   - the basket's dollar NAV is /api/nav/<basket>?at=<open time>: the
  *     recipe at the last US close at or before the open.
  * The two dollar figures are compared. Live token prices at open and the last
- * close differ by a few percent, so the tolerance is 20%: wide enough for that
- * drift, narrow enough that a curve opened at 2x or 0.1x NAV fails. Baskets
+ * close differ by a few percent (every launch measured so far is within 2.4%),
+ * so the tolerance is 10%: room for that drift, narrow enough that a curve
+ * opened at 0.6x NAV or more, or 0.45x or less, fails. The card prints the
+ * measured deviation, not just "verified". Baskets
  * with a pre-IPO component have no listed close, so their anchor cannot be
  * checked and says so.
  */
-export const ANCHOR_TOLERANCE = 0.2;
+export const ANCHOR_TOLERANCE = 0.1;
 
 export type Anchor = {
   status: "verified" | "mismatch" | "unverifiable";
@@ -149,4 +159,48 @@ async function check(params: {
   if (cache.size >= MAX_CACHE) cache.clear();
   cache.set(pool, { at: Date.now(), value });
   return value;
+}
+
+export type ResolvedLaunch = {
+  launch: FoundLaunch | null;
+  unofficial: FoundLaunch[];
+  free: DbcPoolInfo | null;
+  /** The chosen launch's state and anchor. */
+  state: DbcState | null;
+  anchor: Anchor | null;
+  /** The anchor of every pool on the published terms, by pool; and the pools it refused, with the reason. */
+  anchors: Map<string, Anchor>;
+  rejected: Map<string, string>;
+};
+
+/**
+ * A basket's launch, decided on the server: every pool on the published terms
+ * is anchor-checked in slot order, a pool whose curve did not open at half the
+ * basket's NAV is unofficial with that reason, and the first one that is not
+ * rejected is the launch. A later valid pool is therefore never dropped, and a
+ * mismatched slot never blocks a correct launch.
+ */
+export async function resolveLaunch(connection: Connection, origin: string, basket: LaunchBasket): Promise<ResolvedLaunch> {
+  const scan = await scanLaunch(connection, basket);
+  const anchors = new Map<string, Anchor>();
+  const states = new Map<string, DbcState>();
+  const rejected = new Map<string, string>();
+  for (const c of scan.candidates) {
+    const state = await readDbcState(connection, c.info, basket.creator).catch(() => null);
+    if (!state) continue;
+    states.set(c.info.pool, state);
+    const anchor = await anchorFor({ connection, origin, basket: basket.address, pool: c.info.pool, state }).catch(() => null);
+    if (!anchor) continue;
+    anchors.set(c.info.pool, anchor);
+    if (anchor.status === "mismatch") rejected.set(c.info.pool, anchor.reason ?? "It did not open at half the basket's NAV.");
+  }
+  const picked = pickLaunch(scan, rejected);
+  const pool = picked.launch?.info.pool;
+  return {
+    ...picked,
+    state: pool ? (states.get(pool) ?? null) : null,
+    anchor: pool ? (anchors.get(pool) ?? null) : null,
+    anchors,
+    rejected,
+  };
 }

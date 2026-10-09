@@ -12,6 +12,7 @@ import {
   LiveNumbers,
   MarketFacts,
   MeasuredRoute,
+  NearbyProducts,
   OrderSplit,
   PROTOCOL_FEE_BPS,
   PROTOCOL_FEE_SINCE,
@@ -78,7 +79,7 @@ export default function BusinessPage() {
         <div className="max-w-[62ch]">
           <h1 className="display text-hero leading-[0.95] text-ink">How Sheaf makes money</h1>
           <p className="mt-6 text-lg leading-[1.65] text-ink-2">
-            Sheaf is paid when a share is made, and never while it is held or when it is redeemed. Every fee is written into a
+            Sheaf is paid when a share is made, and never while it is held, redeemed or sold. Every fee is written into a
             basket when the basket is created, so the rate a buyer sees is the rate that basket will charge for as long as it
             exists.
           </p>
@@ -89,7 +90,8 @@ export default function BusinessPage() {
           </p>
           <p className="mt-6 text-sm leading-relaxed text-ink-3">
             Everything runs on devnet and testnets with test money today. The protocol fee is live on devnet for Solana baskets
-            created since {PROTOCOL_FEE_SINCE}. The rates are real; the revenue is not yet.
+            created since {PROTOCOL_FEE_SINCE} and on the EVM v2 desk&rsquo;s dollar fills, and the treasury has made its first
+            claim, from our own test flow. The rates are real; the revenue is not yet.
           </p>
         </div>
         <div className="mt-12">
@@ -119,7 +121,7 @@ export default function BusinessPage() {
             <>
               <p>
                 Four lines earn money. Two are paid where backed shares are made: the protocol fee to Sheaf and the creator
-                fee to whoever created the basket. One is paid to whoever delivers the stocks for a dollar order. The last
+                fee to whoever created the basket. One is paid to whoever fills a dollar order, buying or selling. The last
                 comes from launch markets, which sit beside the backed share rather than inside it.
               </p>
               <p>
@@ -161,8 +163,9 @@ export default function BusinessPage() {
             <>
               <p>
                 A Sheaf basket costs something each time shares are made, whether by one order or by every run of a plan, and
-                nothing a year. Against smallcase that makes small monthly plans cheaper and large ones dearer. It is cheaper
-                than a thematic ETF&rsquo;s yearly fee, and dearer than a broad index ETF or five tokens bought by hand.
+                nothing a year. Leaving costs no protocol fee: redeem for the stocks, or sell for dollars and pay only the
+                filler. Against smallcase that makes small monthly plans cheaper and large ones dearer. It is cheaper than a
+                thematic ETF&rsquo;s yearly fee, and dearer than a broad index ETF or five tokens bought by hand.
               </p>
               <p>What the fee buys is one token, backed by the stocks and redeemable for them, held in your own wallet.</p>
             </>
@@ -200,9 +203,9 @@ export default function BusinessPage() {
           lede={
             <p>
               On $1M of shares made, Sheaf keeps between $1,000 and about $4,500, depending on whether the buyer paid in
-              dollars, whether Sheaf&rsquo;s filler filled it, and whether the basket is one Sheaf created. Redemptions pay
-              nothing, so all of it comes from new shares: money coming in, and holders who leave and come back. It is a flow
-              business, so we measure it by shares created a month, not by a forecast.
+              dollars, whether Sheaf&rsquo;s filler filled it, and whether the basket is one Sheaf created. On $1M sold back
+              through its filler it keeps about $1,000 more. Redeeming pays nothing, so almost all of it comes from flow: money
+              coming in, and holders who leave. We measure it by shares created a month, not by a forecast.
             </p>
           }
         >
@@ -213,7 +216,7 @@ export default function BusinessPage() {
             <a href={SOURCES.symmetry.href} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
               Symmetry, fees
             </a>
-            ). Sheaf charges nothing on the way out.
+            ). Sheaf charges no protocol fee on the way out; a seller pays only the filler.
           </p>
         </Section>
 
@@ -236,6 +239,10 @@ export default function BusinessPage() {
           <div className="mt-6">
             <CreatorSide />
           </div>
+          <h3 className="display mt-16 text-2xl text-ink">Baskets that already exist</h3>
+          <div className="mt-6">
+            <NearbyProducts />
+          </div>
         </Section>
 
         <Section
@@ -245,7 +252,7 @@ export default function BusinessPage() {
           lede={
             <p>
               These come from the program&rsquo;s own events, its basket accounts and the launch pools, not from a
-              spreadsheet. Every wallet the team uses is listed in the code and left out of any figure about other people.
+              spreadsheet. Every wallet the team uses is listed in the code, and the figures below say whose activity they are.
             </p>
           }
         >

@@ -42,6 +42,9 @@ export function BrowserWalletMenu({ onDone }: { onDone: () => void }) {
           Whoever has it controls this wallet. Paste it only into a wallet app you are moving it to, such as
           Phantom&rsquo;s &ldquo;Import private key&rdquo;.
         </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-loss">
+          Never send real funds to this address: this site signs for it without asking.
+        </p>
         <div className="mt-3 flex gap-2">
           <button
             type="button"

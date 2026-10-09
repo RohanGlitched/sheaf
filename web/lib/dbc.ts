@@ -526,21 +526,16 @@ export function checkLaunch(
 
 export type FoundLaunch = { info: DbcPoolInfo; check: LaunchCheck };
 
-/**
- * A basket's launch, read from every slot in one batched call: the first
- * official pool, any unofficial ones found on the way, and the first slot
- * still free for the creator to open a launch in.
- */
-export async function findLaunch(
-  connection: Connection,
-  basket: LaunchBasket,
-): Promise<{ launch: FoundLaunch | null; unofficial: FoundLaunch[]; free: DbcPoolInfo | null }> {
+/** Every slot of a basket, read in one batched call: pools on the published terms (in slot order), pools that are not, and the first free slot. */
+export type LaunchScan = { candidates: FoundLaunch[]; failed: FoundLaunch[]; free: DbcPoolInfo | null };
+
+export async function scanLaunch(connection: Connection, basket: LaunchBasket): Promise<LaunchScan> {
   const slots = await launchSlots(basket);
   const accounts = await connection.getMultipleAccountsInfo(
     slots.flatMap((s) => [new PublicKey(s.pool), new PublicKey(s.config), new PublicKey(s.baseMint)]),
   );
-  let launch: FoundLaunch | null = null;
-  const unofficial: FoundLaunch[] = [];
+  const candidates: FoundLaunch[] = [];
+  const failed: FoundLaunch[] = [];
   let free: DbcPoolInfo | null = null;
   slots.forEach((info, i) => {
     const [pool, config, mint] = accounts.slice(i * 3, i * 3 + 3);
@@ -551,10 +546,48 @@ export async function findLaunch(
     // Something sits at the config or mint key but there is no pool: a bricked slot.
     if (!pool) return;
     const check = checkLaunch(info, pool, config, basket.creator, mint);
-    if (check.official) launch ??= { info, check };
-    else unofficial.push({ info, check });
+    (check.official ? candidates : failed).push({ info, check });
   });
-  return { launch, unofficial, free };
+  return { candidates, failed, free };
+}
+
+/**
+ * The basket's launch out of a scan: the first pool on the published terms
+ * that is not in `rejected` (pool -> reason; the server's anchor check fills
+ * it with pools that did not open at half the basket's NAV). Rejected pools,
+ * and any later pool on the published terms, are listed as unofficial, so
+ * nothing found at the basket's addresses disappears, and a rejected slot
+ * never stops a correct launch from being chosen or opened.
+ */
+export function pickLaunch(
+  scan: LaunchScan,
+  rejected: ReadonlyMap<string, string> = new Map(),
+): { launch: FoundLaunch | null; unofficial: FoundLaunch[]; free: DbcPoolInfo | null } {
+  let launch: FoundLaunch | null = null;
+  const unofficial = [...scan.failed];
+  const no = (info: DbcPoolInfo, reason: string): FoundLaunch => ({ info, check: { official: false, reason, preset: null } });
+  for (const c of scan.candidates) {
+    const why = rejected.get(c.info.pool);
+    if (why) unofficial.push(no(c.info, why));
+    else if (!launch) launch = c;
+    else unofficial.push(no(c.info, `A later pool on the same terms: this basket's launch is the one in slot ${launch.info.slot ?? 0}.`));
+  }
+  unofficial.sort((x, y) => (x.info.slot ?? 0) - (y.info.slot ?? 0));
+  return { launch, unofficial, free: scan.free };
+}
+
+/**
+ * A basket's launch, read from every slot in one batched call: the first
+ * official pool, any unofficial ones found on the way, and the first slot
+ * still free for the creator to open a launch in. Pass `rejected` to skip
+ * pools the anchor check refused.
+ */
+export async function findLaunch(
+  connection: Connection,
+  basket: LaunchBasket,
+  rejected?: ReadonlyMap<string, string>,
+): Promise<{ launch: FoundLaunch | null; unofficial: FoundLaunch[]; free: DbcPoolInfo | null }> {
+  return pickLaunch(await scanLaunch(connection, basket), rejected);
 }
 
 /** Which of these baskets have an official open launch, in batched reads. Squatted pools are ignored. */

@@ -1,14 +1,18 @@
-import { AlreadyListed, addToWaitlist, waitlistConfigured, waitlistCounts } from "@/lib/waitlist-store";
+import { AlreadyAnsweredToday, AlreadyListed, addToWaitlist, waitlistConfigured, waitlistCounts } from "@/lib/waitlist-store";
 import { cleanContact, isBand, isHome, isRoute } from "@/lib/waitlist-options";
 import { originAllowed } from "@/lib/server-origin";
+import { cleanRef } from "@/lib/invite-ref";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/waitlist: counts only: { open, count, withContact, byHome }. Never an entry.
- * POST /api/waitlist: { band, route, home, contact? } adds one answer. Only from this
+ *   Every number counts only answers that left a contact, each contact once
+ *   (`count` === `withContact`). Answers without a contact are kept, never counted.
+ * POST /api/waitlist: { band, route, home, contact?, ref? } adds one answer. Only from this
  * site's own pages (exact origins, lib/server-origin.ts; a missing Origin is refused),
- * and one answer per contact.
+ * one answer per contact, and one answer without a contact per address per day.
+ * `ref` is the invite code the person arrived with (lib/invite-ref.ts), kept with the answer.
  *
  * Until the bucket and the federation are configured, GET answers { open: false }
  * and POST answers 503 "Waitlist is not open yet."; the page hides the count.
@@ -84,10 +88,13 @@ export async function POST(request: Request) {
 
   try {
     const oidc = oidcOf(request);
-    await addToWaitlist({ band: body.band, route: body.route, home: body.home, contact, day: new Date().toISOString().slice(0, 10) }, oidc);
+    const ref = cleanRef(body.ref);
+    await addToWaitlist({ band: body.band, route: body.route, home: body.home, contact, day: new Date().toISOString().slice(0, 10), ref }, oidc, { ip: ipOf(request) });
     const counts = await waitlistCounts(oidc).catch(() => null);
     return Response.json({ ok: true, counts }, { headers: NO_STORE });
   } catch (err) {
+    if (err instanceof AlreadyAnsweredToday)
+      return Response.json({ error: "This connection already answered today without a contact. Add an email or Telegram handle, or come back tomorrow." }, { status: 409, headers: NO_STORE });
     if (err instanceof AlreadyListed) return Response.json({ error: "That contact is already on the list. One answer each is enough." }, { status: 409, headers: NO_STORE });
     return Response.json({ error: "We couldn't save that just now. Try again in a minute." }, { status: 502, headers: NO_STORE });
   }

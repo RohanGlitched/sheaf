@@ -1,12 +1,12 @@
 import { Connection } from "@solana/web3.js";
 import { WRITE_CLUSTER, WRITE_RPC } from "@/lib/config";
-import { DBC_PROGRAM, PRESET_NAMES, TREASURY, findLaunch, launchFor, preIpoCompanies, readDbcState } from "@/lib/dbc";
+import { DBC_PROGRAM, PRESET_NAMES, TREASURY, launchFor, preIpoCompanies } from "@/lib/dbc";
 import { isTestBasket } from "@/lib/hidden";
 import { fetchBaskets } from "@/lib/sheaf";
 import { teamTag } from "@/lib/team-wallets";
 import preset from "@/lib/meteora-preset.json";
 import { TRADE_WINDOW, readTrades } from "./read-trades";
-import { anchorFor } from "../launch/anchor";
+import { resolveLaunch } from "../launch/anchor";
 
 /**
  * Every basket's launch market, read straight from the pool and config
@@ -41,15 +41,9 @@ export async function GET(req: Request) {
   const outsideWallets = new Set<string>();
   const all = await Promise.all(
     baskets.map(async (basket) => {
-      const { launch, unofficial, free } = await findLaunch(connection, basket);
+      // Every pool on the published terms is anchor-checked in slot order; the first that passes is the launch.
+      const { launch, unofficial, free, state, anchor, anchors } = await resolveLaunch(connection, url.origin, basket);
       const info = launch?.info ?? free ?? (await launchFor(basket));
-      const state = launch ? await readDbcState(connection, launch.info, basket.creator) : null;
-      const anchor =
-        launch && state
-          ? await anchorFor({ connection, origin: url.origin, basket: basket.address, pool: launch.info.pool, state }).catch(
-              () => null,
-            )
-          : null;
       const official = !!state?.official && anchor?.status !== "mismatch";
       const preIpo = preIpoCompanies(basket);
       const creatorTeam = teamTag(basket.creator);
@@ -111,7 +105,12 @@ export async function GET(req: Request) {
           teamTrades: trades.teamTrades,
         }),
         ...(unofficial.length > 0 && {
-          unofficial: unofficial.map((u) => ({ pool: u.info.pool, slot: u.info.slot ?? 0, reason: u.check.reason })),
+          unofficial: unofficial.map((u) => ({
+            pool: u.info.pool,
+            slot: u.info.slot ?? 0,
+            reason: u.check.reason,
+            ...(anchors.has(u.info.pool) && { anchor: anchors.get(u.info.pool) }),
+          })),
         }),
       };
     }),
@@ -145,7 +144,10 @@ export async function GET(req: Request) {
       // Kept for older readers: launches still open on their curve (graduated ones are counted in `graduated`).
       openLaunches: opened.length - graduated.length,
       graduated: graduated.length,
+      // SOL raised on every curve ever, split into what sits on open curves now and what graduated launches moved into DAMM v2.
       solRaisedOnCurves: opened.reduce((n, l) => n + (("raisedSol" in l && (l.graduated ? l.thresholdSol : l.raisedSol)) || 0), 0),
+      solOnCurvesNow: opened.reduce((n, l) => n + (("raisedSol" in l && !l.graduated && l.raisedSol) || 0), 0),
+      solRaisedByGraduated: opened.reduce((n, l) => n + (("thresholdSol" in l && l.graduated && l.thresholdSol) || 0), 0),
       // Launches whose basket creator is outside the Sheaf team. House and QA launches never count.
       outsideLaunches: opened.filter((l) => l.basket.creatorTeam == null).length,
       // Distinct wallets outside the team that swapped on any launch, over each market's last `tradeWindow` signatures.

@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 /** The list is rendered on the server, so the names are there without JavaScript; the page refreshes it after that. */
 async function initial(): Promise<VoicesAnswer> {
-  const closed: VoicesAnswer = { open: false, voices: [], ours: 0, refs: [], asOf: Date.now() };
+  const closed: VoicesAnswer = { open: false, voices: [], waiting: 0, ours: 0, refs: [], asOf: Date.now() };
   if (!voicesConfigured()) return closed;
   try {
     oidcFrom(await headers());

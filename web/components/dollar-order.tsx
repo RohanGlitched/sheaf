@@ -9,7 +9,7 @@ import type { Basket } from "@/lib/sheaf";
 import { placeOrderIx, cancelOrderIx, freshNonce, requiredShares, decodeOrder, netSharesFor, type Order } from "@/lib/desk";
 import { eventsInLogs } from "@/lib/ledger";
 import { confirmSignature } from "@/lib/confirm";
-import { explainError, signFresh } from "@/lib/tx";
+import { chainClockOffset, chainNow, explainError, signFresh } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
 import { money, timeAgo } from "@/lib/format";
@@ -18,6 +18,12 @@ import { ConnectButton } from "./connect-button";
 const AUCTION_SECS = 90;
 /** Seconds between signing and the auction's start, so confirmation never eats into it. The program allows a future start. */
 export const START_BUFFER_SECS = 8;
+
+/** Wake the house keeper and the second filler. Fire and forget: both routes throttle themselves. */
+export function kickFillers() {
+  fetch("/api/keeper", { method: "POST", keepalive: true }).catch(() => {});
+  fetch("/api/filler2", { method: "POST", keepalive: true }).catch(() => {});
+}
 const BAND_BPS = 200;
 /**
  * The house filler takes orders from $5 (keeper-server's fill filter). A smaller
@@ -134,8 +140,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     const tick = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 500);
     let live = true;
     const watch = async () => {
-      // Ask the house keeper to look; any filler may beat it.
-      fetch("/api/keeper", { method: "POST" }).catch(() => {});
+      // Ask the house keeper and the second filler to look; any filler may beat them.
+      kickFillers();
       for (let i = 0; i < 200 && live; i++) {
         await new Promise((r) => setTimeout(r, 2500));
         const key = new PublicKey(order.address);
@@ -152,7 +158,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
           setStage({ kind: "expired", order, signature: stage.signature });
           return;
         }
-        if (i % 2 === 1) fetch("/api/keeper", { method: "POST" }).catch(() => {});
+        if (i % 2 === 1) kickFillers();
       }
     };
     watch();
@@ -221,6 +227,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     try {
       // Built right before the wallet opens, and rebuilt if the signature comes back stale: the auction's clock and
       // price start when the order can actually land, not when the quote was first shown.
+      // The auction's clock is the chain's, not this device's: a slow device clock could start it too far back.
+      const offset = await chainClockOffset(connection);
       const { order, signature } = await signFresh({
         connection,
         payer: publicKey,
@@ -231,7 +239,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
           const nav = navRef.current ?? navPerShare!;
           const fresh = quote(amount / nav);
           // A few seconds' head start so confirmation never eats into the auction; the program allows a future start.
-          const startTs = Math.floor(Date.now() / 1000) + START_BUFFER_SECS;
+          const startTs = chainNow(offset) + START_BUFFER_SECS;
           const { order, ix } = placeOrderIx({
             buyer: publicKey,
             basket: new PublicKey(basket.address),
@@ -258,6 +266,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
       });
       setNotice(null);
       await confirmSignature(connection, signature);
+      // The order is on chain: wake both fillers now rather than waiting for their schedules.
+      kickFillers();
       const info = await connection.getAccountInfo(order);
       const decoded = info ? decodeOrder(order, new Uint8Array(info.data)) : null;
       if (!decoded) throw new Error("The order was placed but could not be read back.");
@@ -369,7 +379,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
           {blocked && (
             <p className="mt-4 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
               On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
-              {((routeBps ?? 0) / 100).toFixed(2)}% one way. Create shares in kind instead, from the Create in kind tab.
+              {((routeBps ?? 0) / 100).toFixed(2)}% one way. Create shares in kind instead, from the In kind tab.
             </p>
           )}
 

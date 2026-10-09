@@ -15,7 +15,7 @@ import { fromCashRaw } from "@/lib/use-cash";
 import { count, money, shortAddress, timeAgo } from "@/lib/format";
 import { useMarket } from "./market-provider";
 import { PlanSheaf } from "./plan-sheaf";
-import { planTerms } from "./plan-form";
+import { planTerms, hardBpsForPeriod } from "./plan-form";
 import { ConnectButton } from "./connect-button";
 import { KeeperPulse } from "./keeper-pulse";
 import { teamTag, teamWallet } from "@/lib/team-wallets";
@@ -39,6 +39,13 @@ const REFUND_GRACE_SECS = 10 * 60;
 /** True for a plan one of the team's own wallets opened; those never count toward the outside figures. */
 const isTeamPlan = (owner: string) => teamWallet(owner) != null && teamTag(owner) != null;
 const isHouse = (address: string) => teamWallet(address)?.role === "house";
+
+/** The small tag on a team plan: the house's own demo, or one of our test wallets. Null for anyone else's. */
+function teamPill(owner: string): string | null {
+  if (!isTeamPlan(owner)) return null;
+  const role = teamWallet(owner)?.role;
+  return role === "house" ? "Sheaf demo" : role === "test" ? "our test" : "Sheaf";
+}
 
 /** A plan whose reference sits further than this from today's fair rate is offered a re-center. */
 const RECENTER_DRIFT = 0.02;
@@ -159,6 +166,14 @@ function PlanCard({
             <Link href={`/basket/${plan.basket}`} className="display text-xl text-ink hover:underline">
               {basketName}
             </Link>
+            {teamPill(plan.owner) && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] leading-none ${isHouse(plan.owner) ? "bg-bind-wash text-bind" : "bg-sunk text-ink-3"}`}
+                title={isHouse(plan.owner) ? "The house's own demo plan, run by the keeper on its schedule" : "Opened by one of the team's test wallets"}
+              >
+                {teamPill(plan.owner)}
+              </span>
+            )}
             {plan.periodSecs < 86400 && (
               <span
                 className="rounded-full border border-line px-2 py-0.5 text-[11px] leading-none text-ink-3"
@@ -186,9 +201,16 @@ function PlanCard({
           {plan.fills > 0 && plan.lastFillTs > 0 && ` · last filled ${timeAgo(plan.lastFillTs)}`}
         </p>
         {!plan.legacy && plan.trailStepBps > 0 && plan.runsLeft > 0 && (
-          <p className="mt-1 text-xs text-ink-3">
-            Follows the market: each fill re-centers its bounds at ±{(plan.trailStepBps / 100).toFixed(0)}% around the price it filled at.
+          <p className="tnum mt-1 text-xs text-ink-3">
+            Follows the market: each fill moves its bounds up to ±{(plan.trailStepBps / 100).toFixed(0)}% around the price it filled at
+            {plan.hardMinRef != null && plan.hardMaxRef != null && plan.hardMinRef > 0n && plan.hardMaxRef > 0n
+              ? `, never past its owner's limits of ${money(1e9 / Number(plan.hardMaxRef))} to ${money(1e9 / Number(plan.hardMinRef))} a share`
+              : ""}
+            .
           </p>
+        )}
+        {!plan.legacy && plan.trailStepBps === 0 && plan.runsLeft > 0 && payAtMost != null && (
+          <p className="tnum mt-1 text-xs text-ink-3">Fixed bounds: it never pays more than {money(payAtMost)} a share.</p>
         )}
         {pending && (
           <p className="mt-2 text-sm text-ink-2">
@@ -438,7 +460,9 @@ export function PlansBoard() {
   }
   const recenter = (p: Plan, fair: number) => {
     const b = byBasket.get(p.basket);
-    const terms = planTerms(fair, b?.creatorFeeBps ?? 0, b?.protocolFeeBps ?? 0);
+    // A plan with hard limits gets fresh ones around today's price, as wide as the form gives its cadence;
+    // an older plan keeps fixed bounds.
+    const terms = planTerms(fair, b?.creatorFeeBps ?? 0, b?.protocolFeeBps ?? 0, p.bandBps, p.hardMinRef != null ? hardBpsForPeriod(p.periodSecs) : undefined);
     return act(
       p,
       () =>
@@ -482,19 +506,22 @@ export function PlansBoard() {
     );
   };
 
-  // The outside share of a figure appears once there is one; until then the total stands alone.
-  const fromOutside = (n: number, shown: string) => (n > 0 ? `${shown} from wallets outside the team` : null);
+  // Once anyone outside the team has a plan, their figures lead and ours follow; until then the totals stand
+  // alone, with one quiet line under the strip saying whose activity it is.
+  const hasOutside = outside.running + outside.fills > 0;
+  const lead = (o: number, x: number, show: (n: number) => string) =>
+    hasOutside ? { value: show(x), note: `from wallets outside the team, plus ${show(o)} ours` } : { value: show(o + x), note: null };
   const stats = [
-    { label: "Plans running", value: count(ours.running + outside.running), note: fromOutside(outside.running, count(outside.running)) },
-    { label: "Runs filled", value: count(ours.fills + outside.fills), note: fromOutside(outside.fills, count(outside.fills)) },
-    { label: "Dollars put in by plans", value: money(ours.invested + outside.invested), note: fromOutside(outside.invested, money(outside.invested)) },
+    { label: "Plans running", ...lead(ours.running, outside.running, count) },
+    { label: "Runs filled", ...lead(ours.fills, outside.fills, count) },
+    { label: "Dollars put in by plans", ...lead(ours.invested, outside.invested, money) },
     { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
   ];
 
   return (
     <div>
       <KeeperPulse which="solana" className="mb-4" />
-      <dl className="mb-14 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4">
+      <dl className={`${plans != null && !hasOutside ? "mb-3" : "mb-14"} grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4`}>
         {stats.map((s) => (
           <div key={s.label} className="bg-surface px-4 py-4 sm:px-5">
             <dt className="text-xs text-ink-3">{s.label}</dt>
@@ -503,6 +530,7 @@ export function PlansBoard() {
           </div>
         ))}
       </dl>
+      {plans != null && !hasOutside && <p className="mb-14 text-xs text-ink-3">Activity so far is Sheaf&apos;s own testing.</p>}
       <div className="grid gap-14 lg:grid-cols-2">
         <section className="min-w-0">
           <h2 className="display text-title text-ink">Your plans</h2>
@@ -518,7 +546,7 @@ export function PlansBoard() {
               <div className="mt-6 rounded-[var(--radius-panel)] border border-dashed border-line-strong p-8">
                 <p className="text-ink">No plans yet.</p>
                 <p className="mt-2 max-w-[44ch] text-sm leading-relaxed text-ink-2">
-                  Open any basket and choose the Monthly plan tab. Start with &ldquo;every 5 minutes&rdquo; to watch a few runs land today.
+                  Open any basket and choose the Monthly tab. Start with &ldquo;every 5 minutes&rdquo; to watch a few runs land today.
                 </p>
                 <Link href="/explore" className="mt-5 inline-flex rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white hover:bg-bind-deep">
                   Choose a basket
@@ -554,7 +582,7 @@ export function PlansBoard() {
               <Link href="/explore" className="text-bind underline decoration-bind/40 underline-offset-4">
                 choose a basket
               </Link>
-              , then the Monthly plan tab.
+              , then the Monthly tab.
             </p>
           )}
           {plans != null && <FoldedPlans plans={othersLegacy} mine={false} nameOf={nameOf} onClose={close} busy={busy} notes={note} />}

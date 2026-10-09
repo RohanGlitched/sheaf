@@ -12,9 +12,10 @@ import {
   RETIRED_METADATA_MINTS,
   dammV2PoolAddress,
   preIpoCompanies,
-  findLaunch,
   launchFor,
+  pickLaunch,
   readDbcState,
+  scanLaunch,
   type DbcPoolInfo,
   type DbcState,
   type FoundLaunch,
@@ -119,31 +120,29 @@ function useLaunch(basket: LaunchBasketProps) {
   const [unofficial, setUnofficial] = useState<FoundLaunch[]>([]);
   const [readError, setReadError] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [rejected, setRejected] = useState<ReadonlyMap<string, string>>(new Map());
   const { address, name, symbol, creator } = basket;
 
   const load = useCallback(async () => {
     try {
-      const found = await findLaunch(connection, { address, name, symbol, creator });
-      // The anchor check needs prices from outside the chain, so the server does it.
-      const checked: Anchor | null = found.launch
-        ? await fetch(`/api/launch/${address}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => d?.provenance?.anchor ?? null)
-            .catch(() => null)
-        : null;
-      // A curve that did not open at half the basket's NAV is not this basket's launch.
-      if (found.launch && checked?.status === "mismatch") {
-        found.unofficial.unshift({
-          info: found.launch.info,
-          check: { official: false, reason: checked.reason ?? "It did not open at half the basket's NAV.", preset: null },
-        });
-        found.launch = null;
-      }
+      const scan = await scanLaunch(connection, { address, name, symbol, creator });
+      // The anchor check needs prices from outside the chain, so the server does it, over
+      // every pool on the published terms in slot order: it names the launch and the pools it refused.
+      const provenance: { pool: string | null; anchor: Anchor | null; rejected?: { pool: string; reason: string }[] } | null =
+        scan.candidates.length > 0
+          ? await fetch(`/api/launch/${address}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => d?.provenance ?? null)
+              .catch(() => null)
+          : null;
+      const refused = new Map((provenance?.rejected ?? []).map((r) => [r.pool, r.reason] as const));
+      const found = pickLaunch(scan, refused);
       // The official launch if there is one, else where the creator would open it.
       const next = found.launch?.info ?? found.free ?? (await launchFor({ address, name, symbol }));
       setInfo(next);
       setUnofficial(found.unofficial);
-      setAnchor(checked);
+      setRejected(refused);
+      setAnchor(found.launch && provenance?.pool === found.launch.info.pool ? provenance.anchor : null);
       setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
     } catch (err) {
@@ -156,7 +155,7 @@ function useLaunch(basket: LaunchBasketProps) {
     void Promise.resolve().then(load);
   }, [load]);
 
-  return { info, state, unofficial, readError, anchor, reload: load };
+  return { info, state, unofficial, readError, anchor, rejected, reload: load };
 }
 
 /** "20 × NAV", read off a pool's own open and graduation caps, so old and new curves both say the truth. */
@@ -315,7 +314,7 @@ export function BasketLaunch({
   return (
     <section id="launch" className="mt-12 scroll-mt-24">
       {squatted}
-      <OpenLaunch basket={basket} info={launch.info} navUsd={navUsd} onOpened={launch.reload} />
+      <OpenLaunch basket={basket} info={launch.info} navUsd={navUsd} rejected={launch.rejected} onOpened={launch.reload} />
     </section>
   );
 }
@@ -325,11 +324,14 @@ function OpenLaunch({
   info,
   navUsd,
   onOpened,
+  rejected,
 }: {
   basket: { address: string; name: string; symbol: string };
   info: DbcPoolInfo;
   navUsd: number | null;
   onOpened: () => Promise<void>;
+  /** Pools the anchor check refused: their slots count as used, not as the launch. */
+  rejected: ReadonlyMap<string, string>;
 }) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
@@ -356,7 +358,7 @@ function OpenLaunch({
     setError(null);
     try {
       const { buildLaunch } = await import("@/lib/launch");
-      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol });
+      const transaction = await buildLaunch({ connection, creator: publicKey, basket, navSol, rejected });
       const sig = await sendTransaction(transaction, connection);
       await confirmSignature(connection, sig);
       await onOpened();
@@ -483,6 +485,13 @@ type Trade = {
  * The launch's recent swaps, from `/api/launches/trades`. Only wallets outside
  * the team are counted as traders, and that count shows once it is above zero.
  */
+/** How a trade from one of Sheaf's own wallets is marked in the tape. */
+function teamLabel(t: Trade): string {
+  if (t.team === "house") return `Sheaf's own ${t.side}`;
+  if (t.team === "test wallet") return "our test";
+  return `Sheaf ${t.team}`;
+}
+
 function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null }) {
   const [data, setData] = useState<{ trades: Trade[]; traders: number } | null>(null);
   useEffect(() => {
@@ -507,7 +516,7 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
                 {shortAddress(t.wallet)} {t.side}
               </span>
               <span className="text-xs text-ink-3">{t.market === "damm" ? "on DAMM v2" : "on the curve"}</span>
-              {t.team === "house" && <span className="ml-1.5 text-xs text-ink-3">(Sheaf&rsquo;s own buy)</span>}
+              {t.team && <span className="ml-1.5 text-xs text-ink-3">({teamLabel(t)})</span>}
             </span>
             <a
               href={explorerTx(t.signature)}
@@ -520,11 +529,11 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
           </li>
         ))}
       </ul>
-      {data.traders > 0 && (
-        <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          {`${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it.`}
-        </p>
-      )}
+      <p className="mt-2 text-xs leading-relaxed text-ink-3">
+        {data.traders === 0
+          ? "Trades so far are Sheaf's own testing."
+          : `${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it. Rows marked as ours are not counted.`}
+      </p>
     </div>
   );
 }
@@ -780,7 +789,7 @@ export function LaunchCard({
           value={state ? `${quantity(state.openCap, 2)} SOL` : "—"}
           note={
             anchor?.status === "verified"
-              ? `½ × NAV, checked against the ${anchor.closeDay ?? "last"} close`
+              ? `½ × NAV: ${anchor.deviationPct != null ? `${anchor.deviationPct >= 0 ? "+" : ""}${anchor.deviationPct.toFixed(1)}% vs` : "checked against"} the ${anchor.closeDay ?? "last"} close`
               : anchor?.status === "unverifiable"
                 ? "½ × NAV, as set; not checkable"
                 : "½ × NAV"
@@ -914,8 +923,10 @@ export function LaunchCard({
         ) : (
           <div className="flex flex-wrap items-center gap-4">
             <ConnectButton />
-            <p className="text-xs text-ink-3">
-              Connect a wallet to buy or sell.
+            <p className="max-w-[46ch] text-xs leading-relaxed text-ink-3">
+              Connect a wallet to buy or sell. No wallet app? Connect, choose &ldquo;Use a wallet in
+              this browser&rdquo;, get test SOL, and a 0.01 SOL buy here takes a minute. It is devnet:
+              nothing costs real money.
             </p>
           </div>
         )}

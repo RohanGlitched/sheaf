@@ -86,8 +86,14 @@ export async function buildLaunch(params: {
   creator: PublicKey;
   basket: { address: string; name: string; symbol: string };
   navSol: number;
+  /**
+   * Pools the server's anchor check refused (pool -> reason). Their slots count
+   * as used, not as the basket's launch, so a creator whose earlier pool did
+   * not open at half of NAV can still open a correct one.
+   */
+  rejected?: ReadonlyMap<string, string>;
 }): Promise<Transaction> {
-  const { connection, creator, basket, navSol } = params;
+  const { connection, creator, basket, navSol, rejected } = params;
   const {
     DynamicBondingCurveClient,
     buildCurveWithCustomSqrtPrices,
@@ -107,7 +113,7 @@ export async function buildLaunch(params: {
   // A basket has one launch. If a squatter took an earlier derived slot, the
   // launch goes into the next free one; readers check every slot and only
   // count a pool its basket's creator opened.
-  const found = await findLaunch(connection, { ...basket, creator: creator.toBase58() });
+  const found = await findLaunch(connection, { ...basket, creator: creator.toBase58() }, rejected);
   if (found.launch) throw new Error("This basket's launch market is already open.");
   if (!found.free) throw new Error("Every launch address for this basket is taken. Nothing was sent.");
   const slot = found.free.slot ?? 0;

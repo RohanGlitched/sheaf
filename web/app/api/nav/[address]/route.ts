@@ -328,13 +328,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           readWith: `${navUrl}?at=<unix seconds>`,
           nextWindow: {
             opens: new Date(w.opens * 1000).toISOString(),
+            opensText: fmtClose(w.opens),
             fromClose: w.fromClose,
             toClose: w.toClose,
             from: fmtClose(w.fromClose),
             to: fmtClose(w.toClose),
             resolves: new Date(w.resolves * 1000).toISOString(),
+            resolvesText: fmtClose(w.resolves),
           },
-          rule: resolutionRule(basket.symbol, navUrl, w),
+          // The recipe's units are written into the rule, so it outlives the devnet account.
+          rule: resolutionRule(
+            basket.symbol,
+            navUrl,
+            w,
+            components.map((c) => ({ base: c.base ?? c.vaultMint, unitsPerShare: c.unitsPerShare, decimals: c.decimals })),
+          ),
         };
       })(),
       components: components.map(({ _perRaw, _perRawListed, _held, ...c }) => {

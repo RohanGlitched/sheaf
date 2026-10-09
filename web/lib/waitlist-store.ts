@@ -1,5 +1,5 @@
 import "server-only";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { HOMES, type Home, type MonthlyBand, type UsRoute, type WaitlistCounts } from "./waitlist-options";
 
 /**
@@ -20,9 +20,15 @@ import { HOMES, type Home, type MonthlyBand, type UsRoute, type WaitlistCounts }
  *   india/c/<hash>/<home>.json              an answer that left a contact. <hash> is a salted HMAC of the
  *                                           contact, so one contact can answer once; the contact itself is
  *                                           stored once, inside the object, and nowhere else.
- *   india/a/<home>/<day>-<ts>-<rand>.json   an answer without a contact.
- * Nothing about the person is kept beyond the answers and the day: no IP address,
- * no user agent, no wallet.
+ *   india/n/<day>-<iphash>/<home>.json      an answer without a contact. <iphash> is a salted HMAC of the
+ *                                           sender's address and the day, so one address answers without a
+ *                                           contact once a day; the address itself is never stored.
+ *   india/a/<home>/<day>-<ts>-<rand>.json   an answer without a contact, from before that rule (9 Oct).
+ *
+ * Public numbers count only answers that left a contact: a contact is de-duplicated, an
+ * answer without one is not a person anyone can reach, so it is kept but never headlined.
+ * Nothing about the person is kept beyond the answers, the day, the invite code they came
+ * with (if any) and those hashes: no IP address, no user agent, no wallet.
  */
 
 export type WaitlistEntry = {
@@ -33,6 +39,8 @@ export type WaitlistEntry = {
   contact: string;
   /** The day the answer arrived, YYYY-MM-DD (UTC). */
   day: string;
+  /** The invite code the person arrived with (lib/invite-ref.ts), or null. */
+  ref: string | null;
 };
 
 const PREFIX = "india/";
@@ -104,32 +112,32 @@ const asHome = (s: string | undefined): Home | null => (HOMES.some((h) => h.key 
 
 let counted: { c: WaitlistCounts; at: number } | null = null;
 
-/** How many answers the waitlist holds, how many left a contact, and where people live; read at most every 30 s per instance. */
+/** Answers that left a contact, and where those people live; read at most every 30 s per instance. Answers without a contact are not counted. */
 export async function waitlistCounts(oidc: string | null): Promise<WaitlistCounts> {
   if (counted && Date.now() - counted.at < COUNT_TTL_MS) return counted.c;
-  const all = await names(PREFIX, { authorization: `Bearer ${await accessToken(oidc)}` });
+  const all = await names(`${PREFIX}c/`, { authorization: `Bearer ${await accessToken(oidc)}` });
   const c: WaitlistCounts = { count: 0, withContact: 0, byHome: emptyByHome() };
   for (const name of all) {
     const parts = name.split("/");
+    if (parts[1] !== "c") continue;
     c.count++;
-    let home: Home | null = null;
-    if (parts[1] === "c") {
-      c.withContact++;
-      home = asHome(parts[3]?.replace(/\.json$/, ""));
-    } else if (parts[1] === "a") {
-      home = asHome(parts[2]);
-    }
+    c.withContact++;
+    const home = asHome(parts[3]?.replace(/\.json$/, ""));
     if (home) c.byHome[home]++;
   }
   counted = { c, at: Date.now() };
   return c;
 }
 
+/** Thrown when this address already answered today without a contact. */
+export class AlreadyAnsweredToday extends Error {}
+
 /**
  * Stores one answer as its own object. With a contact, the object is named by the contact's hash and
  * written with ifGenerationMatch=0 after checking the hash isn't already listed, so one contact answers once.
+ * Without one, it is named by a hash of the sender's address and the day, so one address answers once a day.
  */
-export async function addToWaitlist(entry: WaitlistEntry, oidc: string | null): Promise<void> {
+export async function addToWaitlist(entry: WaitlistEntry, oidc: string | null, sender: { ip: string }): Promise<void> {
   const auth = { authorization: `Bearer ${await accessToken(oidc)}` };
   let name: string;
   if (entry.contact) {
@@ -137,7 +145,9 @@ export async function addToWaitlist(entry: WaitlistEntry, oidc: string | null): 
     if ((await names(`${PREFIX}c/${hash}/`, auth, 1)).length > 0) throw new AlreadyListed();
     name = `${PREFIX}c/${hash}/${entry.home}.json`;
   } else {
-    name = `${PREFIX}a/${entry.home}/${entry.day}-${Date.now()}-${randomBytes(6).toString("hex")}.json`;
+    const slot = `${PREFIX}n/${entry.day}-${contactHash(`ip|${sender.ip}|${entry.day}`)}/`;
+    if ((await names(slot, auth, 1)).length > 0) throw new AlreadyAnsweredToday();
+    name = `${slot}${entry.home}.json`;
   }
   const q = new URLSearchParams({ uploadType: "media", name, ifGenerationMatch: "0" });
   const r = await fetch(`${UPLOAD}/${bucket()}/o?${q}`, {
@@ -146,13 +156,13 @@ export async function addToWaitlist(entry: WaitlistEntry, oidc: string | null): 
     body: JSON.stringify(entry),
     signal: AbortSignal.timeout(20_000),
   });
-  if (r.status === 412) throw new AlreadyListed();
+  if (r.status === 412) throw entry.contact ? new AlreadyListed() : new AlreadyAnsweredToday();
   if (!r.ok) throw new Error(`Waitlist write: HTTP ${r.status}`);
-  if (counted) {
+  if (counted && entry.contact) {
     const c = counted.c;
     counted = {
       at: counted.at,
-      c: { count: c.count + 1, withContact: c.withContact + (entry.contact ? 1 : 0), byHome: { ...c.byHome, [entry.home]: c.byHome[entry.home] + 1 } },
+      c: { count: c.count + 1, withContact: c.withContact + 1, byHome: { ...c.byHome, [entry.home]: c.byHome[entry.home] + 1 } },
     };
   }
 }

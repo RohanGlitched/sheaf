@@ -61,6 +61,12 @@ export function solamiCooling(): string | null {
   return Date.now() < coolUntil ? lastFailure : null;
 }
 
+/** A read made outside mainnetCall (a web3.js Connection) failed on Solami: cool down the same way. */
+export function reportSolamiFailure(message: string) {
+  lastFailure = message;
+  coolUntil = Date.now() + COOL_DOWN_MS;
+}
+
 export class RpcError extends Error {
   constructor(
     message: string,

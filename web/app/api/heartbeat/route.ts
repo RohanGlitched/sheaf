@@ -19,11 +19,13 @@ export const dynamic = "force-dynamic";
  *  - houseSol: the house key (mint authority, keeper, house filler).
  *  - faucetSol / filler2Sol: the faucet's and the second filler's own keys, when set.
  *  - deploySol: the program's upgrade authority, read from its program-data account.
- *  - low: true when the house is under 4 SOL or the upgrade authority under 1 SOL.
+ *  - low: true when the house is under 4 SOL, the faucet key under 1 SOL or the
+ *    upgrade authority under 1 SOL. The keeper workflow fails on it, as an alert.
  */
 
 const HOUSE_LOW_SOL = 4;
 const DEPLOY_LOW_SOL = 1;
+const FAUCET_LOW_SOL = 1;
 const CACHE_MS = 15_000;
 let cached: { at: number; body: Record<string, unknown> } | null = null;
 
@@ -63,6 +65,7 @@ export async function GET(request: Request) {
   const keeperAt = keeperBeat ?? (lastHouseTx ? lastHouseTx * 1000 : null);
   const houseLow = houseSol != null && houseSol < HOUSE_LOW_SOL;
   const deployLow = deploy != null && deploy.sol < DEPLOY_LOW_SOL;
+  const faucetLow = faucetSol != null && faucetSol < FAUCET_LOW_SOL;
 
   const body = {
     keeperLastRunAt: iso(keeperAt),
@@ -74,12 +77,13 @@ export async function GET(request: Request) {
     houseLow,
     faucetSol,
     faucetKey: faucet?.toBase58() ?? null,
+    faucetLow,
     filler2Sol,
     filler2Key: filler2?.toBase58() ?? null,
     deploySol: deploy?.sol ?? null,
     deployKey: deploy?.key ?? null,
     deployLow,
-    low: houseLow || deployLow,
+    low: houseLow || deployLow || faucetLow,
     asOf: new Date().toISOString(),
   };
   cached = { at: Date.now(), body };

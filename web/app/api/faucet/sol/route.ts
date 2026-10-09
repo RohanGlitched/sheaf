@@ -11,12 +11,13 @@ import { clientIp } from "@/lib/faucet-server";
 import { faucetHasOwnKey, faucetPayerKeypair } from "@/lib/server-keys";
 
 /**
- * Enough devnet SOL to try everything with room to spare: create a basket and
- * shares, open a launch market, buy on it and redeem. The whole run costs about
- * 0.04 SOL, most of it rent. Only for wallets that are nearly empty, so it
- * covers a first visit rather than funding anyone's testing.
+ * Enough devnet SOL for a first visit: shares in kind, a dollar order, a plan
+ * and a sale, most of it rent. A full run that also opens a launch market costs
+ * about 0.04 SOL and may need a second source (faucet.solana.com). Only for
+ * wallets that are nearly empty, so it covers a first visit rather than funding
+ * anyone's testing, and small, so the key that funds the faucet lasts.
  */
-const GRANT = 0.05 * LAMPORTS_PER_SOL;
+const GRANT = 0.03 * LAMPORTS_PER_SOL;
 const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
 /**
  * What the paying key keeps back. The faucet has its own key (FAUCET_KEY), which
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
   if (reserve - GRANT < RESERVE) {
     release();
     return Response.json(
-      { error: "The faucet is running low. faucet.solana.com hands out devnet SOL too." },
+      { error: "Out of test SOL right now: faucet.solana.com hands out devnet SOL, and this faucet is topped up regularly.", empty: true },
       { status: 503 },
     );
   }

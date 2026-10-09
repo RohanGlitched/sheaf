@@ -83,7 +83,8 @@ function SolanaCard() {
         {shown ? `${shown.length} ${plural(shown.length, "basket")}, demo baskets left out` : "Reading the program…"} · paid in test dollars
       </p>
       <ul className="-mx-2 mt-2 grid sm:grid-cols-2">
-        {(shown ?? []).slice(0, 4).map((b) => (
+        {/* Every basket, most created first, so the flagship is never the one left out. */}
+        {[...(shown ?? [])].sort((a, b) => Number(b.mintCount) - Number(a.mintCount)).map((b) => (
           <li key={b.address}>
             <Link
               href={`/basket/${b.address}`}

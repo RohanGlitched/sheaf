@@ -24,10 +24,11 @@ type Sig = { s: string; slot: number; t: number | null };
 
 /**
  * The decoder's version. Rows are stored decoded, so when the decoder learns new
- * events (v2: the sell desk's SellOrderPlaced, Filled and Cancelled) a stored
- * history from an older decoder is dropped and rebuilt from the chain.
+ * events (v2: the sell desk's SellOrderPlaced, Filled and Cancelled; v3: the
+ * protocol fee's ProtocolFeeAccrued, ProtocolFeeClaimed and BasketFeeTerms) a
+ * stored history from an older decoder is dropped and rebuilt from the chain.
  */
-const VERSION = 2;
+const VERSION = 3;
 
 type History = {
   v: number;

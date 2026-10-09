@@ -519,7 +519,7 @@ function HyperCorePricing({
           <p className="tnum display mt-6 text-title text-ink">{nav != null ? money(nav) : "—"}</p>
           <p className="mt-1 text-xs text-ink-3">
             Priced from HyperCore, not deployed
-            {nav != null && quoteNav != null && ` · ${(((nav - quoteNav) / quoteNav) * 100).toFixed(2)}% against the stock quotes`}
+            {nav != null && quoteNav != null && ` · ${signedPct(((nav - quoteNav) / quoteNav) * 100)} against the stock quotes`}
           </p>
         </div>
         <div className="min-w-0 overflow-x-auto border border-line">
@@ -548,4 +548,11 @@ function HyperCorePricing({
       </div>
     </section>
   );
+}
+
+/** A percentage with a true minus sign, and no sign at all when it rounds to zero. */
+function signedPct(x: number): string {
+  const r = Math.round(x * 100) / 100;
+  if (r === 0) return "0.00%";
+  return `${r > 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}%`;
 }

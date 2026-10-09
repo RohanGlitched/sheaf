@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CONTACT_MAX, HOMES, MONTHLY_BANDS, US_ROUTES, cleanContact, type Home, type MonthlyBand, type UsRoute, type WaitlistCounts } from "@/lib/waitlist-options";
 import { count } from "@/lib/format";
+import { useInviteRef } from "@/lib/invite-keep";
 import { WAITLIST_EVENT, readWaitlistCounts } from "./india-traction";
 
 type Status = { state: "checking" } | { state: "closed" } | ({ state: "open" } & WaitlistCounts);
@@ -57,6 +58,7 @@ export function IndiaWaitlist() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [ref] = useInviteRef();
 
   useEffect(() => {
     let live = true;
@@ -78,7 +80,7 @@ export function IndiaWaitlist() {
       const r = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ home, band, route, contact: contact.trim(), website }),
+        body: JSON.stringify({ home, band, route, contact: contact.trim(), website, ref }),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; counts?: WaitlistCounts | null; error?: string };
       if (!r.ok || !j.ok) {
@@ -104,10 +106,9 @@ export function IndiaWaitlist() {
         <h2 id="india-waitlist" className="display text-3xl text-ink">
           The India waitlist
         </h2>
-        {status.state === "open" && status.count >= 1 && (
-          <p className="tnum text-sm text-ink-2" aria-live="polite">
-            {count(status.count)} {status.count === 1 ? "person" : "people"} on the India waitlist
-            {status.withContact > 0 ? ` · ${count(status.withContact)} left a contact` : ""}
+        {status.state === "open" && status.withContact >= 1 && (
+          <p className="tnum text-sm text-ink-2" aria-live="polite" title="Only answers that left a contact are counted, each contact once.">
+            {count(status.withContact)} {status.withContact === 1 ? "person" : "people"} left a contact
           </p>
         )}
       </div>
@@ -120,7 +121,9 @@ export function IndiaWaitlist() {
         <div className="mt-8 rounded-[var(--radius-control)] bg-bind-wash p-5">
           <p className="text-ink">You&apos;re on the list. Thank you.</p>
           <p className="mt-1 text-sm leading-relaxed text-ink-2">
-            {contact.trim() ? "We'll write once, when Sheaf opens where you live." : "You left no contact, so your answer counts but we can't write to you."}
+            {contact.trim()
+              ? "We'll write once, when Sheaf opens where you live."
+              : "You left no contact, so we can't write to you. Your answers shape what we build, but the public count only includes people who left a contact."}
           </p>
         </div>
       ) : (
@@ -154,8 +157,9 @@ export function IndiaWaitlist() {
             </button>
             <p className="mt-3 text-xs leading-relaxed text-ink-3">
               We use this only to tell you when Sheaf opens where you live. We keep your answers, the day you sent them and, if
-              you leave one, your contact, stored once. A salted hash of the contact stops repeat answers. No IP address, no
-              wallet.
+              you leave one, your contact, stored once, plus the invite code you came with, if any. Salted hashes stop repeat answers: of the
+              contact, or without one, of your connection and the day. No IP address, no wallet. Only answers with a contact are
+              counted in public.
             </p>
           </div>
           {error && <p className="border-l-2 border-loss pl-3 text-sm text-loss">{error}</p>}

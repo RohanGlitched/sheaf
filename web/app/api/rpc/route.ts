@@ -1,3 +1,5 @@
+import { VersionedTransaction } from "@solana/web3.js";
+import bs58 from "bs58";
 import { PUBLIC_WRITE_RPC, serverRpcUrl, SHEAF_PROGRAM_ID } from "@/lib/config";
 import { clientIp } from "@/lib/faucet-server";
 import { originAllowed } from "@/lib/server-origin";
@@ -65,6 +67,45 @@ const MAX_SIGNATURES = 100;
 
 type Call = { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
 
+/**
+ * The programs a transaction from this site's pages may call at the top level:
+ * Sheaf, the token programs and their associated-account program, System,
+ * Compute Budget, Memo (both versions), the lookup-table program, Meteora's
+ * bonding curve and DAMM v2 (the launch markets), and Lighthouse, which some
+ * wallets add as a guard on what they sign.
+ */
+const SEND_PROGRAMS = new Set([
+  SHEAF_PROGRAM_ID,
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "11111111111111111111111111111111",
+  "ComputeBudget111111111111111111111111111111",
+  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+  "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
+  "AddressLookupTab1e1111111111111111111111111",
+  "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+  "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+  "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95",
+]);
+
+/** Null when every top-level program of the encoded transaction is allowed; else what was refused. */
+function refusedPrograms(params: unknown): string | null {
+  const [encoded, config] = (Array.isArray(params) ? params : []) as [unknown, { encoding?: string } | undefined];
+  if (typeof encoded !== "string") return "no transaction";
+  let tx: VersionedTransaction;
+  try {
+    const bytes = config?.encoding === "base64" ? Buffer.from(encoded, "base64") : bs58.decode(encoded);
+    tx = VersionedTransaction.deserialize(bytes);
+  } catch {
+    return "unreadable transaction";
+  }
+  // A program id is always a static key: lookup tables cannot name one.
+  const keys = tx.message.staticAccountKeys;
+  const other = tx.message.compiledInstructions.map((ix) => keys[ix.programIdIndex]?.toBase58() ?? "?").find((id) => !SEND_PROGRAMS.has(id));
+  return other ? `not ${other}` : null;
+}
+
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Call | Call[] | null;
   const calls = Array.isArray(body) ? body : body ? [body] : [];
@@ -82,6 +123,18 @@ export async function POST(req: Request) {
   const scan = calls.find((c) => c.method === "getProgramAccounts" && (c.params as unknown[] | undefined)?.[0] !== SHEAF_PROGRAM_ID);
   if (scan) {
     return Response.json({ jsonrpc: "2.0", id: scan.id ?? null, error: { code: -32602, message: "Only the Sheaf program can be scanned here" } }, { status: 403 });
+  }
+  // Sends and simulations are decoded: every program a transaction calls must be
+  // one the site's own flows use, so the proxy is no free relay for anything else.
+  for (const c of calls) {
+    if (c.method !== "sendTransaction" && c.method !== "simulateTransaction") continue;
+    const refused = refusedPrograms(c.params);
+    if (refused) {
+      return Response.json(
+        { jsonrpc: "2.0", id: c.id ?? null, error: { code: -32602, message: `This endpoint only relays transactions for this site's programs (${refused})` } },
+        { status: 403 },
+      );
+    }
   }
   const long = calls.find((c) => {
     if (c.method !== "getSignaturesForAddress") return false;

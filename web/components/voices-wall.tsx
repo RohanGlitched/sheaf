@@ -7,7 +7,7 @@ import { explorerAddress, explorerTx } from "@/lib/config";
 import { shortAddress, timeAgo } from "@/lib/format";
 import { slotColor } from "@/lib/palette";
 import type { Deed } from "@/lib/voices-activity";
-import { handleText, PLATFORMS, profileUrl, voiceMessage, type Voice } from "@/lib/voices-message";
+import { handleText, PLATFORMS, profileUrl, voiceMessage, WALLET_KIND_LABEL, type Voice } from "@/lib/voices-message";
 
 /**
  * One signed name: who, what they said, what their wallet did on Sheaf, and the
@@ -127,6 +127,11 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
   const stalks = useMemo(() => walletStalks(voice.wallet), [voice.wallet]);
   const p = PLATFORMS[voice.platform];
   const signedAt = Date.parse(voice.at) / 1000;
+  // The ledger's events, plus the server's stored proof when the ledger doesn't carry it (a launch-pool swap, or an older event).
+  const proofDeed: Deed | null = voice.proof ? { text: voice.proof.text, signature: voice.proof.signature, time: voice.proof.time ?? 0 } : null;
+  const ledgerDeeds = deeds ?? [];
+  const shownDeeds =
+    proofDeed && (voice.proof?.kind === "launch" || ledgerDeeds.length === 0) ? [proofDeed, ...ledgerDeeds.filter((d) => d.signature !== proofDeed.signature)] : ledgerDeeds;
   return (
     <li className="rise flex flex-col rounded-[var(--radius-panel)] border border-line bg-surface p-5 sm:p-6" style={{ ["--i" as string]: Math.min(index, 8) }}>
       <div className="flex items-start gap-4">
@@ -140,7 +145,32 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
           >
             {handleText(voice.platform, voice.handle)}
           </a>
-          <p className="tnum mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
+          <p className="mt-1.5 flex flex-wrap gap-1.5">
+            {voice.github ? (
+              <a
+                href={`https://gist.github.com/${voice.github.login}/${voice.github.gist}`}
+                target="_blank"
+                rel="noreferrer"
+                title="A public gist from this GitHub account contains the exact signed message"
+                className="rounded-full bg-bind-wash px-2 py-0.5 text-[11px] text-bind-deep"
+              >
+                verified on GitHub
+              </a>
+            ) : (
+              <span title="Anyone can type a handle; this one hasn't been proven" className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-3">
+                self-reported
+              </span>
+            )}
+            {voice.walletKind && (
+              <span
+                title={voice.walletKind === "browser" ? "Signed from the keypair Sheaf keeps in the browser, as the signing page reported" : "Signed from an extension or wallet app, as the signing page reported"}
+                className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-3"
+              >
+                {WALLET_KIND_LABEL[voice.walletKind]}
+              </span>
+            )}
+          </p>
+          <p className="tnum mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
             <span>{p.label}</span>
             <span aria-hidden>·</span>
             <a href={explorerAddress(voice.wallet)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
@@ -165,14 +195,14 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
       )}
 
       <div className="mt-5 flex-1">
-        <p className="text-xs text-ink-3">On Sheaf, from the program&rsquo;s own events</p>
-        {ledger === "loading" ? (
+        <p className="text-xs text-ink-3">On Sheaf, read from the chain</p>
+        {ledger === "loading" && shownDeeds.length === 0 ? (
           <p className="skeleton mt-2 h-4 w-3/4 rounded" aria-label="Reading the ledger" />
-        ) : ledger === "failed" ? (
+        ) : ledger === "failed" && shownDeeds.length === 0 ? (
           <p className="mt-2 text-sm text-ink-3">The ledger didn&rsquo;t answer; the wallet link above shows its transactions.</p>
-        ) : deeds && deeds.length > 0 ? (
+        ) : shownDeeds.length > 0 ? (
           <ul className="mt-2 space-y-1.5 text-sm text-ink-2">
-            {deeds.slice(0, 5).map((d) => (
+            {shownDeeds.slice(0, 5).map((d) => (
               <li key={d.text} className="flex items-baseline gap-2">
                 <span aria-hidden className="size-1.5 shrink-0 translate-y-[-1px] rounded-full bg-gain" />
                 <a href={explorerTx(d.signature)} target="_blank" rel="noreferrer" className="hover:text-ink hover:underline hover:decoration-line-strong hover:underline-offset-4">
@@ -180,7 +210,7 @@ export function VoiceCard({ voice, deeds, ledger, index }: { voice: Voice; deeds
                 </a>
               </li>
             ))}
-            {deeds.length > 5 && <li className="pl-3.5 text-xs text-ink-3">and {deeds.length - 5} more on the ledger</li>}
+            {shownDeeds.length > 5 && <li className="pl-3.5 text-xs text-ink-3">and {shownDeeds.length - 5} more on the ledger</li>}
           </ul>
         ) : (
           <p className="mt-2 text-sm text-ink-3">Nothing on the ledger from this wallet yet.</p>

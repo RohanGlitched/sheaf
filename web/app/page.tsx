@@ -16,9 +16,9 @@ import { Keys, Revenue } from "@/components/home-ledgers";
 const BIG_FIVE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
 
 /**
- * The story in the order it happens to a basket. The first four are the share
- * itself: made in kind, bought with dollars, bought every month. The last two
- * are markets that sit beside it.
+ * The story in the order it happens to a basket. The first five are the share
+ * itself: made in kind, bought or sold for dollars, bought every month. The last
+ * two are markets that sit beside it. /method tells the same seven, in the same words.
  */
 const LIFE = [
   {
@@ -44,20 +44,27 @@ const LIFE = [
   },
   {
     n: "4",
-    title: "Then every month",
-    on: "Monthly plan",
-    href: "#plans",
-    body: "Set a monthly amount and the plan places that dollar order on schedule. Anyone can run it when it is due, and each fill resets its reference price. The habit behind India's SIPs, onchain.",
+    title: "Sell for dollars",
+    on: "Sell order",
+    href: "/method#sell",
+    body: "The way in, reversed: escrow shares for dollars that fall over ninety seconds to your floor, and a filler pays and takes them. No protocol fee on a sale, and redeeming for the stocks stays free.",
   },
   {
     n: "5",
+    title: "Then every month",
+    on: "Monthly plan",
+    href: "#plans",
+    body: "Set a monthly amount and the plan places that dollar order on schedule, as the same auction stretched to 30 minutes so any filler has time. Anyone can run it when due. The habit behind India's SIPs, onchain.",
+  },
+  {
+    n: "6",
     title: "Open a launch market",
     on: "Beside the share",
     href: "#launch",
     body: "A basket's creator can open a Meteora bonding curve beside it: a separate launch token, priced from the basket's value. It is a bet on the basket, not a share, and it cannot be redeemed for the stocks.",
   },
   {
-    n: "6",
+    n: "7",
     title: "Bet on it",
     on: "Beside the share",
     href: "#predict",
@@ -84,8 +91,8 @@ export default function Home() {
             Bind up to eight stocks into one share.
           </h1>
           <p className="rise mt-7 max-w-[44ch] text-lg leading-relaxed text-ink-2" style={{ "--i": 2 } as React.CSSProperties}>
-            One share holds a fixed recipe of tokenized stocks, kept in its own
-            onchain vault. It is always backed by those stocks, and anyone can
+            Baskets of tokenized stocks. One share holds a fixed recipe, kept in
+            its own onchain vault. It is always backed by those stocks, and anyone can
             redeem it for them. Buy it in kind, with dollars, or a little every
             month.
           </p>
@@ -100,7 +107,7 @@ export default function Home() {
           </div>
           <p className="rise mt-8 max-w-[52ch] text-sm leading-relaxed text-ink-3" style={{ "--i": 4 } as React.CSSProperties}>
             A fixed basket, like a unit investment trust: no manager and no
-            rebalancing. To change a recipe, publish a new basket. The program
+            rebalancing. To change a recipe, create a new basket. The program
             reads no price; it checks backing itself, so the vault can only ever
             hold at least what the shares claim.
           </p>
@@ -117,9 +124,9 @@ export default function Home() {
       {/* ------------------------------------------------------- lifecycle */}
       <section className="border-t border-line py-20">
         <h2 className="display text-title max-w-[26ch] text-ink">
-          One backed share, three ways in, and none of it asks you to trust us.
+          One backed share: in with stocks or dollars, out the same ways, or a little every month.
         </h2>
-        <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {LIFE.map((step) => (
             <li key={step.title}>
               <Link

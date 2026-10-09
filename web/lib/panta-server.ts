@@ -1,5 +1,7 @@
 import "server-only";
-import { marketWindow, resolutionRule } from "./panta-window";
+import { marketWindow, recipeText, resolutionRule } from "./panta-window";
+import { fetchBasketAt } from "./sheaf";
+import { stockForWriteMint } from "./mirror";
 
 /**
  * Panta (prediction markets on Solana, by Kaito) from the server side.
@@ -152,18 +154,25 @@ export type CreateQuote = {
 /** The market Sheaf would open on a basket, exactly as it is sent to Panta. */
 export async function basketDraft(input: { wallet: string; basket: string; name: string; symbol: string }) {
   // Panta requires trading to open at least an hour out. The week is measured
-  // between two Friday US closes (lib/panta-window.ts), and the market ends at
-  // the second one, so the rule, the window and the NAV reader all agree.
+  // between two week-ending NYSE closes (lib/panta-window.ts), and the market
+  // ends at the second one, so the rule, the window and the NAV reader agree.
   const w = marketWindow();
-  const { category, preferred } = await basketCategory();
+  const [{ category, preferred }, basket] = await Promise.all([basketCategory(), fetchBasketAt(input.basket).catch(() => null)]);
+  // The recipe's units go into the rule itself, so resolving does not depend on
+  // the devnet basket account staying up.
+  const recipe = (basket?.components ?? []).map((c) => ({
+    base: stockForWriteMint(c.mint)?.base ?? c.mint,
+    unitsPerShare: c.unitsPerShare.toString(),
+    decimals: c.decimals,
+  }));
   const nav = `${PUBLIC_SITE}/api/nav/${input.basket}`;
   return {
     draft: {
       wallet: input.wallet,
       title: `${input.name} vs SPY`,
       question: basketQuestion(input.name, input.symbol),
-      description: `${input.symbol} is a Sheaf basket: a fixed recipe of tokenized stocks held in a vault on Solana. This market asks whether one share outgrows SPY, total return, between two Friday US closes.`,
-      resolutionRule: resolutionRule(input.symbol, nav, w),
+      description: `${input.symbol} is a Sheaf basket (on Solana devnet today): a fixed recipe of tokenized stocks${recipe.length ? ` (${recipeText(recipe)} per share)` : ""}, valued at listed closes and each token's mainnet multiplier. This market asks whether one share outgrows SPY, total return, between two week-ending US closes.`,
+      resolutionRule: resolutionRule(input.symbol, nav, w, recipe),
       sourcesOfTruth: [
         `${nav}?at=${w.fromClose}`,
         `${nav}?at=${w.toClose}`,

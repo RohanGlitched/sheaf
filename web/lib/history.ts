@@ -19,6 +19,7 @@
 
 import snapshot from "./history.snapshot.json";
 import { XSTOCKS } from "./universe";
+import { CLOSE_SETTLE_S, closeDayAtOrBefore } from "./panta-window";
 
 export type Series = {
   /** Trading days as YYYYMMDD integers, ascending. */
@@ -84,10 +85,15 @@ async function fetchSeries(symbol: string, timeoutMs = 8000): Promise<Series> {
   const t: number[] = [];
   const close: number[] = [];
   const adj: number[] = [];
+  // While a session is open, Yahoo's last daily row is that day's price so far,
+  // not a close. Keep only days whose close (on the exchange calendar, early
+  // closes included) has passed and settled, so "the last five closes" are closes.
+  const finalDay = closeDayAtOrBefore(Math.floor(Date.now() / 1000) - CLOSE_SETTLE_S);
   result.timestamp.forEach((ts, i) => {
     const c = quote.close[i];
     const a = adjclose[i];
     if (c == null || a == null) return;
+    if (toDay(ts) > finalDay) return;
     t.push(toDay(ts));
     close.push(Number(c.toFixed(4)));
     adj.push(Number(a.toFixed(4)));

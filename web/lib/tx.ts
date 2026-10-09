@@ -448,6 +448,30 @@ export async function buildRedeemShares(params: {
   return packSteps([accounts, redemption], params.owner);
 }
 
+let clock: { offset: number; at: number } | null = null;
+
+/**
+ * Seconds to add to this device's clock to get the chain's: the latest block's
+ * time minus the device's, read once a minute. The program refuses an auction
+ * that starts more than 60 s before it lands (StaleAuctionStart), so a device
+ * clock that runs slow must never set the start. 0 when it can't be read.
+ */
+export async function chainClockOffset(connection: Connection): Promise<number> {
+  if (clock && Date.now() - clock.at < 60_000) return clock.offset;
+  try {
+    const slot = await connection.getSlot("confirmed");
+    const blockTime = await connection.getBlockTime(slot);
+    if (blockTime == null) return clock?.offset ?? 0;
+    clock = { offset: blockTime - Date.now() / 1000, at: Date.now() };
+    return clock.offset;
+  } catch {
+    return clock?.offset ?? 0;
+  }
+}
+
+/** Now, in unix seconds, on the chain's clock (see chainClockOffset). */
+export const chainNow = (offset: number) => Math.floor(Date.now() / 1000 + offset);
+
 /**
  * Sign a quote-sensitive transaction while its quote is still fresh.
  *
@@ -517,6 +541,7 @@ export const SHEAF_ERRORS: Record<number, string> = {
   6021: "Zero shares.",
   6022: "That is too few shares to move any component at all.",
   6023: "The arithmetic overflowed.",
+  6056: "The order's start time was behind the network's clock, so it was refused before any money moved. Try again.",
 };
 
 /** Anchor's own account errors, which a stale page meets when someone else got there first. */

@@ -81,6 +81,10 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "E1ar22JHqWbUpjJ88Ksb2FJ61iXpJo8vtkHFerzWzHqN", role: "test", label: "Test wallet, QA round 5" },
   { address: "Ep5kyiNSTMz65KHzt4Jem5fZcZXPZGLcCobKATPzrirA", role: "test", label: "Test wallet, QA round 5" },
   { address: "GAPz2cFNVWfTD8NYdyWF8DJeW338H2jbHYJ643Hx1FyH", role: "test", label: "Test wallet, QA round 5" },
+  { address: "0x4eA5e49138b663806B3D5D5c9263fa49191D9114", role: "test", label: "Test wallet, QA round 5" },
+  { address: "0x8e625b09B7d7Ebd06D8CEfDff05F0e9C37BE40f3", role: "test", label: "Test wallet, QA round 5" },
+  { address: "0x9a59582F547F2DE126C775785Ff1d2936BFA750e", role: "test", label: "Test wallet, QA round 5" },
+  { address: "GPC7qwjvNhwzeenP1BA4u2nbwZsAEPduznkj1SKCuCgr", role: "test", label: "Test wallet, QA round 5" },
   { address: "cQKhoauPParjVawD5zTGFqtGLhi3FHp8g8Qn8H1PtcA", role: "test", label: "Test wallet, QA round 2 (funded by the house faucet, bought BIG5A)" },
   // UI tests of plans and dollar orders, 9 October.
   { address: "G6qHDvZq6KsMQkzTXnB5LhUJZDDhY3PS7RZDNwLHx19", role: "test", label: "Test wallet, UI test" },

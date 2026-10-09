@@ -307,7 +307,14 @@ function Chart({
         {createdIndex > 0 && (
           <g>
             <line x1={x(createdIndex)} x2={x(createdIndex)} y1={PAD.top} y2={H - PAD.bottom} stroke="var(--color-bind)" strokeDasharray="2 3" />
-            <text x={x(createdIndex) + 5} y={PAD.top + 10} fontSize="10" fill="var(--color-bind)">
+            {/* Near the right edge the label sits left of its line, so a recent creation date never runs off a phone. */}
+            <text
+              x={x(createdIndex) > w * 0.7 ? x(createdIndex) - 5 : x(createdIndex) + 5}
+              y={PAD.top + 10}
+              fontSize="10"
+              fill="var(--color-bind)"
+              textAnchor={x(createdIndex) > w * 0.7 ? "end" : "start"}
+            >
               basket created
             </text>
           </g>

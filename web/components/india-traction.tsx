@@ -106,10 +106,9 @@ export function IndiaTraction() {
   if (waitlist && waitlist.count >= 1) {
     const abroad = waitlist.byHome.nri;
     const parts = [
-      waitlist.withContact > 0 ? `${count(waitlist.withContact)} left a contact` : null,
       abroad > 0 ? `${count(abroad)} ${abroad === 1 ? "is an NRI" : "are NRIs"} outside the US, UK, Canada and Australia` : null,
     ].filter(Boolean);
-    tiles.push({ k: "On the India waitlist", v: count(waitlist.count), s: parts.join(" · ") });
+    tiles.push({ k: "On the India waitlist, with a contact", v: count(waitlist.count), s: parts.join(" ") });
   }
   if (tiles.length === 0) return null;
 

@@ -40,6 +40,14 @@ const RULES = [
 
 const link = "underline decoration-line-strong underline-offset-4 hover:text-ink";
 
+/** The v2 deployment block written by the deploy script: the fee-carrying desks. */
+type V2 = {
+  desk: string;
+  planDesk?: string;
+  verified?: { contracts?: Record<string, boolean> };
+  smoke?: { passedAt?: string; txs?: Record<string, string> };
+};
+
 export default function ChainsPage() {
   const deployed = DEPLOYED.map((c) => ({ chain: c, d: c.deployment as Extra }));
   const rh = deployed.find((x) => x.d.network === "robinhoodTestnet");
@@ -117,16 +125,18 @@ export default function ChainsPage() {
       <section className="mt-24 border-t border-line pt-16">
         <h2 className="display text-title text-ink">Deployed, verified, smoke-tested</h2>
         <p className="mt-3 max-w-[64ch] text-sm leading-relaxed text-ink-2">
-          Every address below is a verified contract. Each chain passed the same end-to-end run after deployment: faucet, approvals, a mint, a
-          redemption, a dollar order and its fill.
+          New orders go to the v2 desks, deployed on October 9 with the 0.10% protocol fee: CreationDeskV2 for dollar orders and PlanDesk
+          for monthly plans. Each chain ran the same end-to-end test on them after deployment: approvals, a dollar order and its fill, a plan
+          and its first filled installment. The v1 desk each chain started with is listed under the new one.
         </p>
         <div className="mt-8 min-w-0 overflow-x-auto border border-line">
-          <table className="w-full border-collapse text-sm sm:min-w-[52rem]">
+          <table className="w-full border-collapse text-sm sm:min-w-[60rem]">
             <thead>
               <tr className="border-b border-line text-left text-xs text-ink-3">
                 <th className="px-4 py-3 font-normal">Chain</th>
                 <th className="px-4 py-3 font-normal">Factory</th>
-                <th className="px-4 py-3 font-normal">Dollar desk</th>
+                <th className="px-4 py-3 font-normal">Dollar desk (v2)</th>
+                <th className="px-4 py-3 font-normal">Plan desk</th>
                 <th className="px-4 py-3 font-normal">Stocks</th>
                 <th className="px-4 py-3 font-normal">Verified</th>
                 <th className="px-4 py-3 font-normal">Smoke test</th>
@@ -134,8 +144,13 @@ export default function ChainsPage() {
             </thead>
             <tbody>
               {deployed.map(({ chain, d }) => {
-                const v = d.verified?.contracts ? Object.values(d.verified.contracts) : [];
-                const fill = d.smoke?.txs?.fill;
+                const v2 = (d as unknown as { v2?: V2 }).v2;
+                const v = [
+                  ...(d.verified?.contracts ? Object.values(d.verified.contracts) : []),
+                  ...(v2?.verified?.contracts ? Object.values(v2.verified.contracts) : []),
+                ];
+                const fill = v2?.smoke?.txs?.plan_fill ?? v2?.smoke?.txs?.auction_fill ?? d.smoke?.txs?.fill;
+                const passedAt = v2?.smoke?.passedAt ?? d.smoke?.passedAt;
                 return (
                   <tr key={d.network} className="border-b border-line/60 last:border-0">
                     <td className="px-4 py-3 text-ink">
@@ -148,16 +163,35 @@ export default function ChainsPage() {
                       </a>
                     </td>
                     <td className="tnum px-4 py-3">
-                      <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={`text-ink-2 ${link}`}>
-                        {shortAddress(d.desk, 6, 4)}
-                      </a>
+                      {v2 ? (
+                        <a href={`${d.explorer}/address/${v2.desk}`} target="_blank" rel="noreferrer" className={`text-ink-2 ${link}`}>
+                          {shortAddress(v2.desk, 6, 4)}
+                        </a>
+                      ) : (
+                        <span className="text-ink-3">—</span>
+                      )}
+                      <span className="mt-0.5 block text-xs text-ink-3">
+                        v1{" "}
+                        <a href={`${d.explorer}/address/${d.desk}`} target="_blank" rel="noreferrer" className={link}>
+                          {shortAddress(d.desk, 6, 4)}
+                        </a>
+                      </span>
+                    </td>
+                    <td className="tnum px-4 py-3">
+                      {v2?.planDesk ? (
+                        <a href={`${d.explorer}/address/${v2.planDesk}`} target="_blank" rel="noreferrer" className={`text-ink-2 ${link}`}>
+                          {shortAddress(v2.planDesk, 6, 4)}
+                        </a>
+                      ) : (
+                        <span className="text-ink-3">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-ink-2">{d.tokenSource === "real" ? "Robinhood's own" : "Labeled mirrors"}</td>
                     <td className="tnum px-4 py-3 text-ink-2">{v.length ? `${v.filter(Boolean).length} of ${v.length}` : "—"}</td>
                     <td className="tnum px-4 py-3">
                       {fill ? (
                         <a href={`${d.explorer}/tx/${fill}`} target="_blank" rel="noreferrer" className={`text-gain ${link}`}>
-                          passed {d.smoke?.passedAt?.slice(0, 10)}
+                          passed {passedAt?.slice(0, 10)}
                         </a>
                       ) : (
                         <span className="text-ink-3">—</span>

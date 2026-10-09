@@ -350,12 +350,31 @@ function toOrderV2(id: number, o: {
   };
 }
 
-/** The last `limit` v2 desk orders, newest first; [] where v2 is not deployed. */
-export async function readDeskOrdersV2(d: Deployment, limit = 12): Promise<DeskOrderV2[]> {
-  const v2 = v2Of(d);
-  if (!v2) return [];
+/**
+ * Which desk an order is on. 1: the v1 fixed-price CreationDesk. 2: the first
+ * CreationDeskV2 (auction, protocol fee to the deployer). 3: the CreationDeskV2
+ * deployed with PlanDeskV3, whose protocol fee goes to a separate cold treasury.
+ * Desks 2 and 3 run the same contract code.
+ */
+export type DeskVersion = 1 | 2 | 3;
+
+/** The desk contract for a version on this chain, or null where it is not deployed. */
+export function deskAddress(d: Deployment, version: DeskVersion): Address | null {
+  if (version === 1) return d.desk as Address;
+  const rec = version === 3 ? v3Of(d) : v2Of(d);
+  return rec ? (rec.desk as Address) : null;
+}
+
+/** The newest auction desk on this chain: 3 where deployed, else 2, else null. */
+export function auctionDeskVersion(d: Deployment): 2 | 3 | null {
+  return v3Of(d) ? 3 : v2Of(d) ? 2 : null;
+}
+
+/** The last `limit` orders on an auction desk (v2 by default), newest first; [] where it is not deployed. */
+export async function readDeskOrdersV2(d: Deployment, limit = 12, version: 2 | 3 = 2): Promise<DeskOrderV2[]> {
+  const desk = deskAddress(d, version);
+  if (!desk) return [];
   const client = publicClientFor(d);
-  const desk = v2.desk as Address;
   const count = Number(await client.readContract({ address: desk, abi: DESK_V2_ABI, functionName: "orderCount" }));
   const ids = Array.from({ length: Math.min(limit, count) }, (_, i) => count - 1 - i);
   const rows = await Promise.all(
@@ -364,10 +383,10 @@ export async function readDeskOrdersV2(d: Deployment, limit = 12): Promise<DeskO
   return rows.map((o, i) => toOrderV2(ids[i], o));
 }
 
-export async function readDeskOrderV2(d: Deployment, id: number): Promise<DeskOrderV2> {
-  const v2 = v2Of(d);
-  if (!v2) throw new Error(`no v2 deployment on ${d.network}`);
-  const o = await publicClientFor(d).readContract({ address: v2.desk as Address, abi: DESK_V2_ABI, functionName: "getOrder", args: [BigInt(id)] });
+export async function readDeskOrderV2(d: Deployment, id: number, version: 2 | 3 = 2): Promise<DeskOrderV2> {
+  const desk = deskAddress(d, version);
+  if (!desk) throw new Error(`no v${version} desk on ${d.network}`);
+  const o = await publicClientFor(d).readContract({ address: desk, abi: DESK_V2_ABI, functionName: "getOrder", args: [BigInt(id)] });
   return toOrderV2(id, o);
 }
 
@@ -413,6 +432,179 @@ export async function readPlansOf(d: Deployment, owner: Address): Promise<PlanV2
     active: p.active,
     nextRunAt: p.runs === 0 ? 0 : Number(p.lastRunAt) + Number(p.interval),
   }));
+}
+
+// ------------------------------------------------------------------- v3
+
+/**
+ * v3: PlanDeskV3, plans with trailing bounds under the owner's hard floor and
+ * ceiling, on a fresh CreationDeskV2 whose immutable treasury is a separate cold
+ * key (not the deployer, not the keeper). Recorded under `v3`: read with v3Of(d).
+ */
+export const PLAN_DESK_V3_ABI = parseAbi([
+  "function desk() view returns (address)",
+  "function cash() view returns (address)",
+  "function MAX_STEP_BPS() view returns (uint16)",
+  "function planCount() view returns (uint256)",
+  "function getPlan(uint256 id) view returns ((address owner, uint64 interval, uint32 runs, address basket, uint64 lastRunAt, uint16 bandBps, uint16 stepBps, address keeper, uint64 auctionSecs, bool active, uint128 cashPerRun, uint128 refShares, uint128 hardMin, uint128 hardMax, uint64 lastOrderPlusOne))",
+  "function plansOf(address owner) view returns (uint256[])",
+  "function nextRunAt(uint256 id) view returns (uint256)",
+  "function windowOf(uint256 id) view returns (uint256 refShares, uint256 low, uint256 high)",
+  "function auctionFor(uint256 id, uint256 fairShares) view returns (uint256 startShares, uint256 endShares)",
+  "function openPlan(address basket, uint256 cashPerRun, uint64 interval, uint64 auctionSecs, uint16 bandBps, uint16 stepBps, uint256 refShares, uint256 hardMin, uint256 hardMax, address keeper) returns (uint256)",
+  "function recenter(uint256 id, uint256 refShares, uint256 hardMin, uint256 hardMax)",
+  "function closePlan(uint256 id)",
+  "function instalment(uint256 id, uint256 fairShares) returns (uint256)",
+  "event PlanOpened(uint256 indexed id, address indexed owner, address indexed basket, address keeper, uint256 cashPerRun, uint64 interval, uint64 auctionSecs, uint16 bandBps, uint16 stepBps, uint256 refShares, uint256 hardMin, uint256 hardMax)",
+  "event PlanClosed(uint256 indexed id)",
+  "event Recentered(uint256 indexed id, uint256 refShares, uint256 hardMin, uint256 hardMax, bool byOwner)",
+  "event Instalment(uint256 indexed id, uint256 indexed orderId, address indexed caller, uint256 fairShares, uint256 startShares, uint256 endShares, uint32 run)",
+  "error UnknownBasket()",
+  "error ZeroAmount()",
+  "error BadSchedule()",
+  "error BandTooWide()",
+  "error StepTooWide()",
+  "error BadBounds()",
+  "error NotOwner()",
+  "error NotAllowed()",
+  "error PlanClosedAlready()",
+  "error TooSoon(uint256 nextRunAt)",
+  "error FairOutOfBounds(uint256 fairShares, uint256 low, uint256 high)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
+  "error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)",
+  "error SafeERC20FailedOperation(address token)",
+]);
+
+/** The v3 contracts on one chain, as evm/scripts/deploy-v3.js records them. Same shape as v2. */
+export type DeploymentV3 = Omit<DeploymentV2, "sip" | "smoke"> & {
+  smoke?: { passedAt: string; basket: string; treasury: string; auctionOrderId: number; planId: number; planOrderIds: number[]; txs: Record<string, string> };
+  /** Tempo only: the recorded access-key run against PlanDeskV3 (evm/scripts/tempo-sip-v3.mjs). */
+  sip?: {
+    at: string;
+    keeperKey: string;
+    planId: number;
+    openPlanTx: string;
+    authorizeTx: string;
+    instalmentTxs: string[];
+    fillTxs: string[];
+    recenterTx?: string;
+    orderIds: number[];
+    cashPerRun: string;
+    hardMinShares: string;
+    hardMaxShares: string;
+    stepPct: number;
+    sharesToInvestor: string[];
+    limitPerPeriod: string;
+    periodSeconds: number;
+    scopes: string[];
+    refused: Record<string, string>;
+  };
+};
+
+/** The chain's v3 contracts, or null where v3 is not deployed. */
+export function v3Of(d: Deployment): DeploymentV3 | null {
+  return (d as Deployment & { v3?: DeploymentV3 }).v3 ?? null;
+}
+
+export type PlanV3 = {
+  id: number;
+  owner: Address;
+  basket: Address;
+  keeper: Address;
+  cashPerRun: bigint;
+  interval: number;
+  auctionSecs: number;
+  bandBps: number;
+  stepBps: number;
+  hardMin: bigint;
+  hardMax: bigint;
+  /** The window the next run's fair count must sit in, the reference already moved to the last fill. */
+  refShares: bigint;
+  low: bigint;
+  high: bigint;
+  runs: number;
+  lastRunAt: number;
+  active: boolean;
+  /** Unix seconds; 0 means it may run now. */
+  nextRunAt: number;
+};
+
+/** Every PlanDeskV3 plan `owner` has opened, oldest first, with each one's live window; [] where v3 is not deployed. */
+export async function readPlansOfV3(d: Deployment, owner: Address): Promise<PlanV3[]> {
+  const v3 = v3Of(d);
+  if (!v3) return [];
+  const client = publicClientFor(d);
+  const plans = v3.planDesk as Address;
+  const ids = await client.readContract({ address: plans, abi: PLAN_DESK_V3_ABI, functionName: "plansOf", args: [owner] });
+  const rows = await Promise.all(
+    ids.map(async (id) => {
+      const [p, w] = await Promise.all([
+        client.readContract({ address: plans, abi: PLAN_DESK_V3_ABI, functionName: "getPlan", args: [id] }),
+        client.readContract({ address: plans, abi: PLAN_DESK_V3_ABI, functionName: "windowOf", args: [id] }),
+      ]);
+      return { p, w };
+    }),
+  );
+  return rows.map(({ p, w }, i) => ({
+    id: Number(ids[i]),
+    owner: p.owner,
+    basket: p.basket,
+    keeper: p.keeper,
+    cashPerRun: p.cashPerRun,
+    interval: Number(p.interval),
+    auctionSecs: Number(p.auctionSecs),
+    bandBps: p.bandBps,
+    stepBps: p.stepBps,
+    hardMin: p.hardMin,
+    hardMax: p.hardMax,
+    refShares: w[0],
+    low: w[1],
+    high: w[2],
+    runs: p.runs,
+    lastRunAt: Number(p.lastRunAt),
+    active: p.active,
+    nextRunAt: p.runs === 0 ? 0 : Number(p.lastRunAt) + Number(p.interval),
+  }));
+}
+
+/**
+ * The v3 Tempo SIP. Same shape as v2 (the root key opens the plan, then scopes the
+ * keeper's access key to approve(PlanDeskV3) and PlanDeskV3.instalment), with
+ * trailing bounds: each run's fair count must sit within 10% of what the last run
+ * filled at, and never outside the owner's hard bounds of 70% to 150% of the fair
+ * count at signing. So a monthly plan follows normal moves, and the owner's worst
+ * price is fixed at signing: no run buys fewer than 70% of today's count.
+ */
+export const TEMPO_SIP_V3 = {
+  ...TEMPO_SIP_V2,
+  stepBps: 1_000,
+  hardMinBps: 7_000,
+  hardMaxBps: 15_000,
+} as const;
+
+/** The plan terms a visitor signs for `navUsd` a share now (see TEMPO_SIP_V3). */
+export function tempoSipV3Terms(navUsd: number, cashDecimals = 6) {
+  const fair = fairSharesFor(TEMPO_SIP_V3.cashPerRun, cashDecimals, navUsd);
+  return {
+    cashPerRun: TEMPO_SIP_V3.cashPerRun,
+    interval: TEMPO_SIP_V3.interval,
+    auctionSecs: TEMPO_SIP_V3.auctionSecs,
+    bandBps: TEMPO_SIP_V3.bandBps,
+    stepBps: TEMPO_SIP_V3.stepBps,
+    refShares: fair,
+    hardMin: (fair * BigInt(TEMPO_SIP_V3.hardMinBps)) / BPS,
+    hardMax: (fair * BigInt(TEMPO_SIP_V3.hardMaxBps)) / BPS,
+  };
+}
+
+/** The access-key scopes for a v3 Tempo SIP: approve(PlanDeskV3) and PlanDeskV3.instalment, nothing else. */
+export function tempoSipV3Scopes(d: Deployment) {
+  const v3 = v3Of(d);
+  if (!v3) throw new Error(`no v3 deployment on ${d.network}`);
+  return [
+    { address: d.stable.address as Address, selector: "approve(address,uint256)", recipients: [v3.planDesk as Address] },
+    { address: v3.planDesk as Address, selector: "instalment(uint256,uint256)" },
+  ];
 }
 
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
@@ -551,6 +743,8 @@ export function explainEvmError(err: unknown): string {
           return "That plan is closed.";
         case "BadBounds":
           return "The plan's price bounds are inverted or zero.";
+        case "StepTooWide":
+          return "The plan's trailing step is capped at 50%.";
         case "BadSchedule":
           return "The plan needs a non-zero interval and an auction of at most 30 days.";
         case "BadAuctionShares":

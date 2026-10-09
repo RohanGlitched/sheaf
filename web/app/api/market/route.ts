@@ -1,5 +1,5 @@
 import { UNIVERSE_MINTS, fetchMarket, withChainMultipliers } from "@/lib/market";
-import { readMints } from "@/lib/mainnet";
+import { lastMintReadFailure, readMints } from "@/lib/mainnet";
 
 /**
  * The market snapshot, proxied server-side.
@@ -11,16 +11,29 @@ import { readMints } from "@/lib/mainnet";
  * upstream.
  *
  * Prices come from Jupiter; the dividend multipliers come from the mint
- * accounts themselves, read in one call through Solami's mainnet RPC.
+ * accounts themselves, read in one call through Solami's mainnet RPC. When
+ * that read failed or Solami had to be skipped, `chainError` says why and who
+ * answered instead (null if nobody did, in which case `chain` is null and the
+ * multipliers are Jupiter's copy).
  */
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const [market, chain] = await Promise.all([fetchMarket(), readMints(UNIVERSE_MINTS)]);
   const snapshot = withChainMultipliers(market, chain);
-  return Response.json(snapshot, {
-    headers: {
-      "cache-control": "public, s-maxage=10, stale-while-revalidate=50",
+  const failure = lastMintReadFailure();
+  // Only a failure from this read (or one still in effect) is worth reporting.
+  const chainError =
+    failure && (chain == null || chain.via === "public") && Date.now() - failure.at < 60_000
+      ? { message: failure.message, answeredBy: failure.answeredBy, at: new Date(failure.at).toISOString() }
+      : null;
+  return Response.json(
+    { ...snapshot, chainError },
+    {
+      headers: {
+        // A failed chain read should not be cached as if it were the answer.
+        "cache-control": chain ? "public, s-maxage=10, stale-while-revalidate=50" : "public, s-maxage=2",
+      },
     },
-  });
+  );
 }

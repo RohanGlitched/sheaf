@@ -28,10 +28,10 @@ import {
   ERC20_ABI,
   MIRROR_ABI,
   ONE_SHARE,
-  PLAN_DESK_ABI,
+  PLAN_DESK_V3_ABI,
   PROTOCOL_FEE_BPS,
   TEMPO_PATH_USD,
-  TEMPO_SIP_V2,
+  TEMPO_SIP_V3,
   auctionSharesAt,
   evmChain,
   fairSharesFor,
@@ -41,16 +41,19 @@ import {
   mintAmounts,
   navFrom,
   publicClientFor,
+  deskAddress,
   readDeskOrderV2,
   readDeskOrders,
   readDeskOrdersV2,
   readPlansOf,
-  tempoSipV2Terms,
+  readPlansOfV3,
+  tempoSipV3Terms,
   v2FillSplit,
   v2Of,
+  v3Of,
   type DeskOrder,
   type DeskOrderV2,
-  type PlanV2,
+  type DeskVersion,
 } from "./evm";
 
 /**
@@ -165,8 +168,8 @@ export async function dripGas(d: Deployment, to: Address): Promise<{ hash?: Hex;
 export type FillResult = {
   network: string;
   id: number;
-  /** Which desk the order is on: 1, the fixed-price CreationDesk; 2, the CreationDeskV2 auction. */
-  version: 1 | 2;
+  /** Which desk the order is on: 1, the fixed-price CreationDesk; 2 and 3, the two CreationDeskV2 auctions (3: cold treasury). */
+  version: DeskVersion;
   status: "filled" | "skipped" | "failed";
   reason?: string;
   hash?: Hex;
@@ -320,9 +323,9 @@ function firstSecondAtOrBelow(o: DeskOrderV2, target: bigint): number | null {
 }
 
 /** v2: an auction, filled once its count reaches the house's price (fair plus FILL_MARGIN_BPS), waiting up to `maxWait` seconds for it. */
-async function fillOneV2(d: Deployment, o: DeskOrderV2, prices: Record<string, number>, maxWait: number): Promise<FillResult> {
-  const v2 = v2Of(d)!;
-  const base = { network: d.network, id: o.id, version: 2 as const };
+async function fillOneV2(d: Deployment, o: DeskOrderV2, prices: Record<string, number>, maxWait: number, version: 2 | 3): Promise<FillResult> {
+  const desk = deskAddress(d, version)!;
+  const base = { network: d.network, id: o.id, version };
   const basket = basketOf(d, o.basket);
   if (!basket) return { ...base, status: "skipped", reason: "basket not in this deployment's list" };
   const now = Math.floor(Date.now() / 1000);
@@ -346,13 +349,13 @@ async function fillOneV2(d: Deployment, o: DeskOrderV2, prices: Record<string, n
     return { ...base, status: "skipped", reason: `the auction reaches the house's price (fair plus ${FILL_MARGIN_BPS / 100}%) in ${at - now}s; any filler can take it sooner`, retryInSec: at - now };
   }
   const buyerKey = o.buyer.toLowerCase();
-  const counted = !sipOrders.has(`${d.network}:v2:${o.id}`);
+  const counted = !sipOrders.has(`${d.network}:v${version}:${o.id}`);
   const quota = counted ? perBuyer.check(buyerKey) : { ok: true, retryInSec: 0 };
   if (!quota.ok) return { ...base, status: "skipped", reason: `the house has filled this buyer's orders enough for now; try again in ${Math.ceil(quota.retryInSec / 60)} min, or any holder can fill it` };
 
   if (at > now) await sleep((at - now) * 1000 + 1_000);
   // Another sweep (or another filler) may have taken it while this one waited for the chain lock or the price.
-  const fresh = await readDeskOrderV2(d, o.id);
+  const fresh = await readDeskOrderV2(d, o.id, version);
   if (fresh.status !== "Open") {
     return { ...base, status: "skipped", reason: fresh.status === "Filled" ? `already filled by ${fresh.filler.toLowerCase() === houseAccount()!.address.toLowerCase() ? "the house" : fresh.filler}` : "no longer open" };
   }
@@ -360,25 +363,25 @@ async function fillOneV2(d: Deployment, o: DeskOrderV2, prices: Record<string, n
   const client = publicClientFor(d);
   let quote: readonly [bigint, bigint, readonly bigint[]] | null = null;
   for (let i = 0; i < 6; i++) {
-    quote = await client.readContract({ address: v2.desk as Address, abi: DESK_V2_ABI, functionName: "quoteFill", args: [BigInt(o.id)] });
+    quote = await client.readContract({ address: desk, abi: DESK_V2_ABI, functionName: "quoteFill", args: [BigInt(o.id)] });
     if (quote[0] <= target) break;
     await sleep(1_500);
   }
   if (!quote || quote[0] > target) return { ...base, status: "skipped", reason: "the chain's clock has not reached the house's price yet", retryInSec: 5 };
-  const r = await deliverAndFill(d, basket, quote[2], v2.desk as Address, encodeFunctionData({ abi: DESK_V2_ABI, functionName: "fill", args: [BigInt(o.id)] }));
+  const r = await deliverAndFill(d, basket, quote[2], desk, encodeFunctionData({ abi: DESK_V2_ABI, functionName: "fill", args: [BigInt(o.id)] }));
   if (!r.ok) return { ...base, status: r.hash ? "failed" : "skipped", reason: r.reason, hash: r.hash };
   if (counted) perBuyer.hit(buyerKey);
   return { ...base, status: "filled", hash: r.hash };
 }
 
 /** Return the cash of expired, unfilled v2 orders to their buyers. Anyone may; the house does it after a grace period. */
-async function refundExpiredV2(d: Deployment, orders: DeskOrderV2[]): Promise<FillResult[]> {
-  const v2 = v2Of(d)!;
+async function refundExpiredV2(d: Deployment, orders: DeskOrderV2[], version: 2 | 3): Promise<FillResult[]> {
+  const desk = deskAddress(d, version)!;
   const now = Math.floor(Date.now() / 1000);
   const due = orders.filter((o) => o.status === "Open" && o.endTs + REFUND_GRACE_SECS < now).slice(0, REFUNDS_PER_SWEEP);
   const out: FillResult[] = [];
   for (const o of due) {
-    const base = { network: d.network, id: o.id, version: 2 as const };
+    const base = { network: d.network, id: o.id, version };
     try {
       const data = encodeFunctionData({ abi: DESK_V2_ABI, functionName: "cancel", args: [BigInt(o.id)] });
       let hash: Hex;
@@ -388,9 +391,9 @@ async function refundExpiredV2(d: Deployment, orders: DeskOrderV2[]): Promise<Fi
           chain: tempoModerato.extend({ feeToken: TEMPO_PATH_USD }),
           transport: http(d.rpc, { timeout: 20_000 }),
         }).extend(publicActions);
-        hash = (await sendTransactionSync(tempo, { calls: [{ to: v2.desk as Address, data }] } as never)).transactionHash;
+        hash = (await sendTransactionSync(tempo, { calls: [{ to: desk, data }] } as never)).transactionHash;
       } else {
-        hash = await walletFor(d).sendTransaction({ to: v2.desk as Address, data });
+        hash = await walletFor(d).sendTransaction({ to: desk, data });
         await publicClientFor(d).waitForTransactionReceipt({ hash, timeout: 60_000 });
       }
       out.push({ ...base, status: "skipped", reason: "the auction ended unfilled; the house cancelled it and the dollars went back to the buyer", hash });
@@ -402,47 +405,57 @@ async function refundExpiredV2(d: Deployment, orders: DeskOrderV2[]): Promise<Fi
 }
 
 /**
- * Fill the open, fair, unexpired orders on one chain, at most `max` per run: v2 auctions
- * first (at the house's price, waiting up to half a minute for it), then any v1 orders
- * still open. A named order needs its `version` (default 1, the v1 desk). A sweep also
- * refunds a couple of v2 orders that ended unfilled.
+ * Fill the open, fair, unexpired orders on one chain, at most `max` per run: auctions on
+ * the v3 and v2 desks first (at the house's price, waiting up to half a minute for it),
+ * then any v1 orders still open. A named order needs its `version` (default 1, the v1
+ * desk). A sweep also refunds a couple of auctions per desk that ended unfilled.
  */
 export async function runEvmKeeper(
   d: Deployment,
-  opts: { orderId?: number; max?: number; version?: 1 | 2; maxWaitSecs?: number } = {},
+  opts: { orderId?: number; max?: number; version?: DeskVersion; maxWaitSecs?: number } = {},
 ): Promise<FillResult[]> {
   const max = opts.max ?? 3;
   const named = opts.orderId != null;
   const version = named ? (opts.version ?? 1) : opts.version;
-  const hasV2 = !!v2Of(d);
-  const [v2Orders, v1Orders] = await Promise.all([
-    hasV2 && version !== 1 ? readDeskOrdersV2(d, 15) : Promise.resolve([] as DeskOrderV2[]),
-    version !== 2 ? readDeskOrders(d, 15) : Promise.resolve([] as DeskOrder[]),
+  const wants = (v: DeskVersion) => version == null || version === v;
+  const [v3Orders, v2Orders, v1Orders] = await Promise.all([
+    v3Of(d) && wants(3) ? readDeskOrdersV2(d, 15, 3) : Promise.resolve([] as DeskOrderV2[]),
+    v2Of(d) && wants(2) ? readDeskOrdersV2(d, 15, 2) : Promise.resolve([] as DeskOrderV2[]),
+    wants(1) ? readDeskOrders(d, 15) : Promise.resolve([] as DeskOrder[]),
   ]);
   const pick = <T extends { id: number; status: string }>(rows: T[]) => rows.filter((o) => o.status === "Open" && (!named || o.id === opts.orderId));
   const now = Math.floor(Date.now() / 1000);
-  const openV2 = pick(v2Orders).filter((o) => named || o.endTs > now);
+  const auctions = [
+    ...pick(v3Orders).map((o) => ({ o, v: 3 as const })),
+    ...pick(v2Orders).map((o) => ({ o, v: 2 as const })),
+  ].filter(({ o }) => named || o.endTs > now);
   const openV1 = pick(v1Orders);
-  const expiredV2 = named ? [] : v2Orders.filter((o) => o.status === "Open" && o.endTs <= now);
-  if (openV2.length === 0 && openV1.length === 0 && expiredV2.length === 0) return [];
+  const expired = named
+    ? []
+    : ([
+        [v3Orders, 3],
+        [v2Orders, 2],
+      ] as const).map(([rows, v]) => ({ v, rows: rows.filter((o) => o.status === "Open" && o.endTs <= now) }));
+  const anyExpired = expired.some((e) => e.rows.length > 0);
+  if (auctions.length === 0 && openV1.length === 0 && !anyExpired) return [];
   // Mirror chains are checked against the same quotes; a mirror basket falls back to its deploy-time prices.
-  const prices = openV2.length + openV1.length > 0 ? await fetchRobinhoodPrices(d.tokens.map((t) => t.symbol)) : {};
+  const prices = auctions.length + openV1.length > 0 ? await fetchRobinhoodPrices(d.tokens.map((t) => t.symbol)) : {};
   const wait = opts.maxWaitSecs ?? (named ? MAX_WAIT_SECS : SWEEP_WAIT_SECS);
   return withChainLock(d.network, async () => {
     const out: FillResult[] = [];
-    const failed = (version: 1 | 2, id: number, err: unknown): FillResult => ({
+    const failed = (v: DeskVersion, id: number, err: unknown): FillResult => ({
       network: d.network,
       id,
-      version,
+      version: v,
       status: "failed",
       reason: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200),
     });
-    // Soonest to reach the house's price first.
-    for (const o of openV2.sort((a, b) => a.endTs - b.endTs).slice(0, max)) {
+    // Soonest to end first.
+    for (const { o, v } of auctions.sort((x, y) => x.o.endTs - y.o.endTs).slice(0, max)) {
       try {
-        out.push(await fillOneV2(d, o, prices, wait));
+        out.push(await fillOneV2(d, o, prices, wait, v));
       } catch (err) {
-        out.push(failed(2, o.id, err));
+        out.push(failed(v, o.id, err));
       }
     }
     for (const o of openV1.slice(0, Math.max(0, max - out.length))) {
@@ -452,7 +465,7 @@ export async function runEvmKeeper(
         out.push(failed(1, o.id, err));
       }
     }
-    if (expiredV2.length > 0) out.push(...(await refundExpiredV2(d, expiredV2)));
+    for (const e of expired) if (e.rows.length > 0) out.push(...(await refundExpiredV2(d, e.rows, e.v)));
     return out;
   });
 }
@@ -474,8 +487,12 @@ export type SipResult = {
   ok: boolean;
   hash?: Hex;
   planId?: number;
+  /** Which plan desk the plan is on: 3 (trailing bounds) or 2 (fixed bounds, accounts that signed before v3). */
+  planVersion?: 2 | 3;
   orderId?: number;
   fairShares?: string;
+  /** Set when this run first moved the plan's window to the last run's fill. */
+  recentredOn?: string;
   startShares?: string;
   endShares?: string;
   fill?: FillResult;
@@ -486,46 +503,110 @@ export type SipResult = {
 /**
  * The plan terms a visitor signs on Tempo, priced the way the keeper prices each run:
  * the first basket, at live Robinhood quotes for the underlying stocks (deploy-time
- * prices for any quote that is missing). Bigints as decimal strings.
+ * prices for any quote that is missing). New plans go to PlanDeskV3 (trailing bounds
+ * under hard bounds); the same terms re-centre an existing v3 plan. Bigints as strings.
  */
 export async function tempoSipTerms() {
   const d = deploymentFor("tempoTestnet");
-  const v2 = d ? v2Of(d) : null;
-  if (!d || !v2) throw new Error("Tempo v2 is not deployed.");
+  const v3 = d ? v3Of(d) : null;
+  if (!d || !v3) throw new Error("Tempo v3 is not deployed.");
   const basket = d.baskets[0];
   const prices = await fetchRobinhoodPrices(basket.components.map((c) => c.symbol));
   const nav = navFor(d, basket, prices);
   if (nav == null) throw new SipRefused("No price for the basket right now. Try again in a moment.");
-  const t = tempoSipV2Terms(nav, d.stable.decimals);
+  const t = tempoSipV3Terms(nav, d.stable.decimals);
   return {
+    version: 3 as const,
     basket: basket.address,
     symbol: basket.symbol,
     nav,
-    planDesk: v2.planDesk,
-    desk: v2.desk,
+    planDesk: v3.planDesk,
+    desk: v3.desk,
     cashPerRun: t.cashPerRun.toString(),
     interval: t.interval.toString(),
     auctionSecs: t.auctionSecs.toString(),
     bandBps: t.bandBps,
-    fairShares: t.fairShares.toString(),
-    minShares: t.minShares.toString(),
-    maxShares: t.maxShares.toString(),
+    stepBps: t.stepBps,
+    refShares: t.refShares.toString(),
+    hardMin: t.hardMin.toString(),
+    hardMax: t.hardMax.toString(),
   };
 }
 
 /**
+ * The plan a Tempo SIP account runs: its newest open PlanDeskV3 plan, else its newest
+ * open v2 PlanDesk plan (kept running for accounts that signed before v3). `low` and
+ * `high` are what the next run's fair count must sit in: v3's trailing window inside
+ * the hard bounds, or v2's fixed bounds.
+ */
+type SipPlan = {
+  version: 2 | 3;
+  id: number;
+  basket: Address;
+  cashPerRun: bigint;
+  runs: number;
+  interval: number;
+  nextRunAt: number;
+  low: bigint;
+  high: bigint;
+  hardMin: bigint;
+  hardMax: bigint;
+  planDesk: Address;
+};
+
+async function sipPlanOf(d: Deployment, account: Address): Promise<SipPlan | undefined> {
+  const [v3Plans, v2Plans] = await Promise.all([readPlansOfV3(d, account), readPlansOf(d, account)]);
+  const p3 = [...v3Plans].reverse().find((p) => p.active && basketOf(d, p.basket));
+  if (p3) {
+    return {
+      version: 3,
+      id: p3.id,
+      basket: p3.basket,
+      cashPerRun: p3.cashPerRun,
+      runs: p3.runs,
+      interval: p3.interval,
+      nextRunAt: p3.nextRunAt,
+      low: p3.low,
+      high: p3.high,
+      hardMin: p3.hardMin,
+      hardMax: p3.hardMax,
+      planDesk: v3Of(d)!.planDesk as Address,
+    };
+  }
+  const p2 = [...v2Plans].reverse().find((p) => p.active && basketOf(d, p.basket));
+  if (p2) {
+    return {
+      version: 2,
+      id: p2.id,
+      basket: p2.basket,
+      cashPerRun: p2.cashPerRun,
+      runs: p2.runs,
+      interval: p2.interval,
+      nextRunAt: p2.nextRunAt,
+      low: p2.minShares,
+      high: p2.maxShares,
+      hardMin: p2.minShares,
+      hardMax: p2.maxShares,
+      planDesk: v2Of(d)!.planDesk as Address,
+    };
+  }
+  return undefined;
+}
+
+/**
  * The keeper side of a Tempo SIP. The visitor's account (a passkey, usually) opened a
- * plan on PlanDesk with its root key, then signed one key authorization naming the
+ * plan on PlanDeskV3 with its root key, then signed one key authorization naming the
  * house key as an access key, with a recurring AlphaUSD limit and two scoped calls:
- * AlphaUSD.approve with PlanDesk as spender, and PlanDesk.instalment. Here the house
+ * AlphaUSD.approve with the plan desk as spender, and its instalment. Here the house
  * signs as that access key, for that account. The plan contract fixes the amount, the
- * interval and the worst price; the chain fixes the budget and the scope. The keeper
- * only supplies today's fair share count, which must sit inside the visitor's bounds.
+ * interval, the trailing window and the owner's hard bounds; the chain fixes the
+ * budget and the scope. The keeper only supplies today's fair share count, which must
+ * sit inside the window.
  */
 export async function runTempoSip(account: Address, action: SipAction, opts: { auto?: boolean } = {}): Promise<SipResult> {
   const d = deploymentFor("tempoTestnet");
   const key = houseKey();
-  if (!d || !key || !v2Of(d)) throw new Error("Tempo keeper not configured.");
+  if (!d || !key || !v3Of(d)) throw new Error("Tempo keeper not configured.");
   const slot = account.toLowerCase();
   if (sipInFlight.has(slot)) throw new SipRefused("The keeper is already acting for this account.");
   sipInFlight.add(slot);
@@ -538,7 +619,7 @@ export async function runTempoSip(account: Address, action: SipAction, opts: { a
 
 /** A request the keeper turns down before it reaches the chain; `retryAt` is when asking again could succeed. */
 export class SipRefused extends Error {
-  constructor(message: string, readonly retryAt?: number) {
+  constructor(message: string, readonly retryAt?: number, readonly code?: "outOfWindow") {
     super(message);
   }
 }
@@ -548,9 +629,12 @@ const sipInFlight = new Set<string>();
 
 const CHAIN_REFUSAL = /(SpendingLimitExceeded|CallNotAllowed|KeyAlreadyRevoked|KeyExpired|KeyNotFound|[A-Z][A-Za-z]+(?:Exceeded|NotAllowed|Revoked|Expired))/;
 
-/** The plan contract's own reason for a reverted run: the same call simulated from the account, its msg.sender. */
-async function planRefusal(d: Deployment, account: Address, args: readonly [bigint, bigint]): Promise<string | null> {
-  const v2 = v2Of(d)!;
+/**
+ * The plan contract's own reason for a reverted run: the same call simulated from the
+ * account, its msg.sender. Both plan desks share instalment's and auctionFor's
+ * signatures and error selectors, so one ABI reads either.
+ */
+async function planRefusal(d: Deployment, planDesk: Address, account: Address, args: readonly [bigint, bigint]): Promise<string | null> {
   const reader = createClient({ chain: tempoModerato, transport: http(d.rpc, { timeout: 15_000 }) }).extend(publicActions);
   const reason = async (call: () => Promise<unknown>) => {
     try {
@@ -561,10 +645,10 @@ async function planRefusal(d: Deployment, account: Address, args: readonly [bigi
       return r instanceof ContractFunctionRevertedError ? (r.data?.errorName ?? null) : null;
     }
   };
-  const first = await reason(() => reader.simulateContract({ account, address: v2.planDesk as Address, abi: PLAN_DESK_ABI, functionName: "instalment", args }));
+  const first = await reason(() => reader.simulateContract({ account, address: planDesk, abi: PLAN_DESK_V3_ABI, functionName: "instalment", args }));
   // The schedule is checked before the price; when both refuse, say both.
   if (first === "TooSoon") {
-    const price = await reason(() => reader.readContract({ address: v2.planDesk as Address, abi: PLAN_DESK_ABI, functionName: "auctionFor", args }));
+    const price = await reason(() => reader.readContract({ address: planDesk, abi: PLAN_DESK_V3_ABI, functionName: "auctionFor", args }));
     if (price) return `TooSoon, and ${price}`;
   }
   return first;
@@ -574,7 +658,6 @@ const shareText = (v: bigint) => fromRaw(v).toFixed(4);
 const dayText = (secs: number) => new Date(secs * 1000).toISOString().slice(0, 10);
 
 async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action: SipAction, auto: boolean): Promise<SipResult> {
-  const v2 = v2Of(d)!;
   const keeper = TempoAccount.fromSecp256k1(key, { access: account });
   const client = createClient({
     account: keeper,
@@ -582,20 +665,17 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
     transport: http(d.rpc, { timeout: 20_000 }),
   }).extend(publicActions);
   const alpha = d.stable.address as Address;
-  const planDesk = v2.planDesk as Address;
   const now = Math.floor(Date.now() / 1000);
 
-  // The visitor's newest open plan on PlanDesk, for a basket this deployment lists.
-  let plan: PlanV2 | undefined;
+  // The visitor's newest open plan, v3 first, for a basket this deployment lists.
+  let plan: SipPlan | undefined;
   if (action !== "outOfScope") {
-    let plans: PlanV2[];
     try {
-      plans = await readPlansOf(d, account);
+      plan = await sipPlanOf(d, account);
     } catch {
       throw new SipRefused("Could not read this account's plan on Tempo. Try again in a moment.");
     }
-    plan = [...plans].reverse().find((p) => p.active && basketOf(d, p.basket));
-    if (!plan) throw new SipRefused("This account has no open plan on PlanDesk. Sign the plan first.", auto ? Date.now() + 6 * 3_600_000 : undefined);
+    if (!plan) throw new SipRefused("This account has no open plan. Sign the plan first.", auto ? Date.now() + 6 * 3_600_000 : undefined);
     if (action === "instalment" && plan.nextRunAt > now) {
       throw new SipRefused(`This period's installment has already run. The next one is due ${dayText(plan.nextRunAt)}.`, plan.nextRunAt * 1000);
     }
@@ -628,11 +708,11 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
     const basket = d.baskets[0];
     calls = [
       {
-        to: v2.desk as Address,
+        to: v3Of(d)!.desk as Address,
         data: encodeFunctionData({
           abi: DESK_V2_ABI,
           functionName: "placeOrder",
-          args: [basket.address as Address, TEMPO_SIP_V2.cashPerRun, 1n, 1n, BigInt(now), BigInt(now + 600)],
+          args: [basket.address as Address, TEMPO_SIP_V3.cashPerRun, 1n, 1n, BigInt(now), BigInt(now + 600)],
         }),
       },
     ];
@@ -643,16 +723,25 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
     const nav = navFor(d, basket, prices);
     if (nav == null) throw new SipRefused("No price for the basket right now. Try again in a moment.", Date.now() + 600_000);
     fair = fairSharesFor(p.cashPerRun, d.stable.decimals, nav);
-    if (action !== "overspend" && (fair < p.minShares || fair > p.maxShares)) {
+    if (action !== "overspend" && (fair < p.low || fair > p.high)) {
+      const where =
+        p.version === 3
+          ? fair < p.hardMin || fair > p.hardMax
+            ? `past this plan's hard bounds (${shareText(p.hardMin)} to ${shareText(p.hardMax)})`
+            : `more than one step from the last fill (window ${shareText(p.low)} to ${shareText(p.high)})`
+          : `outside this plan's bounds (${shareText(p.low)} to ${shareText(p.high)})`;
       throw new SipRefused(
-        `Today's price makes a run ${shareText(fair)} ${basket.symbol}, outside this plan's bounds (${shareText(p.minShares)} to ${shareText(p.maxShares)}). The keeper will not post it; open a new plan at today's price to go on.`,
+        `Paused: today's price makes a run ${shareText(fair)} ${basket.symbol}, ${where}. The keeper will not post it. ${
+          p.version === 3 ? "Re-centre the plan (one signature from your own key) to go on." : "Open a new plan at today's price to go on."
+        }`,
         Date.now() + 6 * 3_600_000,
+        "outOfWindow",
       );
     }
     const runFair = action === "overspend" ? 1n : fair;
     calls = [
-      { to: alpha, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [planDesk, p.cashPerRun] }) },
-      { to: planDesk, data: encodeFunctionData({ abi: PLAN_DESK_ABI, functionName: "instalment", args: [BigInt(p.id), runFair] }) },
+      { to: alpha, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [p.planDesk, p.cashPerRun] }) },
+      { to: p.planDesk, data: encodeFunctionData({ abi: PLAN_DESK_V3_ABI, functionName: "instalment", args: [BigInt(p.id), runFair] }) },
     ];
   }
 
@@ -663,34 +752,38 @@ async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action
     const e = err as { details?: string; shortMessage?: string; message?: string };
     const text = `${e.details ?? ""} ${e.shortMessage ?? ""} ${e.message ?? ""}`;
     const named = text.match(CHAIN_REFUSAL)?.[1];
-    const fromPlan = !named && plan ? await planRefusal(d, account, [BigInt(plan.id), action === "overspend" ? 1n : fair]) : null;
+    const fromPlan = !named && plan ? await planRefusal(d, plan.planDesk, account, [BigInt(plan.id), action === "overspend" ? 1n : fair]) : null;
     return {
       action,
       ok: false,
       planId: plan?.id,
+      planVersion: plan?.version,
       refusal: named ?? fromPlan ?? (e.shortMessage ?? "refused").split("\n")[0].slice(0, 160),
     };
   }
-  if (receipt.status !== "success") return { action, ok: false, hash: receipt.transactionHash, planId: plan?.id, refusal: "reverted" };
+  if (receipt.status !== "success") return { action, ok: false, hash: receipt.transactionHash, planId: plan?.id, planVersion: plan?.version, refusal: "reverted" };
 
-  const ran = parseEventLogs({ abi: PLAN_DESK_ABI, logs: receipt.logs, eventName: "Instalment" })[0];
+  const ran = parseEventLogs({ abi: PLAN_DESK_V3_ABI, logs: receipt.logs, eventName: "Instalment" })[0];
+  const recentred = parseEventLogs({ abi: PLAN_DESK_V3_ABI, logs: receipt.logs, eventName: "Recentered" })[0];
   const orderId = ran ? Number(ran.args.orderId) : undefined;
   let fill: FillResult | undefined;
-  if (orderId != null) {
+  if (orderId != null && plan) {
     // The house is also a participant: it fills once the auction reaches fair plus its margin.
     // The auction opens above that, so this answers at once with when; any filler can take it sooner.
-    sipOrders.add(`${d.network}:v2:${orderId}`);
-    fill = (await runEvmKeeper(d, { orderId, max: 1, version: 2, maxWaitSecs: 0 }))[0];
+    sipOrders.add(`${d.network}:v${plan.version}:${orderId}`);
+    fill = (await runEvmKeeper(d, { orderId, max: 1, version: plan.version, maxWaitSecs: 0 }))[0];
   }
   return {
     action,
     ok: true,
     hash: receipt.transactionHash,
     planId: plan?.id,
+    planVersion: plan?.version,
     orderId,
     fairShares: ran ? ran.args.fairShares.toString() : undefined,
     startShares: ran ? ran.args.startShares.toString() : undefined,
     endShares: ran ? ran.args.endShares.toString() : undefined,
+    recentredOn: recentred ? recentred.args.refShares.toString() : undefined,
     fill,
   };
 }
@@ -728,7 +821,7 @@ async function discoverSipAccounts(d: Deployment) {
   ]);
   const secsPerBlock = Math.max(0.05, Number(head.timestamp - back.timestamp) / Number(latest > LOG_RANGE ? LOG_RANGE : latest || 1n));
   // First pass: one period back, since an older key has had this period's installment or expired.
-  const lookback = BigInt(Math.ceil((TEMPO_SIP_V2.period + 86_400) / secsPerBlock));
+  const lookback = BigInt(Math.ceil((TEMPO_SIP_V3.period + 86_400) / secsPerBlock));
   let from = sipScannedTo != null ? sipScannedTo + 1n : latest > lookback ? latest - lookback : 0n;
   const ranges: [bigint, bigint][] = [];
   for (; from <= latest; from += LOG_RANGE) ranges.push([from, from + LOG_RANGE - 1n > latest ? latest : from + LOG_RANGE - 1n]);
@@ -753,14 +846,14 @@ async function discoverSipAccounts(d: Deployment) {
 export type SipScheduleResult = {
   accounts: number;
   checked: number;
-  placed: { account: string; ok: boolean; planId?: number; orderId?: number; fill?: string; refusal?: string }[];
+  placed: { account: string; ok: boolean; planId?: number; planVersion?: 2 | 3; orderId?: number; fill?: string; refusal?: string }[];
   ms: number;
 };
 
 export async function runSipSchedule(): Promise<SipScheduleResult> {
   const started = Date.now();
   const d = deploymentFor("tempoTestnet");
-  if (!d || !houseKey() || !v2Of(d)) return { accounts: 0, checked: 0, placed: [], ms: 0 };
+  if (!d || !houseKey() || !v3Of(d)) return { accounts: 0, checked: 0, placed: [], ms: 0 };
   sipScan ??= discoverSipAccounts(d).finally(() => (sipScan = null));
   await sipScan;
   const placed: SipScheduleResult["placed"] = [];
@@ -771,14 +864,13 @@ export async function runSipSchedule(): Promise<SipScheduleResult> {
     if (now < entry.nextCheck || now - entry.authorizedAt < SIP_GRACE_MS) continue;
     checked++;
     // Gate on the plan itself: no open plan, or not yet due, means no transaction at all.
-    let plans: PlanV2[];
+    let plan: SipPlan | undefined;
     try {
-      plans = await readPlansOf(d, entry.account);
+      plan = await sipPlanOf(d, entry.account);
     } catch {
       entry.nextCheck = now + 600_000;
       continue;
     }
-    const plan = [...plans].reverse().find((p) => p.active && basketOf(d, p.basket));
     if (!plan) {
       // A v1 authorization (scoped to the old desk) or a closed plan: nothing to run.
       entry.nextCheck = now + 6 * 3_600_000;
@@ -790,11 +882,13 @@ export async function runSipSchedule(): Promise<SipScheduleResult> {
     }
     try {
       const r = await runTempoSip(entry.account, "instalment", { auto: true });
-      placed.push({ account: entry.account, ok: r.ok, planId: r.planId, orderId: r.orderId, fill: r.fill?.status, refusal: r.refusal });
+      placed.push({ account: entry.account, ok: r.ok, planId: r.planId, planVersion: r.planVersion, orderId: r.orderId, fill: r.fill?.status, refusal: r.refusal });
       // Placed: the plan's next due date. Refused by the chain (no AlphaUSD, say): try again in an hour.
       entry.nextCheck = r.ok ? now + plan.interval * 1000 : now + 3_600_000;
     } catch (err) {
       entry.nextCheck = err instanceof SipRefused ? (err.retryAt ?? now + 6 * 3_600_000) : now + 600_000;
+      // A plan paused by a price move says so in the sweep's report, so the cron log shows it.
+      if (err instanceof SipRefused && err.code === "outOfWindow") placed.push({ account: entry.account, ok: false, planId: plan.id, planVersion: plan.version, refusal: err.message });
     }
   }
   return { accounts: sipAccounts.size, checked, placed, ms: Date.now() - started };

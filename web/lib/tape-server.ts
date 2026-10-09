@@ -132,7 +132,8 @@ export type Tape = {
 
 /** The mints we watch; the rest of the universe trades too rarely to fill a tape. */
 const WATCH = ["SPY", "NVDA", "TSLA", "AAPL", "QQQ", "CRCL", "MSTR", "COIN", "GOOGL", "HOOD"];
-const STOCKS = XSTOCKS.filter((x) => WATCH.includes(x.base));
+// Busiest first: a cold instance decodes its first rows from the first two.
+const STOCKS = XSTOCKS.filter((x) => WATCH.includes(x.base)).sort((a, b) => WATCH.indexOf(a.base) - WATCH.indexOf(b.base));
 const BY_MINT = new Map(STOCKS.map((x) => [x.mint, x]));
 const mintOf = (symbol: string) => STOCKS.find((s) => s.symbol === symbol)?.mint ?? "";
 
@@ -193,6 +194,8 @@ const freshTx = { tried: 0, solami: 0, public: 0 };
 const RACE_EVERY_MS = 60_000;
 /** Prints kept in the answer; the page shows up to 40 after merging polls. */
 const DEPTH = 60;
+/** The newest slot any poll has read, for a warming answer. */
+let latestSlot = 0;
 /** Upstreams this instance has already called once (so the connection is open). */
 const warmed = new Set<Via>();
 const BACKLOG_MAX = 80;
@@ -360,18 +363,65 @@ async function poll(): Promise<Tape> {
     rpcMs = warmed.has(out.via) ? out.ms : null;
     warmed.add(out.via);
     slotAt = Date.now();
+    latestSlot = slot;
   } catch {
     // A missed getSlot is not worth an empty tape: keep the last slot and go on.
   }
 
+  // Decode signatures into prints. Rows go into `seen` as soon as they are
+  // decoded, so a warming answer can already show them.
+  const decodeSome = async (sigs: Signature[], ref: Map<string, number>, times: Map<string, number | null>) => {
+    const decoded: (Decoded & { live: boolean })[] = [];
+    for (const s of sigs) {
+      try {
+        const out = await call<RawTx | null>("getTransaction", [
+          s.signature,
+          { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" },
+        ]);
+        if (!out.result) continue; // not served yet; a later poll retries it
+        seen.set(s.signature, null);
+        const d = decode(out.result, s.signature, ref);
+        if (!d) continue;
+        const row = { ...d, blockTime: times.get(s.signature) || s.blockTime || d.blockTime, live: live.has(s.signature) };
+        decoded.push(row);
+        // Provisional: placed by slot distance until the block time is read below.
+        const exact = row.blockTime || blockTimes.get(row.slot) || null;
+        const { blockTime: _b, ...rest } = row;
+        void _b;
+        seen.set(s.signature, {
+          ...rest,
+          time: exact ?? Math.round(slotAt / 1000 - (slot - row.slot) * SLOT_SECONDS),
+          timeSource: exact ? "chain" : "slot",
+          seenAt: Date.now(),
+          refPrice: ref.get(mintOf(row.symbol)) ?? null,
+          refAt: ref.has(mintOf(row.symbol)) && refPrices ? Math.round(refPrices.at / 1000) : null,
+        });
+      } catch (err) {
+        // An outage is retried on a later poll; a request the node refused is not.
+        if (err instanceof RpcError && err.answered) seen.set(s.signature, null);
+      }
+    }
+    return decoded;
+  };
+
   // A cold instance has an empty tape, so its first poll is the backfill: the
-  // last 20 signatures on every watched mint (ten paced calls, once). The newest
-  // few are decoded now; the rest queue up for the next polls.
+  // last 20 signatures on every watched mint (ten paced calls, once). The two
+  // busiest mints go first and their newest two trades are decoded straight
+  // away (about three seconds), so the first answer, even a `warming` one,
+  // already has rows; then the other mints, and the rest queue for later polls.
   const cold = !backfilled;
   const batch = cold ? STOCKS : [0, 1].map((i) => STOCKS[(cursor + i) % STOCKS.length]);
   if (!cold) cursor = (cursor + batch.length) % STOCKS.length;
   const lists: { mint: string; sigs: Signature[] }[] = [];
+  const quickStart = async () => {
+    if (lists.length !== 2) return;
+    const sigs = lists.flatMap((l) => l.sigs).filter((s) => !s.err && !seen.has(s.signature));
+    const first = sigs.sort((a, b) => b.slot - a.slot).slice(0, 2);
+    if (!first.length) return;
+    await decodeSome(first, await prices(), new Map(first.map((s) => [s.signature, s.blockTime || null])));
+  };
   for (const s of batch) {
+    if (cold) await quickStart();
     try {
       const out = await call<Signature[]>("getSignaturesForAddress", [
         s.mint,
@@ -416,28 +466,7 @@ async function poll(): Promise<Tape> {
   const work = [...fresh, ...extra];
 
   const ref = work.length ? await prices() : (refPrices?.usd ?? new Map<string, number>());
-  const decoded: (Decoded & { live: boolean })[] = [];
-  for (const s of work) {
-    try {
-      const out = await call<RawTx | null>("getTransaction", [
-        s.signature,
-        { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" },
-      ]);
-      if (!out.result) continue; // not served yet; a later poll retries it
-      seen.set(s.signature, null);
-      const d = decode(out.result, s.signature, ref);
-      if (d) {
-        decoded.push({
-          ...d,
-          blockTime: sigTimes.get(s.signature) || s.blockTime || d.blockTime,
-          live: live.has(s.signature),
-        });
-      }
-    } catch (err) {
-      // An outage is retried on a later poll; a request the node refused is not.
-      if (err instanceof RpcError && err.answered) seen.set(s.signature, null);
-    }
-  }
+  const decoded = await decodeSome(work.filter(unseen), ref, sigTimes);
 
   // Solami answers blockTime 0 at "confirmed". One getBlockTime on the newest
   // fresh slot anchors the rest, which are placed by slot distance from it.
@@ -456,16 +485,12 @@ async function poll(): Promise<Tape> {
     return Math.round(slotAt / 1000 - (slot - s) * SLOT_SECONDS);
   };
   const now = Date.now();
-  for (const { blockTime, ...rest } of decoded) {
-    const exact = blockTime || blockTimes.get(rest.slot) || null;
-    seen.set(rest.signature, {
-      ...rest,
-      time: exact ?? estimate(rest.slot),
-      timeSource: exact ? "chain" : "slot",
-      seenAt: now,
-      refPrice: ref.get(mintOf(rest.symbol)) ?? null,
-      refAt: ref.has(mintOf(rest.symbol)) && refPrices ? Math.round(refPrices.at / 1000) : null,
-    });
+  // Settle the times of this poll's rows (and any provisional ones) against the anchors.
+  for (const p of seen.values()) {
+    if (!p || p.timeSource === "chain") continue;
+    const exact = blockTimes.get(p.slot) ?? null;
+    p.time = exact ?? estimate(p.slot);
+    p.timeSource = exact ? "chain" : "slot";
   }
 
   if (seen.size > 600) {
@@ -548,9 +573,10 @@ function refresh(): Promise<Tape> {
  * instead of freezing it the moment the response is sent.
  *
  * A cold instance's backfill is about fifteen paced calls (ten seconds or
- * so). The caller waits up to four; past that it gets an empty tape marked
- * `warming` (the page keeps its earlier-trades seed on screen) and the
- * backfill finishes in the background for the next request.
+ * so). The caller waits up to four; past that it gets a tape marked `warming`
+ * holding whatever the backfill has decoded so far (it decodes the busiest two
+ * mints' newest trades first, in about three seconds), and the backfill
+ * finishes in the background for the next request.
  */
 export async function readTape(background?: (task: () => Promise<unknown>) => void): Promise<Tape> {
   const age = cache ? Date.now() - cache.polledAt : Infinity;
@@ -566,12 +592,16 @@ export async function readTape(background?: (task: () => Promise<unknown>) => vo
   if (first) return first;
   later(() => poll.catch(() => {}));
   return {
-    slot: 0,
+    slot: latestSlot,
     via: solamiKey() ? "solami" : "public",
     fallback: null,
     stale: false,
     warming: true,
-    prints: [],
+    // Whatever the backfill has decoded so far (its first rows land in about three seconds).
+    prints: [...seen.values()]
+      .filter((p): p is Print => p != null)
+      .sort((a, b) => b.slot - a.slot || b.time - a.time)
+      .slice(0, DEPTH),
     polledAt: Date.now(),
     watching: STOCKS.map((s) => s.base),
     backlog: 0,

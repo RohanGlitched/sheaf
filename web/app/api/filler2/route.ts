@@ -5,6 +5,8 @@ import { runFillerPass, type CoreBasket, type FillerIdl } from "@/lib/filler-cor
 import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint, symbolForWriteMint } from "@/lib/mirror";
 import { filler2Keypair } from "@/lib/server-keys";
+import { rememberOidc } from "@/lib/gcs-store";
+import { recordFills } from "@/lib/server-fill-log";
 import idl from "@/lib/sheaf-idl.json";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,10 @@ export const maxDuration = 60;
  */
 
 const EDGE_BPS = 8;
+/** Extra margin when any quote is a fallback (Jupiter did not answer for it), as the house asks. */
+const FALLBACK_EXTRA_BPS = 50;
+/** The whole pass, waits included, stays inside this, well under the route's 60 s. */
+const PASS_BUDGET_SECS = 45;
 /** Inside one pass, wait up to this long for an order about to reach the margin. */
 const WAIT_SECS = 30;
 
@@ -33,6 +39,7 @@ let lastRun = 0;
 let running = false;
 
 export async function GET(request: Request) {
+  rememberOidc(request);
   const filler = filler2Keypair();
   if (!filler) return Response.json({ error: "The second filler is not configured here. Set FILLER2_KEY on the server." }, { status: 503 });
   const noStore = { headers: { "cache-control": "no-store" } };
@@ -46,13 +53,16 @@ export async function GET(request: Request) {
   const short = new Set<string>();
   try {
     const market = await fetchMarket();
+    const fallback = market.quotes.some((q) => q.source && q.source !== "jupiter");
+    const edgeBps = EDGE_BPS + (fallback ? FALLBACK_EXTRA_BPS : 0);
     const quotes = new Map(market.quotes.map((q) => [q.symbol, q]));
     const result = await runFillerPass({
       connection,
       filler,
       idl: idl as unknown as FillerIdl,
       cashMint: new PublicKey(CASH_MINT),
-      edgeBps: EDGE_BPS,
+      edgeBps,
+      passBudgetSecs: PASS_BUDGET_SECS,
       waitUpToSecs: WAIT_SECS,
       quote: (mint) => {
         const stock = stockForWriteMint(mint.toBase58());
@@ -81,7 +91,11 @@ export async function GET(request: Request) {
         .then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }))
         .catch((e) => ({ error: (e as Error).message }));
     }
-    return Response.json({ filler: filler.publicKey.toBase58(), edgeBps: EDGE_BPS, ...result, topUp, log: lines.slice(-40) }, noStore);
+    // What it believed each fill was worth, for the realized margins on /api/ledger.
+    await recordFills(
+      result.filled.map((f) => ({ order: f.order, side: f.side, filler: "second" as const, cash: f.dollars, fair: f.cost, marginBps: f.edgeBps, fallback, at: Date.now() })),
+    );
+    return Response.json({ filler: filler.publicKey.toBase58(), edgeBps, fallback, ...result, topUp, log: lines.slice(-40) }, noStore);
   } catch (err) {
     return Response.json({ error: ((err as Error).message ?? "pass failed").split("\n")[0].slice(0, 200), log: lines.slice(-20) }, { status: 500 });
   } finally {

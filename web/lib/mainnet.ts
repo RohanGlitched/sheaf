@@ -1,11 +1,15 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getScaledUiAmountConfig, unpackMint } from "@solana/spl-token";
-import { pacedFetch, rpcUrl, solamiCooling, solamiKey, type Via } from "./solami";
+import { pacedFetch, reportSolamiFailure, rpcUrl, solamiCooling, solamiKey, type Via } from "./solami";
 
 /**
  * Mainnet reads go through Solami's private RPC when a key is configured, and
  * fall back to the public endpoint when it is not, or when Solami fails this
  * read. `via` says which one actually answered. The key stays on the server.
+ *
+ * Failures are not swallowed: each is logged, a Solami failure puts Solami on
+ * its cool-down, and the last one is kept for routes to report beside the data
+ * (lastMintReadFailure, shown by /api/market as `chainError`).
  */
 
 export type MintState = {
@@ -31,21 +35,49 @@ export type ChainRead = {
  */
 export async function readMints(mints: string[]): Promise<ChainRead | null> {
   const order: Via[] = solamiKey() && !solamiCooling() ? ["solami", "public"] : ["public"];
+  const failures: string[] = [];
   for (const via of order) {
-    const read = await readMintsVia(via, mints);
-    if (read) return read;
+    try {
+      const read = await readMintsVia(via, mints);
+      if (via === "public" && solamiKey()) {
+        // Solami was skipped or failed: say so rather than pass the public answer off silently.
+        lastFailure = {
+          at: Date.now(),
+          message: failures.length ? failures.join("; ") : `Solami is cooling down (${solamiCooling() ?? "recent failure"})`,
+          answeredBy: "public",
+        };
+      }
+      return read;
+    } catch (err) {
+      const message = `${via}: ${(err as Error).message?.slice(0, 160) || "read failed"}`;
+      failures.push(message);
+      // A Solami failure puts it on the same short cool-down the tape uses.
+      if (via === "solami") reportSolamiFailure(message);
+      console.error(`[mainnet] mint read failed via ${message}`);
+    }
   }
+  lastFailure = { at: Date.now(), message: failures.join("; ") || "no RPC answered", answeredBy: null };
   return null;
 }
 
-async function readMintsVia(via: Via, mints: string[]): Promise<ChainRead | null> {
+/**
+ * The last time a mint read could not come from Solami: when, why, and who
+ * answered instead (null if nobody did). Routes surface it next to the data.
+ */
+export type MintReadFailure = { at: number; message: string; answeredBy: Via | null };
+let lastFailure: MintReadFailure | null = null;
+export function lastMintReadFailure(): MintReadFailure | null {
+  return lastFailure;
+}
+
+async function readMintsVia(via: Via, mints: string[]): Promise<ChainRead> {
   const connection = new Connection(rpcUrl(via), {
     commitment: "confirmed",
     fetch: pacedFetch(via),
     // web3.js would otherwise retry 429s on its own schedule, outside the pacing.
     disableRetryOnRateLimit: true,
   });
-  try {
+  {
     const keys = mints.map((m) => new PublicKey(m));
     const out = new Map<string, MintState>();
     let slot = 0;
@@ -69,8 +101,7 @@ async function readMintsVia(via: Via, mints: string[]): Promise<ChainRead | null
         });
       });
     }
+    if (out.size === 0) throw new Error("no Token-2022 mint in the answer");
     return { slot, via, mints: out };
-  } catch {
-    return null;
   }
 }

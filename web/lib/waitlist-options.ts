@@ -59,5 +59,9 @@ export const isBand = (v: unknown): v is MonthlyBand => MONTHLY_BANDS.some((b) =
 export const isRoute = (v: unknown): v is UsRoute => US_ROUTES.some((r) => r.key === v);
 export const isHome = (v: unknown): v is Home => HOMES.some((h) => h.key === v);
 
-/** What GET /api/waitlist answers: counts only, never an entry. */
+/**
+ * What GET /api/waitlist answers: counts only, never an entry. Every number counts
+ * only answers that left a contact (each contact once); answers without one are kept
+ * but never counted in public. `withContact` equals `count`, kept for older readers.
+ */
 export type WaitlistCounts = { count: number; withContact: number; byHome: Record<Home, number> };

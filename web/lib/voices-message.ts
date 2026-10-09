@@ -20,8 +20,20 @@ export const QUOTE_MAX = 200;
 export const FRESH_DAYS = 2;
 export const SITE_LINE = "sheaf-index.vercel.app/voices";
 
+/**
+ * How the signing wallet was made, as the signing page reports it: "browser" for
+ * the keypair Sheaf keeps in this browser (adapter "Browser wallet"), "app" for an
+ * extension or a wallet app. Self-reported, and shown as such.
+ */
+export type WalletKind = "browser" | "app";
+export const WALLET_KIND_LINE: Record<WalletKind, string> = { browser: "browser", app: "extension or app" };
+export const WALLET_KIND_LABEL: Record<WalletKind, string> = { browser: "in-browser wallet", app: "wallet app" };
+export const isWalletKind = (k: unknown): k is WalletKind => k === "browser" || k === "app";
+
 export type VoiceFields = {
   wallet: string;
+  /** Optional in the type only so older callers that read the header line still compile; the API requires it. */
+  walletKind?: WalletKind;
   platform: Platform;
   handle: string;
   quote: string;
@@ -29,6 +41,18 @@ export type VoiceFields = {
   /** YYYY-MM-DD, UTC. */
   date: string;
 };
+
+/** The wallet's first provable action, found on the chain by the server (lib/voices-proof.ts). */
+export type Proof = {
+  /** "sheaf": a Sheaf program event with this wallet as actor. "launch": a swap it paid for on an official launch pool. */
+  kind: "sheaf" | "launch";
+  signature: string;
+  time: number | null;
+  text: string;
+};
+
+/** A GitHub handle proven by a public gist from that account containing the signed message. */
+export type GithubProof = { gist: string; login: string; at: string };
 
 /** One stored, signed entry, as /api/voices serves it. */
 export type Voice = VoiceFields & {
@@ -38,7 +62,16 @@ export type Voice = VoiceFields & {
   signature: string;
   /** When the server received it, ISO 8601. */
   at: string;
+  /** Null until the wallet has done something on Sheaf; only entries with a proof are listed. */
+  proof: Proof | null;
+  /** When the chain was last read for a proof, ISO 8601. */
+  checkedAt?: string;
+  /** Set once the GitHub handle is proven; every other handle is self-reported. */
+  github?: GithubProof | null;
 };
+
+/** Where a signed entry stands. */
+export type VoiceStatus = "listed" | "waiting" | "team";
 
 export const isPlatform = (p: unknown): p is Platform => typeof p === "string" && Object.hasOwn(PLATFORMS, p);
 
@@ -106,7 +139,8 @@ export function voiceMessage(f: VoiceFields): string {
     "",
     "I used Sheaf with this wallet, and I'm happy for that to be public.",
     "",
-    `Wallet: ${f.wallet}`,
+    `Address: ${f.wallet}`,
+    `Wallet: ${WALLET_KIND_LINE[f.walletKind ?? "app"]}`,
     `Handle: ${PLATFORMS[f.platform].label} ${handleText(f.platform, f.handle)}`,
     `Quote: ${f.quote || "(none)"}`,
     `Invited via: ${f.ref || "(none)"}`,
@@ -119,18 +153,20 @@ export function voiceMessage(f: VoiceFields): string {
 
 /** The text a wallet signs to take its entry down again. */
 export function removalMessage(wallet: string, date: string): string {
-  return ["Sheaf: remove my name", "", `Wallet: ${wallet}`, `Date: ${date}`, `Site: ${SITE_LINE}`].join("\n");
+  return ["Sheaf: remove my name", "", `Address: ${wallet}`, `Date: ${date}`, `Site: ${SITE_LINE}`].join("\n");
 }
 
 /** What GET /api/voices answers. */
 export type VoicesAnswer = {
   /** False until storage is configured; the page then says signing hasn't opened. */
   open: boolean;
-  /** Signed entries from wallets that aren't the team's, newest first. */
+  /** Signed entries from wallets that aren't the team's and have done something on Sheaf, newest first. */
   voices: Voice[];
+  /** Signed by wallets that aren't the team's but have no Sheaf action yet: counted, not listed. */
+  waiting: number;
   /** How many signed entries came from the team's own wallets (not listed). */
   ours: number;
-  /** Per invite code: link opens and signatures. */
+  /** Per invite code: link opens, and listed signers who came with it. */
   refs: { ref: string; opens: number; signed: number }[];
   asOf: number;
   message?: string;

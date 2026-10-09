@@ -1,5 +1,6 @@
 {
   "id": "sheaf-nav-shelf-v2",
+  "idNote": "The id is kept for link stability. v2 has no shelf: its weights are close to even (3:3:3:4); the shelf was v1's 16:6:2:1.",
   "title": "NAV-anchored curve: open at 0.5x NAV, graduate at 5x NAV",
   "description": "A Meteora DBC curve for anything with an onchain-verifiable net asset value. Market caps are multiples of a NAV you supply in the quote token; the four segments and weights fix the shape. Built with buildCurveWithCustomSqrtPrices.",
   "program": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",

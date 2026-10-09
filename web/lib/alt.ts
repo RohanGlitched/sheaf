@@ -14,6 +14,7 @@ import {
 import { CASH_MINT } from "./cash.generated";
 import { SHEAF_PROGRAM_ID } from "./config";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, tokenAccount, type Basket } from "./sheaf";
+import { stockForWriteMint } from "./mirror";
 
 /**
  * Address lookup tables for the big baskets.
@@ -30,8 +31,12 @@ import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, tokenAccount, type 
  * authority = house finds them again after any restart.
  */
 
-/** Below this a legacy transaction fits, and no table is made. */
-export const ALT_MIN_COMPONENTS = 7;
+/**
+ * From this size up a basket gets a table. A plan order's legacy fill at six
+ * components measures 1,244 bytes with the compute-budget instruction (1,204
+ * without), over the 1,232-byte packet, so six is the first size that needs one.
+ */
+export const ALT_MIN_COMPONENTS = 6;
 /** Rent for a table is small, but the house key also pays the keeper's rent: never below this. */
 const ALT_FLOOR_LAMPORTS = 1.5e9;
 /** Addresses per extend instruction, so each transaction stays well inside the packet limit. */
@@ -54,6 +59,8 @@ export function altAddressesFor(basket: Basket): PublicKey[] {
     SystemProgram.programId,
     new PublicKey(SHEAF_PROGRAM_ID),
     new PublicKey(CASH_MINT),
+    // The Memo program rides along as a remaining account on every fill and sale.
+    new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
   ];
   for (const c of basket.components) {
     const mint = new PublicKey(c.mint);
@@ -118,6 +125,11 @@ async function sendV0(connection: Connection, payer: Keypair, ixs: TransactionIn
  */
 export async function ensureAlt(connection: Connection, house: Keypair, basket: Basket): Promise<AddressLookupTableAccount | null> {
   if (basket.components.length < ALT_MIN_COMPONENTS) return null;
+  // The house pays a table's rent for good, so it builds them only for baskets of
+  // the site's own stand-in stocks, or its own baskets; anyone else's basket keeps
+  // a table it already has but gets no new one at the house's expense.
+  const ours = basket.creator === house.publicKey.toBase58() || basket.components.every((c) => stockForWriteMint(c.mint) != null);
+  if (!ours) return findAlt(connection, house.publicKey, basket);
   const existing = await findAlt(connection, house.publicKey, basket);
   const wanted = altAddressesFor(basket);
   const missing = (t: AddressLookupTableAccount | null) => {

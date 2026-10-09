@@ -5,7 +5,7 @@
  * token URI once pushed it to 1,268 bytes and broke "Open the launch market"
  * for every new basket; this check fails loudly instead.
  *
- * It runs the real builder: launch.ts, dbc.ts and config.ts are transpiled
+ * It runs the real builder: web/lib is transpiled
  * with the project's own TypeScript into web/node_modules/.cache and loaded
  * as they are, against devnet. Nothing is signed by a wallet or sent.
  *
@@ -23,14 +23,16 @@ const ts = require("typescript");
 
 const OUT = path.join(WEB, "node_modules", ".cache", "meteora-launch-size");
 fs.mkdirSync(OUT, { recursive: true });
-for (const name of ["launch", "dbc", "config"]) {
-  const source = fs.readFileSync(path.join(WEB, "lib", `${name}.ts`), "utf8");
-  const { outputText } = ts.transpileModule(source, {
+// Every module in web/lib, so whatever launch.ts and dbc.ts import (mirror, prestocks, generated tables) resolves.
+for (const file of fs.readdirSync(path.join(WEB, "lib"))) {
+  const from = path.join(WEB, "lib", file);
+  if (file.endsWith(".json")) fs.copyFileSync(from, path.join(OUT, file));
+  if (!file.endsWith(".ts") || file.endsWith(".d.ts")) continue;
+  const { outputText } = ts.transpileModule(fs.readFileSync(from, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true, resolveJsonModule: true },
   });
-  fs.writeFileSync(path.join(OUT, `${name}.js`), outputText);
+  fs.writeFileSync(path.join(OUT, file.replace(/\.ts$/, ".js")), outputText);
 }
-fs.copyFileSync(path.join(WEB, "lib", "meteora-preset.json"), path.join(OUT, "meteora-preset.json"));
 const { buildLaunch, launchUri } = require(path.join(OUT, "launch.js"));
 
 const { Keypair } = web3;

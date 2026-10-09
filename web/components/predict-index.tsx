@@ -16,7 +16,16 @@ type Nav = {
     offered?: boolean;
     reason?: string;
     rule?: string;
-    nextWindow?: { opens: string; from: string; to: string; fromClose: number; toClose: number; resolves: string };
+    nextWindow?: {
+      opens: string;
+      opensText?: string;
+      from: string;
+      to: string;
+      fromClose: number;
+      toClose: number;
+      resolves: string;
+      resolvesText?: string;
+    };
   };
 };
 
@@ -46,6 +55,9 @@ const LEAD = "BIG5";
 const question = (name: string, symbol: string) => `Will ${name.replace(/^The /, "the ")} (${symbol}) beat SPY this week?`;
 
 type Fee = { paymentUsdc?: string; liquidityInjectionUsdc?: string; platformRevenueUsdc?: string; fixture?: boolean };
+
+/** "Fri, Oct 9, 2026, 16:00 New York (2026-10-09T20:00:00Z)" without the UTC echo, for prose. */
+const nyOnly = (s: string) => s.replace(/ \([^)]*\)$/, "");
 
 const pct = (x: number | null | undefined) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}%`);
 const usd = (x: number | null | undefined) =>
@@ -320,10 +332,11 @@ export function PredictIndex() {
         <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">How a market resolves.</h2>
           <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
-            The week runs between two US closes, 16:00 New York time: the first Friday at or after trading
-            opens, and the Friday after. So none of the measured week is known when the first share is
-            bought. Stock tokens trade around the clock, but SPY only has a close at the close, so both sides
-            are read there. If a Friday is a market holiday, the last close before it counts.
+            The week runs between two NYSE closes, each the last close of its week: normally Friday 16:00
+            New York time, Thursday&apos;s close when Friday is a holiday, 13:00 on an early-close day. The
+            first is the first such close after trading opens, and trading stops at the second. So nobody
+            trades a week that has started or one that is decided. Stock tokens trade around the clock, but SPY
+            only has a close at the close, so both sides are read there.
           </p>
           <ol className="mt-5 max-w-[50ch] list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink-2">
             <li>
@@ -337,8 +350,12 @@ export function PredictIndex() {
           {win && (
             <p className="mt-5 max-w-[50ch] text-sm leading-relaxed text-ink-3">
               A market opened on {sampleBasket?.symbol} now would trade from{" "}
-              {new Date(win.opens).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{" "}
-              and measure {win.from} to {win.to}. Both are total return: adjusted closes reinvest dividends, the
+              {nyOnly(
+                win.opensText ??
+                  `${new Date(win.opens).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} New York`,
+              )}{" "}
+              until {nyOnly(win.to)}, and measure {nyOnly(win.from)} to {nyOnly(win.to)}. Every time here is New
+              York time. Both are total return: adjusted closes reinvest dividends, the
               way an xStock&apos;s multiplier does. A close is served once it is final, an hour after the bell; a
               time in the future is refused, never answered with today&apos;s number. A basket holding a company
               that is not listed yet has no such number, so it gets no market.
@@ -461,7 +478,8 @@ export function PredictIndex() {
               </span>
               <span className="tnum text-xs text-ink-3 md:text-right">
                 {Number(m.volumeUsdc).toLocaleString("en-US")} USDC traded · ends{" "}
-                {new Date(m.endTime).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                {new Date(m.endTime).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/New_York" })}{" "}
+                New York
               </span>
             </div>
           ))}

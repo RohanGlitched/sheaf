@@ -14,7 +14,7 @@ export function SiteFooter() {
               Sheaf binds tokenized stocks into one token, backed share for share
               in a vault anyone can read. Solana baskets settle on {WRITE_CLUSTER},
               priced from Solana mainnet. EVM baskets settle on each chain&rsquo;s
-              testnet, priced from Robinhood&rsquo;s stock token quotes.
+              testnet, priced from Robinhood&rsquo;s stock-token quotes.
             </p>
           </div>
 

@@ -35,8 +35,9 @@ const CASES = [
   ["getTransaction", [SIG, { maxSupportedTransactionVersion: 0 }], "allowed"],
   ["getVersion", [], "allowed"],
   ["isBlockhashValid", [SYSTEM, {}], "allowed"],
-  ["sendTransaction", ["AA==", { encoding: "base64" }], "allowed"],
-  ["simulateTransaction", ["AA==", { encoding: "base64" }], "allowed"],
+  // Sends and simulations are decoded and must call only the site's programs; an unreadable one is refused.
+  ["sendTransaction", ["AA==", { encoding: "base64" }], "refused"],
+  ["simulateTransaction", ["AA==", { encoding: "base64" }], "refused"],
   // Must stay refused.
   ["requestAirdrop", [SYSTEM, 1], "refused"],
   ["getProgramAccounts", [TOKEN_2022, { encoding: "base64" }], "refused"],

@@ -6,10 +6,10 @@ import type { LedgerEntry } from "@/lib/ledger";
 import { useLedger } from "@/lib/use-ledger";
 import { useBaskets } from "@/lib/use-baskets";
 import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
-import { count, duration, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
+import { count, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
-import { isTeamWallet } from "@/lib/team-wallets";
+import { isTeamWallet, teamTag, teamWallet } from "@/lib/team-wallets";
 import { KeeperPulse } from "./keeper-pulse";
 import { isTestBasket } from "@/lib/hidden";
 
@@ -35,6 +35,8 @@ const KIND: Record<LedgerEntry["kind"], { label: string; color: string }> = {
   sellOrdered: { label: "Sell order", color: "#b9821a" },
   sold: { label: "Shares sold", color: "var(--color-loss)" },
   sellReturned: { label: "Shares returned", color: "var(--color-ink-3)" },
+  feeAccrued: { label: "Protocol fee accrued", color: "var(--color-bind)" },
+  feeClaimed: { label: "Fee claimed by treasury", color: "var(--color-bind)" },
 };
 
 function describe(entry: LedgerEntry, basket: Basket | undefined): string {
@@ -47,6 +49,8 @@ function describe(entry: LedgerEntry, basket: Basket | undefined): string {
   if (entry.kind === "sellOrdered") return "Escrowed; fillers bid to pay dollars for the shares";
   if (entry.kind === "sold") return "A filler paid the dollars and took the shares";
   if (entry.kind === "sellReturned") return "Nobody bought in time; the shares went back";
+  if (entry.kind === "feeAccrued") return "Sheaf's 0.10% of a creation, set aside in new shares, never out of the vault";
+  if (entry.kind === "feeClaimed") return "Accrued fee shares minted to the treasury; anyone can send the claim";
   if (!entry.amounts || !basket) return "";
   basket.components.forEach((c, i) => {
     const raw = entry.amounts![i];
@@ -74,13 +78,50 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
     main = `${quantity(n, 4)} ${plural(n, "share")}`;
     if ((e.kind === "filled" || e.kind === "sold") && e.cash != null) notes.push(`for ${money(e.cash)}`);
   }
-  if (e.feeShares) notes.push(`+${quantity(e.feeShares, 4)} to the creator`);
+  if (e.kind === "feeAccrued") notes.push("Sheaf's 0.10%");
+  if (e.kind === "feeClaimed") notes.push("to the treasury");
+  if (e.feeShares) notes.push(`+${quantity(e.feeShares, e.feeShares < 0.01 ? 6 : 4)} to the creator`);
   return { main, notes };
+}
+
+/** "53 s" or "2 min 29 s": the same short form /business uses. */
+function waitFor(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const s = Math.round(seconds);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+/** A small chip naming one of our wallets: house, faucet, treasury, second filler or test wallet. */
+function TeamTag({ address }: { address: string }) {
+  const tag = teamTag(address);
+  if (!tag) return null;
+  return (
+    <span
+      title={teamWallet(address)?.label}
+      className="ml-2 whitespace-nowrap rounded-full border border-line px-1.5 py-px align-middle text-[11px] leading-none text-ink-3"
+    >
+      {tag}
+    </span>
+  );
+}
+
+/** Who delivered a fill or bought a sale: Sheaf's house filler, our second filler, or someone outside. */
+function fillerLabel(e: LedgerEntry): string | null {
+  if ((e.kind !== "filled" && e.kind !== "sold") || !e.filler) return null;
+  const tag = teamTag(e.filler);
+  if (tag === "house") return "house filler";
+  if (tag === "second filler") return "second filler (ours)";
+  if (tag) return `filled by our ${tag}`;
+  return "outside filler";
 }
 
 /** Distinct wallets behind a set of events, and how many of them are not ours. */
 export function walletCounts(entries: LedgerEntry[]) {
-  const wallets = new Set(entries.map((e) => e.actor));
+  // Fee events name a basket or the treasury's share account, not a person; they are not wallets that acted.
+  const wallets = new Set(entries.filter((e) => e.kind !== "feeAccrued" && e.kind !== "feeClaimed").map((e) => e.actor));
   let outside = 0;
   for (const w of wallets) if (!isTeamWallet(w)) outside++;
   return { wallets: wallets.size, outside, actions: entries.length };
@@ -181,6 +222,8 @@ export function LedgerTable({
                 <span className="min-w-0 text-ink-2">
                   {amount.main}
                   {amount.notes.length > 0 && <span className="text-xs text-ink-3"> · {amount.notes.join(" · ")}</span>}
+                  {fillerLabel(e) && <span className="text-xs text-ink-3"> · {fillerLabel(e)}</span>}
+                  <TeamTag address={e.actor} />
                 </span>
                 <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-ink-2 underline decoration-line-strong underline-offset-4">
                   Tx {shortAddress(e.signature, 4, 4)}
@@ -212,7 +255,10 @@ export function LedgerTable({
                     <td colSpan={showBasket ? 7 : 6} className="px-4 py-3">
                       <button type="button" onClick={() => toggle(e.fold.id)} aria-expanded={false} className="flex items-center gap-2 text-left text-ink-2 hover:text-ink">
                         <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: KIND.returned.color }} />
-                        {foldSummary(e.fold.entries)}, {timeAgo(e.fold.entries[e.fold.entries.length - 1].time)} to {timeAgo(e.fold.entries[0].time)}
+                        {foldSummary(e.fold.entries)},{" "}
+                        {timeAgo(e.fold.entries[e.fold.entries.length - 1].time) === timeAgo(e.fold.entries[0].time)
+                          ? timeAgo(e.fold.entries[0].time)
+                          : `${timeAgo(e.fold.entries[e.fold.entries.length - 1].time)} to ${timeAgo(e.fold.entries[0].time)}`}
                         <span className="text-xs text-bind">Show each</span>
                       </button>
                     </td>
@@ -245,6 +291,7 @@ export function LedgerTable({
                     <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                       {shortAddress(e.actor)}
                     </a>
+                    <TeamTag address={e.actor} />
                   </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right text-ink">
                     {amount.main}
@@ -252,7 +299,10 @@ export function LedgerTable({
                       <span key={n} className="block text-xs text-ink-3">{n}</span>
                     ))}
                   </td>
-                  <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">{describe(e, basket)}</td>
+                  <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">
+                    {describe(e, basket)}
+                    {fillerLabel(e) && <span className="text-ink-2"> · {fillerLabel(e)}</span>}
+                  </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right">
                     <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                       {shortAddress(e.signature, 4, 4)}
@@ -306,9 +356,9 @@ export function LedgerPage() {
           <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
             Every basket, every share created or redeemed, every dollar order and
             every plan run, read from the events the program wrote into its own
-            transactions. There is no database behind it: the server decodes the
-            chain and caches the result for half a minute, and anyone can rebuild it
-            from the chain.
+            transactions. There is no database of record: the server keeps a cache
+            of the decoded history in a storage bucket, refreshed from the chain every
+            half minute, and anyone can rebuild it from the chain.
           </p>
         </div>
         {ledger && (
@@ -372,14 +422,20 @@ export function LedgerPage() {
                     .map(
                       ([label, f]) =>
                         ` · ${label}: ${f.fillRate != null ? `${Math.round(f.fillRate * 100)}% filled` : "none finished"}${
-                          f.medianSecsToFill != null ? `, median ${duration(f.medianSecsToFill)} to fill` : ""
+                          f.medianSecsToFill != null ? `, median ${waitFor(f.medianSecsToFill)} to fill` : ""
                         }`,
                     )
                     .join("")
                 : `${served.fillRate != null ? ` · ${Math.round(served.fillRate * 100)}% of finished orders filled` : ""}${
-                    served.medianSecsToFill != null ? ` · median ${duration(served.medianSecsToFill)} from order to fill` : ""
+                    served.medianSecsToFill != null ? ` · median ${waitFor(served.medianSecsToFill)} from order to fill` : ""
                   }`}
               {` · ${count(served.plans)} ${plural(served.plans, "plan")} opened`}
+            </p>
+          )}
+          {!decoding && stats.outside === 0 && ledger.entries.length > 0 && (
+            <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
+              Activity so far is Sheaf&rsquo;s own testing; wallets outside the team appear here as they arrive. Our
+              wallets carry a small tag in each row.
             </p>
           )}
           {!decoding && stats.outside > 0 && (

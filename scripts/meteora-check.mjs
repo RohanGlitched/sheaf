@@ -7,7 +7,11 @@
  * mismatch, so a layout upgrade or a broken check fails loudly here instead of
  * silently in the UI.
  *
- *   node scripts/meteora-check.mjs
+ * It then asks the site's metadata route for each basket's anchor verdict:
+ * the listed launches must verify within 5% of NAV, and the rogue-anchor pool
+ * (IDX slot 1, opened at 2x the preset's prices) must be refused.
+ *
+ *   SITE=http://localhost:3900 node scripts/meteora-check.mjs   (default SITE: production)
  */
 import { BASKETS, DBC_PROGRAM, TREASURY, connection, dbc, launchInfo, launchTerms, web3 } from "./meteora-lib.mjs";
 
@@ -48,6 +52,8 @@ const LAUNCHES = [
   ["FRNTRA", BASKETS.FRNTR, 0, "v1"],
   ["PROXYA", PROXY, 1, "v2"],
   ["IDXA", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 0, "v2"],
+  // Passes the terms on purpose: only its anchor is wrong (see the anchor checks below).
+  ["rogue anchor", "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE", 1, "v2"],
   ["squat", PROXY, 0, "rejected"],
   ["rogue terms", PROXY, 2, "rejected"],
 ];
@@ -123,8 +129,33 @@ for (const [name, basket, slot, expected] of LAUNCHES) {
   );
 }
 
+// The anchor: decided on the server (web/app/api/launch/anchor.ts), so read its verdicts.
+const SITE = (process.env.SITE ?? "https://sheaf-index.vercel.app").replace(/\/$/, "");
+const IDX = "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE";
+const ANCHORS = [
+  ["IDXA", IDX, launchInfo(IDX, 0).pool.toBase58()],
+  ["PROXYA", PROXY, launchInfo(PROXY, 1).pool.toBase58()],
+  ["BIG5A", BASKETS.BIG5, launchInfo(BASKETS.BIG5, 0).pool.toBase58()],
+];
+console.log(`anchors, from ${SITE}/api/launch/<basket>`);
+for (const [name, basket, pool] of ANCHORS) {
+  const body = await fetch(`${SITE}/api/launch/${basket}`).then((r) => r.json()).catch(() => null);
+  const a = body?.provenance?.anchor;
+  check(`${name} is the launch`, body?.provenance?.pool, pool);
+  check(`${name} anchor verified`, a?.status, "verified");
+  check(`${name} anchor within 5% of NAV`, a?.deviationPct != null && Math.abs(a.deviationPct) < 5, true);
+  console.log(`  info: ${name} deviation ${a?.deviationPct}% against the ${a?.closeDay} close`);
+}
+{
+  const rogue = launchInfo(IDX, 1).pool.toBase58();
+  const body = await fetch(`${SITE}/api/launch/${IDX}`).then((r) => r.json()).catch(() => null);
+  const refused = body?.provenance?.rejected?.find((r) => r.pool === rogue);
+  check("rogue anchor (IDX slot 1) refused as a mismatch", refused?.anchor?.status, "mismatch");
+  console.log(`  info: ${refused?.reason} (deviation ${refused?.anchor?.deviationPct}%)`);
+}
+
 if (failures) {
-  console.error(`${failures} mismatch(es): web/lib/dbc.ts offsets or the terms check are out of date.`);
+  console.error(`${failures} mismatch(es): web/lib/dbc.ts offsets, the terms check or the anchor check are out of date.`);
   process.exit(1);
 }
-console.log("Decoder offsets match the SDK, and the terms check gives every expected verdict.");
+console.log("Decoder offsets match the SDK, and the terms and anchor checks give every expected verdict.");

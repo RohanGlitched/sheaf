@@ -9,6 +9,7 @@ import {
 import { WRITE_RPC, WRITE_WS } from "@/lib/config";
 import { BrowserWalletAdapter } from "@/lib/browser-wallet";
 import { BrowserWalletWelcome } from "./browser-wallet-welcome";
+import { BrowserWalletConfirm } from "./browser-wallet-confirm";
 
 const connectionConfig = (): ConnectionConfig => ({ commitment: "confirmed", wsEndpoint: WRITE_WS });
 
@@ -35,6 +36,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       <AdapterWalletProvider wallets={wallets} autoConnect>
         {children}
         <BrowserWalletWelcome onFunded={refreshBalances} />
+        <BrowserWalletConfirm />
       </AdapterWalletProvider>
     </ConnectionProvider>
   );

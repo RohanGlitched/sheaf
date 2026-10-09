@@ -8,12 +8,12 @@ import { placeSellOrderIx, cancelSellOrderIx, decodeSellOrder, freshNonce, requi
 import { fromBase64 } from "@/lib/ledger";
 import idl from "@/lib/sheaf-idl.json";
 import { confirmSignature } from "@/lib/confirm";
-import { explainError, signFresh } from "@/lib/tx";
+import { chainClockOffset, chainNow, explainError, signFresh } from "@/lib/tx";
 import { explorerTx } from "@/lib/config";
 import { useCash, CASH, fromCashRaw } from "@/lib/use-cash";
 import { money, quantity } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
-import { MIN_ORDER_DOLLARS, START_BUFFER_SECS, routeBpsFor, routeCostText, routeOutsideBand, useRouteCost } from "./dollar-order";
+import { MIN_ORDER_DOLLARS, START_BUFFER_SECS, kickFillers, routeBpsFor, routeCostText, routeOutsideBand, useRouteCost } from "./dollar-order";
 
 const AUCTION_SECS = 90;
 const BAND_BPS = 200;
@@ -129,7 +129,7 @@ export function SellOrderPanel({
     const tick = open ? setInterval(() => setNow(Math.floor(Date.now() / 1000)), 500) : null;
     let live = true;
     const watch = async () => {
-      fetch("/api/keeper", { method: "POST" }).catch(() => {});
+      kickFillers();
       for (let i = 0; i < 240 && live; i++) {
         await new Promise((r) => setTimeout(r, 2500));
         if (!live) return;
@@ -147,7 +147,7 @@ export function SellOrderPanel({
           setStage({ kind: "expired", order, signature });
           return;
         }
-        if (i % (open ? 2 : 12) === 1) fetch("/api/keeper", { method: "POST" }).catch(() => {});
+        if (i % (open ? 2 : 12) === 1) kickFillers();
       }
     };
     watch();
@@ -166,6 +166,8 @@ export function SellOrderPanel({
     try {
       // Built right before the wallet opens and rebuilt if the signature comes back stale, so the ask and the
       // auction clock start when the order can actually land.
+      // The auction's clock is the chain's, not this device's: a slow device clock could start it too far back.
+      const offset = await chainClockOffset(connection);
       const { sellOrder, signature } = await signFresh({
         connection,
         payer: publicKey,
@@ -174,7 +176,7 @@ export function SellOrderPanel({
         onStale: () => setNotice("The wallet was open a while, so the price and the auction clock were refreshed. Approve once more."),
         build: () => {
           const ask = askFor((Number(rawShares) / SHARE) * (navRef.current ?? navPerShare!));
-          const startTs = Math.floor(Date.now() / 1000) + START_BUFFER_SECS;
+          const startTs = chainNow(offset) + START_BUFFER_SECS;
           const { sellOrder, ix } = placeSellOrderIx({
             seller: publicKey,
             basket,
@@ -192,6 +194,7 @@ export function SellOrderPanel({
       });
       setNotice(null);
       await confirmSignature(connection, signature);
+      kickFillers();
       const info = await connection.getAccountInfo(sellOrder);
       const decoded = info ? decodeSellOrder(sellOrder, new Uint8Array(info.data)) : null;
       if (!decoded) throw new Error("The sell order was placed but could not be read back.");

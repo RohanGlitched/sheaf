@@ -2,9 +2,9 @@
 // dollar order on a basket, then the site's /api/filler2 is asked to fill it, and
 // the script reports who did (the second filler, the house, or nobody).
 //   TEST_WALLET_INDEX=1 node scripts/e2e-filler2.cjs [base] [basket] [dollars]
-// FILLER=house asks /api/keeper instead. START_AGO=165 places an order whose
-// 180 s auction began 165 s earlier (15 s left), as a wallet that sat on the
-// signing prompt would, to check a fill still lands before the end.
+// FILLER=house asks /api/keeper instead. START_AGO=55 places an order whose
+// 180 s auction began 55 s earlier, as a wallet that sat on the signing prompt
+// would (the program refuses a start more than 60 s in the past).
 // Run in WSL (it signs with @solana/web3.js). Devnet only.
 const crypto = require("crypto");
 const path = require("path");

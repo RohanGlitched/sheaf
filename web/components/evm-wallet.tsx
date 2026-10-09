@@ -13,6 +13,14 @@ import {
 import type { Deployment } from "@/lib/chains";
 import { evmChain, explainEvmError, isTempo, publicClientFor } from "@/lib/evm";
 import { shortAddress } from "@/lib/format";
+import {
+  EVM_BROWSER_WALLET_EVENT,
+  chooseEvmBrowserWallet,
+  evmBrowserProvider,
+  evmBrowserWalletChosen,
+  isEvmBrowserProvider,
+} from "@/lib/evm-browser-wallet";
+import { EvmBrowserWalletMenu } from "./browser-wallet-evm";
 
 /**
  * An injected EVM wallet (MetaMask, Rabby, Coinbase Wallet, Phantom's EVM side),
@@ -20,6 +28,11 @@ import { shortAddress } from "@/lib/format";
  * to the basket's chain, and sends a list of steps: as one EIP-5792 batch when
  * the wallet can do it atomically, otherwise one transaction at a time, each
  * waiting for the last so an approval is mined before the call that spends it.
+ *
+ * With nothing installed, or by choice, the same code drives the browser wallet
+ * in lib/evm-browser-wallet.ts: a throwaway key kept in this browser behind an
+ * EIP-1193 provider. It switches chains without asking and gets a first drip
+ * from /api/evm-faucet, so a clean browser can try every step.
  */
 
 export type Step = { label: string; to: Address; data: Hex };
@@ -30,20 +43,64 @@ function injected(): EIP1193Provider | null {
   return ((window as unknown as { ethereum?: EIP1193Provider }).ethereum ?? null) as EIP1193Provider | null;
 }
 
+/** The browser wallet when the visitor chose it, otherwise whatever is injected. */
+function activeProvider(): EIP1193Provider | null {
+  if (typeof window === "undefined") return null;
+  return evmBrowserWalletChosen() ? evmBrowserProvider() : injected();
+}
+
+/** Re-render when the browser wallet is created, chosen, left or forgotten. */
+function useBrowserWalletVersion() {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    window.addEventListener(EVM_BROWSER_WALLET_EVENT, bump);
+    return () => window.removeEventListener(EVM_BROWSER_WALLET_EVENT, bump);
+  }, []);
+  return version;
+}
+
+export type DripState = { status: "sending" | "done" | "error"; text: string };
+
+const dripsInFlight = new Set<string>();
+
+const dripKey = (network: string, address: string) => `sheaf:evm-browser-wallet:drip:${network}:${address.toLowerCase()}`;
+
+function dripped(network: string, address: string): boolean {
+  try {
+    return window.localStorage.getItem(dripKey(network, address)) != null;
+  } catch {
+    return true;
+  }
+}
+
+function markDripped(network: string, address: string) {
+  try {
+    window.localStorage.setItem(dripKey(network, address), String(Date.now()));
+  } catch {
+    /* private mode: at worst the faucet's own limit answers next time */
+  }
+}
+
 export function useEvmWallet(d: Deployment) {
   const [provider, setProvider] = useState<EIP1193Provider | null>(null);
+  const [hasInjected, setHasInjected] = useState(false);
   const [address, setAddress] = useState<Address | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [drip, setDrip] = useState<DripState | null>(null);
+  const version = useBrowserWalletVersion();
 
   useEffect(() => {
-    const p = injected();
+    const p = activeProvider();
     let live = true;
     void Promise.resolve().then(() => {
       if (!live) return;
       setProvider(p);
+      setHasInjected(!!injected());
       setReady(true);
+      if (!p) setAddress(null);
     });
     if (!p) return;
     // Silent reads: no prompt unless the visitor already connected this site.
@@ -64,9 +121,74 @@ export function useEvmWallet(d: Deployment) {
       p.removeListener?.("accountsChanged", onAccounts as never);
       p.removeListener?.("chainChanged", onChain as never);
     };
-  }, []);
+  }, [version]);
 
   const chain = useMemo(() => evmChain(d), [d]);
+  const isBrowser = isEvmBrowserProvider(provider);
+
+  // The browser wallet asks nobody, so it simply moves to this page's chain.
+  useEffect(() => {
+    if (!isBrowser || !provider || !address || chainId == null || chainId === d.chainId) return;
+    void provider
+      .request({ method: "wallet_switchEthereumChain", params: [{ chainId: numberToHex(d.chainId) }] })
+      .then(() => setChainId(d.chainId))
+      .catch((err) => setError(explainEvmError(err)));
+  }, [isBrowser, provider, address, chainId, d.chainId]);
+
+  // First run: a browser wallet with no gas gets the page's faucet once per chain.
+  // Not cancelled on re-render: the request is deduplicated by a flag instead, so
+  // a dependency changing mid-request cannot leave the line stuck on "Sending".
+  useEffect(() => {
+    if (!isBrowser || !address || chainId !== d.chainId) return;
+    const key = `${d.network}:${address.toLowerCase()}`;
+    if (dripsInFlight.has(key) || dripped(d.network, address)) return;
+    dripsInFlight.add(key);
+    void (async () => {
+      try {
+        const gas = isTempo(d) ? 0n : await publicClientFor(d).getBalance({ address }).catch(() => null);
+        if (gas == null || gas > 0n) return;
+        markDripped(d.network, address);
+        setDrip({ status: "sending", text: isTempo(d) ? "Asking Tempo's faucet for test dollars…" : "Sending a drip of test gas…" });
+        const basket = window.location.pathname.split("/")[3];
+        const res = await fetch("/api/evm-faucet", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ network: d.network, address, ...(basket ? { basket: decodeURIComponent(basket) } : {}) }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { txs?: unknown[]; notes?: string[]; error?: string };
+        if (!res.ok) throw new Error(json.error ?? `The faucet answered ${res.status}.`);
+        const sent = json.txs?.length ?? 0;
+        setDrip({
+          status: "done",
+          text: [sent ? "Test funds sent to this wallet." : "", ...(json.notes ?? [])].filter(Boolean).join(" ") || "The faucet had nothing to send here.",
+        });
+      } catch (err) {
+        setDrip({ status: "error", text: (err as Error).message });
+      } finally {
+        dripsInFlight.delete(key);
+      }
+    })();
+  }, [isBrowser, address, chainId, d]);
+
+  /** Use the wallet kept in this browser: made on first use, no install, test funds only. */
+  const connectBrowser = useCallback(async () => {
+    setError(null);
+    const made = chooseEvmBrowserWallet();
+    if (!made) {
+      setError("This browser does not allow saving a wallet here.");
+      return null;
+    }
+    const p = evmBrowserProvider();
+    setProvider(p);
+    setAddress(made);
+    try {
+      await p.request({ method: "wallet_switchEthereumChain", params: [{ chainId: numberToHex(d.chainId) }] });
+      setChainId(d.chainId);
+    } catch (err) {
+      setError(explainEvmError(err));
+    }
+    return made;
+  }, [d.chainId]);
 
   const connect = useCallback(async () => {
     setError(null);
@@ -206,6 +328,10 @@ export function useEvmWallet(d: Deployment) {
   return {
     ready,
     available: !!provider,
+    hasInjected,
+    isBrowser,
+    drip,
+    connectBrowser,
     address,
     chainId,
     onChain: chainId === d.chainId,
@@ -219,54 +345,77 @@ export function useEvmWallet(d: Deployment) {
 
 export type EvmWallet = ReturnType<typeof useEvmWallet>;
 
+const primary =
+  "w-full rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep";
+const secondary =
+  "w-full rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-3 text-left text-sm text-ink transition-colors hover:border-ink-3";
+
 /** Connect, then switch: the one button a visitor needs before anything else. */
 export function EvmConnect({ wallet, d }: { wallet: EvmWallet; d: Deployment }) {
   if (!wallet.ready) return <div className="h-11" />;
-  if (!wallet.available) {
-    return (
-      <p className="text-sm leading-relaxed text-ink-2">
-        No EVM wallet in this browser. Install{" "}
-        <a href="https://metamask.io/download" target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
-          MetaMask
-        </a>{" "}
-        or{" "}
-        <a href="https://rabby.io" target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
-          Rabby
-        </a>
-        , then reload. Everything on this page is read from the chain without one.
-      </p>
-    );
-  }
   if (!wallet.address) {
-    return (
-      <button
-        type="button"
-        onClick={() => void wallet.connect()}
-        className="w-full rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
-      >
-        Connect an EVM wallet
+    const browserOption = (
+      <button type="button" onClick={() => void wallet.connectBrowser()} className={wallet.hasInjected ? secondary : primary}>
+        <span className="block">Use a wallet in this browser</span>
+        <span className={`mt-0.5 block text-xs font-normal ${wallet.hasInjected ? "text-ink-3" : "text-white/75"}`}>
+          Nothing to install, testnet funds only
+        </span>
       </button>
+    );
+    return (
+      <div className="space-y-2">
+        {wallet.hasInjected && (
+          <button type="button" onClick={() => void wallet.connect()} className={primary}>
+            Connect an EVM wallet
+          </button>
+        )}
+        {browserOption}
+        {!wallet.hasInjected && (
+          <p className="pt-1 text-xs leading-relaxed text-ink-3">
+            Or install{" "}
+            <a href="https://metamask.io/download" target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
+              MetaMask
+            </a>{" "}
+            or{" "}
+            <a href="https://rabby.io" target="_blank" rel="noreferrer" className="underline decoration-line-strong underline-offset-4 hover:text-ink">
+              Rabby
+            </a>{" "}
+            and reload. Everything on this page is read from the chain without one.
+          </p>
+        )}
+      </div>
     );
   }
   if (!wallet.onChain) {
     return (
-      <button
-        type="button"
-        onClick={() => void wallet.switchChain()}
-        className="w-full rounded-[var(--radius-control)] bg-bind px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
-      >
+      <button type="button" onClick={() => void wallet.switchChain()} className={primary}>
         Switch to {d.label}
       </button>
     );
   }
   return (
-    <p className="flex items-center justify-between gap-3 text-xs text-ink-3">
-      <span className="flex items-center gap-1.5">
-        <span className="live-dot size-1.5 rounded-full bg-gain" aria-hidden />
-        {shortAddress(wallet.address, 6, 4)} on {d.label}
-      </span>
-      {isTempo(d) && <span>fees in pathUSD</span>}
-    </p>
+    <div>
+      <div className="flex items-center justify-between gap-3 text-xs text-ink-3">
+        <span className="flex items-center gap-1.5">
+          <span className="live-dot size-1.5 rounded-full bg-gain" aria-hidden />
+          {shortAddress(wallet.address, 6, 4)} on {d.label}
+        </span>
+        <span className="flex items-center gap-3">
+          {isTempo(d) && <span>fees in pathUSD</span>}
+          {wallet.isBrowser && <EvmBrowserWalletMenu align="right" />}
+        </span>
+      </div>
+      {wallet.drip && (
+        <p
+          className={`mt-2 text-xs leading-relaxed ${
+            wallet.drip.status === "error" ? "text-loss" : wallet.drip.status === "done" ? "text-gain" : "text-ink-3"
+          }`}
+          aria-live="polite"
+        >
+          {wallet.drip.text}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -319,12 +468,19 @@ export function EvmHeaderConnect() {
   const [provider, setProvider] = useState<EIP1193Provider | null | undefined>(undefined);
   const [address, setAddress] = useState<Address | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const version = useBrowserWalletVersion();
+  const hasInjected = typeof window !== "undefined" && !!injected();
 
   useEffect(() => {
-    const p = injected();
+    const p = activeProvider();
     let live = true;
-    void Promise.resolve().then(() => live && setProvider(p));
+    void Promise.resolve().then(() => {
+      if (!live) return;
+      setProvider(p);
+      if (!p) setAddress(null);
+    });
     if (!p) return;
     void p
       .request({ method: "eth_accounts" })
@@ -336,7 +492,7 @@ export function EvmHeaderConnect() {
       live = false;
       p.removeListener?.("accountsChanged", onAccounts as never);
     };
-  }, []);
+  }, [version]);
 
   const base =
     "flex items-center gap-2 whitespace-nowrap rounded-[var(--radius-control)] border border-line-strong bg-surface px-3.5 py-2 text-sm text-ink transition-colors hover:border-ink-3 disabled:opacity-60";
@@ -344,6 +500,9 @@ export function EvmHeaderConnect() {
   if (provider === undefined) return <div className="h-9 w-36" aria-hidden />;
 
   if (address) {
+    if (isEvmBrowserProvider(provider)) {
+      return <EvmBrowserWalletMenu align="right" header address={address} />;
+    }
     return (
       <span className={base} title={`${address}: connected EVM wallet`}>
         <span aria-hidden className="size-1.5 rounded-full bg-gain" />
@@ -353,31 +512,57 @@ export function EvmHeaderConnect() {
     );
   }
 
+  async function connectInjected() {
+    setNote(null);
+    setOpen(false);
+    const p = injected();
+    if (!p) return;
+    setBusy(true);
+    try {
+      const accounts = (await p.request({ method: "eth_requestAccounts" })) as Address[];
+      setAddress(accounts[0] ?? null);
+    } catch (err) {
+      setNote(explainEvmError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="relative">
-      <button
-        type="button"
-        disabled={busy}
-        className={base}
-        onClick={async () => {
-          setNote(null);
-          if (!provider) {
-            setNote("No EVM wallet in this browser. Install MetaMask or Rabby, then reload.");
-            return;
-          }
-          setBusy(true);
-          try {
-            const accounts = (await provider.request({ method: "eth_requestAccounts" })) as Address[];
-            setAddress(accounts[0] ?? null);
-          } catch (err) {
-            setNote(explainEvmError(err));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
+      <button type="button" disabled={busy} className={base} onClick={() => setOpen((v) => !v)}>
         {busy ? "Connecting…" : "Connect EVM wallet"}
       </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-72 max-w-[calc(100vw-2rem)] rounded-[var(--radius-control)] border border-line bg-raised p-1 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)]">
+          {hasInjected && (
+            <button
+              type="button"
+              onClick={() => void connectInjected()}
+              className="w-full px-3 py-2.5 text-left text-sm text-ink-2 transition-colors hover:bg-sunk hover:text-ink"
+            >
+              Installed wallet (MetaMask, Rabby…)
+            </button>
+          )}
+          {hasInjected && <div aria-hidden className="mx-3 my-1 border-t border-line" />}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              if (!chooseEvmBrowserWallet()) setNote("This browser does not allow saving a wallet here.");
+            }}
+            className="w-full px-3 py-2.5 text-left transition-colors hover:bg-sunk"
+          >
+            <span className="block text-sm text-ink">Use a wallet in this browser</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-ink-3">Nothing to install, testnet funds only.</span>
+          </button>
+          {!hasInjected && (
+            <p className="mx-3 mt-1 border-t border-line py-2.5 text-xs leading-relaxed text-ink-3">
+              Or install MetaMask or Rabby and reload.
+            </p>
+          )}
+        </div>
+      )}
       {note && (
         <p className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-[var(--radius-control)] border border-line bg-raised px-3 py-2.5 text-xs leading-relaxed text-ink-2 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)]">
           {note}

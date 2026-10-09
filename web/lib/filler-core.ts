@@ -39,6 +39,11 @@ export { AddressLookupTableAccount, Connection, Keypair, PublicKey };
 export const TOKEN = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 export const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+/**
+ * Passed as the last remaining account on every fill and sale, so the program
+ * can pay into an account that requires a memo on incoming transfers.
+ */
+export const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 const ONE_SHARE = 1_000_000n;
 
 /** The parts of the program's IDL a filler needs. */
@@ -330,6 +335,7 @@ export function fillIx(idl: FillerIdl, filler: PublicKey, order: CoreOrder, bask
     keys.push({ pubkey: ata(c.mint, filler, basket.tokenProgram), isSigner: false, isWritable: true });
     keys.push({ pubkey: ata(c.mint, basket.address, basket.tokenProgram), isSigner: false, isWritable: true });
   }
+  keys.push({ pubkey: MEMO_PROGRAM, isSigner: false, isWritable: false });
   return new TransactionInstruction({ programId, keys, data: Buffer.from(FILL.discriminator) });
 }
 
@@ -357,6 +363,7 @@ export function fillSellIx(idl: FillerIdl, filler: PublicKey, order: CoreSellOrd
     isSigner: !!a.signer,
     isWritable: !!a.writable,
   }));
+  keys.push({ pubkey: MEMO_PROGRAM, isSigner: false, isWritable: false });
   return new TransactionInstruction({ programId, keys, data: Buffer.from(FILL.discriminator) });
 }
 
@@ -400,6 +407,8 @@ export type PassOptions = {
   dryRun?: boolean;
   /** Wait inside the pass, up to this many seconds, for an order about to reach the margin. */
   waitUpToSecs?: number;
+  /** Total seconds the pass may spend, waits included (default 45). */
+  passBudgetSecs?: number;
   /** The basket's lookup table, for 7–8 component baskets whose fill does not fit a legacy-sized packet. */
   lookupTable?: (basket: CoreBasket) => Promise<AddressLookupTableAccount | null>;
   /** Called with what the filler is short of, before an order it would otherwise price. */
@@ -433,7 +442,7 @@ async function chainClock(connection: Connection): Promise<() => number> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function runFillerPass(o: PassOptions): Promise<PassResult> {
-  const { connection, filler, idl, cashMint, edgeBps } = o;
+  const { connection, filler, idl, cashMint } = o;
   const log = o.log ?? (() => {});
   const result: PassResult = { filled: [], considered: 0 };
   const programId = new PublicKey(idl.address);
@@ -488,6 +497,15 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
     }
   });
 
+  // Every order is priced first. One that clears the margin within the wait window
+  // is queued, soonest first, and waited for under one shared deadline, then
+  // re-checked: still open, and still worth it.
+  const passDeadline = Date.now() + (o.passBudgetSecs ?? 45) * 1000;
+  const pending: { dueAt: number; run: (opts: PassOptions) => Promise<Priced>; address: PublicKey; id: string }[] = [];
+  const take = (r: Priced, run: (opts: PassOptions) => Promise<Priced>, address: PublicKey, id: string) => {
+    if (r && "due" in r) pending.push({ dueAt: Date.now() + r.due * 1000, run, address, id });
+    else if (r) result.filled.push(r);
+  };
   for (const order of accepted) {
     const id = short(order.address);
     try {
@@ -500,8 +518,8 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
         log(`${id} skipped: cash program ${order.cashProgram.toBase58()} is not the mint's owner`);
         continue;
       }
-      const fill = await priceAndFill(o, order, basket, cash, epoch, clock, log);
-      if (fill) result.filled.push(fill);
+      const run = (opts: PassOptions) => priceAndFill(opts, order, basket, cash, epoch, clock, log);
+      take(await run(o), run, order.address, id);
     } catch (err) {
       // One bad order never ends the pass.
       log(`${id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
@@ -519,14 +537,36 @@ export async function runFillerPass(o: PassOptions): Promise<PassResult> {
         log(`sell ${id} skipped: cash program ${order.cashProgram.toBase58()} is not the mint's owner`);
         continue;
       }
-      const fill = await priceAndFillSell(o, order, basket, cash, epoch, clock, log);
-      if (fill) result.filled.push(fill);
+      const run = (opts: PassOptions) => priceAndFillSell(opts, order, basket, cash, epoch, clock, log);
+      take(await run(o), run, order.address, `sell ${id}`);
     } catch (err) {
       log(`sell ${id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
     }
   }
+  pending.sort((x, y) => x.dueAt - y.dueAt);
+  for (const job of pending) {
+    if (job.dueAt > passDeadline) {
+      log(`${job.id} skipped: its margin comes after this pass's deadline`);
+      continue;
+    }
+    if (job.dueAt > Date.now()) await sleep(job.dueAt - Date.now());
+    try {
+      // Cancelled or filled by someone else during the wait: nothing to do.
+      if (!(await connection.getAccountInfo(job.address))) {
+        log(`${job.id} gone during the wait`);
+        continue;
+      }
+      const r = await job.run({ ...o, waitUpToSecs: 0 });
+      if (r && !("due" in r)) result.filled.push(r);
+    } catch (err) {
+      log(`${job.id} failed: ${String((err as Error).message ?? err).slice(0, 160)}`);
+    }
+  }
   return result;
 }
+
+/** A priced order: filled, due in a few seconds, or nothing to do. */
+type Priced = PassResult["filled"][number] | { due: number } | null;
 
 /** The cash a sell order owes its seller at `t`: start_cash decaying to end_cash, rounded in the seller's favour. */
 export const requiredCash = (o: Pick<CoreSellOrder, "startCash" | "endCash" | "startTs" | "endTs">, t: number) =>
@@ -540,7 +580,7 @@ async function priceAndFillSell(
   epoch: number,
   clock: () => number,
   log: (line: string) => void,
-): Promise<PassResult["filled"][number] | null> {
+): Promise<Priced> {
   const { connection, filler, idl, edgeBps } = o;
   const id = `sell ${short(order.address)}`;
   const fillerCash = ata(order.cashMint, filler.publicKey, order.cashProgram);
@@ -586,14 +626,12 @@ async function priceAndFillSell(
     return paid > 0 ? (value - paid) / paid : -1;
   };
   // The cash only decays, so the amount owed at the cluster's clock now is the most the fill can cost.
-  let t = clock();
+  const t = clock();
   if (edgeAt(t) * 10_000 < edgeBps && o.waitUpToSecs) {
     for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
       if (edgeAt(t + dt) * 10_000 >= edgeBps) {
-        log(`${tag}: margin in ${dt}s, waiting`);
-        await sleep(dt * 1000);
-        t = clock();
-        break;
+        log(`${tag}: margin in ${dt}s, queued`);
+        return { due: dt };
       }
     }
   }
@@ -616,10 +654,14 @@ async function priceAndFillSell(
   }
 
   // Defence 5: simulate the exact signed transaction: no more cash out than priced, every component in.
-  const table = basket.components.length > 6 && o.lookupTable ? await o.lookupTable(basket) : null;
+  // Six components and up need the basket's table to fit one packet; with one, the
+  // compute limit is raised too. Below six the default limit is ample (fills use
+  // 55 to 90 thousand units), so the instruction is left out to save the bytes.
+  const table = basket.components.length >= 6 && o.lookupTable ? await o.lookupTable(basket) : null;
+  const computeLimit = table ? [ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })] : [];
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   const ixs = [
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+    ...computeLimit,
     ...(fillerShareInfo ? [] : [createAtaIdempotent(filler.publicKey, basket.shareMint, filler.publicKey, TOKEN_2022)]),
     ...basket.components.flatMap((c, i) => (holdingInfos[i] ? [] : [createAtaIdempotent(filler.publicKey, c.mint, filler.publicKey, basket.tokenProgram)])),
     fillSellIx(idl, filler.publicKey, order, basket),
@@ -669,7 +711,7 @@ async function priceAndFill(
   epoch: number,
   clock: () => number,
   log: (line: string) => void,
-): Promise<PassResult["filled"][number] | null> {
+): Promise<Priced> {
   const { connection, filler, idl, edgeBps } = o;
   const id = short(order.address);
   // What the filler is paid: the escrow's whole balance, less the cash mint's fee this epoch.
@@ -717,8 +759,8 @@ async function priceAndFill(
   const tag = `${id} ${basket.symbol} $${dollars.toFixed(2)} net`;
   // Priced at the cluster's own clock: the auction only decays, so the count owed
   // now is the most the fill can need when it lands a moment later.
-  let t = clock();
-  let p = priceAt(t);
+  const t = clock();
+  const p = priceAt(t);
   if ("error" in p) {
     log(`${tag} skipped: ${p.error}`);
     return null;
@@ -728,11 +770,8 @@ async function priceAndFill(
     for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
       const q = priceAt(t + dt);
       if (!("error" in q) && q.edge * 10_000 >= edgeBps) {
-        log(`${tag} margin in ${dt}s, waiting`);
-        await sleep(dt * 1000);
-        t = clock();
-        p = priceAt(t);
-        break;
+        log(`${tag} margin in ${dt}s, queued`);
+        return { due: dt };
       }
     }
   }
@@ -753,15 +792,19 @@ async function priceAndFill(
   }
 
   // Defence 5: simulate the exact signed transaction and check what it does to the filler's accounts.
-  const table = basket.components.length > 6 && o.lookupTable ? await o.lookupTable(basket) : null;
+  // Six components and up need the basket's table to fit one packet; with one, the
+  // compute limit is raised too. Below six the default limit is ample (fills use
+  // 55 to 90 thousand units), so the instruction is left out to save the bytes.
+  const table = basket.components.length >= 6 && o.lookupTable ? await o.lookupTable(basket) : null;
+  const computeLimit = table ? [ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })] : [];
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   const tx = new VersionedTransaction(
     new TransactionMessage({
       payerKey: filler.publicKey,
       recentBlockhash: blockhash,
       instructions: [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-        createAtaIdempotent(filler.publicKey, order.cashMint, filler.publicKey, order.cashProgram),
+        ...computeLimit,
+        ...(fillerCashInfo ? [] : [createAtaIdempotent(filler.publicKey, order.cashMint, filler.publicKey, order.cashProgram)]),
         fillIx(idl, filler.publicKey, order, basket),
       ],
     }).compileToV0Message(table ? [table] : []),

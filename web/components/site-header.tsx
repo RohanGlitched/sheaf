@@ -10,18 +10,18 @@ import { EvmHeaderConnect } from "./evm-wallet";
 
 /**
  * Seven destinations, in the order of the story: make a basket, find one, buy it
- * every month, check the record, then how it works, how it pays, and who has
- * tried it. Portfolio, Chains and Predict are one click away in the footer and
- * from their sections on the home page.
+ * every month, see what you hold, check the record, then how it works and how
+ * it pays. Chains, Predict and People are in the footer and one click away from
+ * their sections on the home page; People joins the header once it has names.
  */
 const NAV = [
   { href: "/compose", label: "Create", long: "Create a basket" },
   { href: "/explore", label: "Explore" },
   { href: "/plans", label: "Plans" },
+  { href: "/portfolio", label: "Portfolio" },
   { href: "/ledger", label: "Ledger" },
   { href: "/method", label: "How it works" },
   { href: "/business", label: "Business" },
-  { href: "/voices", label: "People" },
 ];
 
 export function SiteHeader() {

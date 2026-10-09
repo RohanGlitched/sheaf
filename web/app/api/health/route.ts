@@ -12,7 +12,7 @@ export const maxDuration = 60;
 
 /** The flagship basket, for the NAV check, when the baskets list cannot name it. */
 const BIG5_FALLBACK = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
-const TIMEOUT_MS = 25_000;
+const TIMEOUT_MS = 40_000;
 
 type Check = { name: string; path: string; ok: boolean; status: number; ms: number; error?: string };
 type Shape = (j: unknown) => string | null;

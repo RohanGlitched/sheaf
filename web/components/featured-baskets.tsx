@@ -12,6 +12,8 @@ import { isTestBasket } from "@/lib/hidden";
 const FEATURED = [
   // The Big Five leads: listed megacaps, with a year of history and dividends inside.
   "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  // The Magnificent Seven: created after the protocol fee, so it carries the 0.10%.
+  "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x",
   // Bitcoin, by proxy: its launch market is on the current curve (sheaf-nav-shelf-v2).
   "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
   "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",

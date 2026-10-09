@@ -7,7 +7,7 @@ import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-t
 import { tokenAccount, TOKEN_2022_PROGRAM_ID } from "@/lib/sheaf";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Basket } from "@/lib/sheaf";
-import { openPlanIx, netSharesFor } from "@/lib/desk";
+import { openPlanIx, netSharesFor, freshNonce } from "@/lib/desk";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
 import { useCash, CASH, toCashRaw, fromCashRaw } from "@/lib/use-cash";
@@ -24,19 +24,27 @@ import { fxNote, rupees } from "@/lib/fx";
  * before the next run is due and two never overlap.
  */
 const CADENCE = [
-  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month", auctionSecs: 1800 },
-  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week", auctionSecs: 1800 },
-  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", auctionSecs: 240, hint: "demo speed, to watch runs land today" },
+  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month", auctionSecs: 1800, bandBps: 600, hardBps: 2500 },
+  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week", auctionSecs: 1800, bandBps: 400, hardBps: 1500 },
+  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", auctionSecs: 240, bandBps: 200, hardBps: 1000, hint: "demo speed, to watch runs land today" },
 ] as const;
 
-/** Each run's auction opens this far either side of the reference. */
+/**
+ * Each run's auction opens this far either side of the reference. A month is a
+ * long time for a price, so the band widens with the cadence: 6% a month, 4% a
+ * week, 2% at demo speed, wide enough that one period's ordinary move still
+ * leaves the auction a price a filler can meet. The default is the demo's.
+ */
 export const PLAN_BAND_BPS = 200;
-/** The reference may follow the market this far, three bands, either way and never further. */
-export const PLAN_BOUND_BPS = 3 * PLAN_BAND_BPS;
+/** A fixed-bounds plan's bounds sit four points outside its band, so the band is never squeezed by its own floor. */
+export const boundForBand = (bandBps: number) => bandBps + 400;
 
-// The bounds are on shares per dollar, so as prices they are 1 / (1 ∓ 6%): 6.4% above, 5.7% below.
-const BOUND_ABOVE = Math.round((10_000 / (10_000 - PLAN_BOUND_BPS) - 1) * 1000) / 10;
-const BOUND_BELOW = Math.round((1 - 10_000 / (10_000 + PLAN_BOUND_BPS)) * 1000) / 10;
+/**
+ * The owner's hard limits for a trailing plan, as a price either side of
+ * today's: 25% for a monthly plan, 15% weekly, 10% at demo speed. Each fill moves
+ * the plan's working bounds by at most its band, and never past these.
+ */
+export const hardBpsForPeriod = (periodSecs: number) => (periodSecs >= 28 * 86_400 ? 2500 : periodSecs >= 7 * 86_400 ? 1500 : 1000);
 
 /**
  * A plan's reference rate and the bounds it may never leave, from a share's fair
@@ -44,14 +52,33 @@ const BOUND_BELOW = Math.round((1 - 10_000 / (10_000 + PLAN_BOUND_BPS)) * 1000) 
  * the shares the owner actually receives per dollar, which is also what every
  * fill moves the reference to.
  */
-export function planTerms(navPerShare: number, creatorFeeBps = 0, protocolFeeBps = 0) {
+export function planTerms(
+  navPerShare: number,
+  creatorFeeBps = 0,
+  protocolFeeBps = 0,
+  bandBps = PLAN_BAND_BPS,
+  /** Hard limits as a price either side of today's, in bps; omitted for a fixed-bounds plan. */
+  hardBps?: number,
+) {
   // Raw share units per raw cash unit, times 1e9: (1e6 / nav) shares per 1e6 cash, less the fees on them.
   const ref = netSharesFor(BigInt(Math.floor(1e9 / navPerShare)), creatorFeeBps, protocolFeeBps);
+  if (hardBps != null) {
+    // A price h above today's is ref / (1 + h) shares per dollar; h below is ref / (1 − h).
+    return {
+      ref,
+      minRef: (ref * 10_000n) / BigInt(10_000 + hardBps),
+      maxRef: (ref * 10_000n) / BigInt(10_000 - hardBps),
+      bandBps,
+      trailStepBps: bandBps,
+    };
+  }
+  const bound = boundForBand(bandBps);
   return {
     ref,
-    minRef: (ref * BigInt(10_000 - PLAN_BOUND_BPS)) / 10_000n,
-    maxRef: (ref * BigInt(10_000 + PLAN_BOUND_BPS)) / 10_000n,
-    bandBps: PLAN_BAND_BPS,
+    minRef: (ref * BigInt(10_000 - bound)) / 10_000n,
+    maxRef: (ref * BigInt(10_000 + bound)) / 10_000n,
+    bandBps,
+    trailStepBps: 0,
   };
 }
 
@@ -105,7 +132,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       : null;
   const routeCost = useRouteCost(basket.address);
   const routeBps = routeBpsFor(routeCost, amount);
-  const blocked = routeOutsideBand(routeBps, PLAN_BAND_BPS);
+  const blocked = routeOutsideBand(routeBps, c.bandBps);
   const feeBps = basket.creatorFeeBps + (basket.protocolFeeBps ?? 0);
   const label = amountInr != null && Number.isFinite(amountInr) ? `${rupees(amountInr)} (${money(amount)})` : money(amount);
 
@@ -114,22 +141,23 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
     setBusy(true);
     setError(null);
     try {
-      const terms = planTerms(navPerShare, basket.creatorFeeBps, basket.protocolFeeBps ?? 0);
+      const terms = planTerms(navPerShare, basket.creatorFeeBps, basket.protocolFeeBps ?? 0, c.bandBps, c.hardBps);
       const { plan, ix } = openPlanIx({
         owner: publicKey,
         basket: new PublicKey(basket.address),
         cashMint: CASH.mint,
         cashProgram: CASH.program,
-        planId: BigInt(Date.now()),
+        planId: freshNonce(),
         cashPerRun: toCashRaw(amount),
         periodSecs: c.secs,
         runs,
         refSharesPerCashE9: terms.ref,
-        // The reference may follow the market three bands either side of today's
-        // rate and never further, however thin the competition.
+        // The owner's hard limits: no fill can walk the plan past them, however thin the competition.
         minRef: terms.minRef,
         maxRef: terms.maxRef,
         bandBps: terms.bandBps,
+        // The plan follows the market by at most its band per fill, inside the hard limits above.
+        trailStepBps: terms.trailStepBps,
         auctionSecs: c.auctionSecs,
       });
       // The share account the fill will pay into, created by the buyer, idempotently.
@@ -275,16 +303,16 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       )}
       {blocked && (
         <p className="mt-3 border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
-          On mainnet no filler could fill this inside the 2% band today: buying the stocks costs about{" "}
+          On mainnet no filler could fill this inside the {c.bandBps / 100}% band today: buying the stocks costs about{" "}
           {((routeBps ?? 0) / 100).toFixed(2)}% one way, so every run would come back unfilled. Create shares in kind instead,
-          from the Create in kind tab.
+          from the In kind tab.
         </p>
       )}
       {navPerShare != null && (
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
-          The first run never pays more than {BOUND_ABOVE}% above or {BOUND_BELOW}% below today&apos;s fair price of{" "}
-          {money(navPerShare)} a share. After that the plan follows the market: each fill re-centers those bounds at ±
-          {PLAN_BOUND_BPS / 100}% around the price it filled at. If the price jumps past them between runs, re-center the plan
+          Each run&apos;s auction opens ±{c.bandBps / 100}% around the last fill and follows the market, but never pays more
+          than {c.hardBps / 100}% above or {c.hardBps / 100}% below today&apos;s price of {money(navPerShare)} a share
+          {feeBps > 0 ? " (fees included)" : ""}. If the price jumps further than the band between runs, re-center the plan
           from your plans page.
         </p>
       )}

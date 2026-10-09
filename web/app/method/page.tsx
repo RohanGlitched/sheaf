@@ -10,7 +10,7 @@ import {
   explorerTx,
 } from "@/lib/config";
 import { PlanSheaf } from "@/components/plan-sheaf";
-import { FEATURED_DBC, PRESET_URL } from "@/lib/dbc";
+import { PRESET_URL } from "@/lib/dbc";
 import { FeeTable } from "@/components/business-case";
 import { fetchBasketAt, type Basket } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
@@ -22,12 +22,16 @@ import preset from "@/lib/meteora-preset.json";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Six steps from a list of companies to a token you can hold, buy with dollars and buy every month, plus the two markets beside it, each linked to the transaction, account or data that proves it.",
+    "Seven steps from a list of companies to a token you can hold, buy or sell for dollars and buy every month, plus the two markets beside it, each linked to the transaction, account or data that proves it.",
 };
 
 export const revalidate = 300;
 
-const [EXAMPLE] = FEATURED_DBC;
+/** The running example: The Big Five, the basket the home page leads with. */
+const EXAMPLE = "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ";
+/** A sale of shares for dollars, filled on devnet. */
+const EXAMPLE_SELL_TX =
+  "MmvsWDKyrLZzvDEdM7cedYhoM9PEdNyMnyUra8AbEt7aDjJA5DxsbZPJRP181G7hADeXzivh4bCW4diUu8a1Sen";
 /** The launch this page shows: Bitcoin, by proxy, opened on the current curve. */
 const LAUNCH_EXAMPLE = {
   address: "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
@@ -54,6 +58,7 @@ const STAGES = [
   { id: "recipe", title: "Write the recipe" },
   { id: "create", title: "Create shares in kind" },
   { id: "dollars", title: "Or buy with dollars" },
+  { id: "sell", title: "Sell for dollars" },
   { id: "plans", title: "Then every month" },
   { id: "market", title: "Open a launch market" },
   { id: "predict", title: "Bet on it" },
@@ -71,7 +76,7 @@ const RISKS = [
   },
   {
     title: "Devnet is a rehearsal",
-    body: "Prices, multipliers and liquidity are read from mainnet, but every vault today holds devnet mirrors of the real mints, worth nothing. On mainnet the vaults would hold the real tokens, and dollar orders would need fillers buying real xStocks. Today the only filler is Sheaf's own, delivering mirrors.",
+    body: "Prices, multipliers and liquidity are read from mainnet, but every vault today holds devnet mirrors of the real mints, worth nothing. On mainnet the vaults would hold the real tokens, and dollar orders would need fillers buying real xStocks. Today two fillers run, both ours: Sheaf's house filler, and a second filler running the published reference code with its own key. Both deliver mirrors.",
   },
   {
     title: "The program is not audited",
@@ -94,7 +99,7 @@ const GUARANTEES = [
   },
   {
     title: "No edit button",
-    body: "The recipe is written once: a fixed basket, like a unit investment trust. There is no manager, no rebalancing and no instruction that changes what a share holds. To change a recipe, publish a new basket.",
+    body: "The recipe is written once: a fixed basket, like a unit investment trust. There is no manager, no rebalancing and no instruction that changes what a share holds. To change a recipe, create a new basket.",
   },
   {
     title: "Rounding favors holders",
@@ -110,7 +115,7 @@ const GUARANTEES = [
   },
   {
     title: "Buying with dollars, measured",
-    body: "Every basket page quotes the round trip through Jupiter for each component. A typical basket lands under a quarter of a percent.",
+    body: "Every basket page measures what buying its stocks through Jupiter costs a filler, one way, for a $100 and a $1,000 order, from live mainnet quotes. Where that cost is above Sheaf's 0.15% margin, its filler waits deeper into the auction.",
   },
   {
     title: "A track record, not a promise",
@@ -160,7 +165,7 @@ const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[]
       "Anyone",
       "Yes, by anyone, at any time",
       "Fillers bid in an auction on share count; the program reads no price",
-      "Yes, monthly plans",
+      "Yes, from $5 a run, one order for the whole basket",
       "Solana, plus five EVM testnets",
     ],
   },
@@ -192,6 +197,70 @@ const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[]
       "Yes, burn for the underlying tokens",
       "Vault value and keeper auctions start from oracle prices",
       "Not stated",
+      "Solana",
+    ],
+  },
+  {
+    name: "Kraken bundles",
+    note: "Crypto + xStocks, since Apr 30 2026",
+    href: "https://support.kraken.com/gb/articles/bundles-faq",
+    cells: [
+      "Held in your Kraken account, with Kraken as custodian",
+      "Kraken only",
+      "Unbundle into the holdings inside Kraken",
+      "Bought at Kraken's prices; Kraken+ makes conversions fee-free",
+      "Not stated; bundles auto-rebalance on Kraken's schedule",
+      "Kraken; not offered in the US, UK, EEA, Canada or Australia",
+    ],
+  },
+  {
+    name: "Bitget Wallet Basket",
+    href: "https://web3.bitget.com/wallet/basket-wallet",
+    cells: [
+      "Self-custody: you hold each token in your wallet",
+      "Curated themes, with community voting",
+      "Not needed: you already hold the tokens",
+      "Swaps at market prices",
+      "Automatic regular investments mentioned, details not stated",
+      "Solana and Robinhood Chain; memecoin baskets",
+    ],
+  },
+  {
+    name: "Weave",
+    note: "hackathon project",
+    href: "https://hackquest.io/projects/Weave",
+    cells: [
+      "Not stated",
+      "Creators publish thematic stock baskets",
+      "Not stated",
+      "Not stated",
+      "Not stated",
+      "Robinhood Chain, per its listing; deployment not confirmed",
+    ],
+  },
+  {
+    name: "Basket",
+    note: "basketsolana.xyz",
+    href: "https://basketsolana.xyz",
+    cells: [
+      "In kind: a share token over crypto tokens it holds; no stocks",
+      "Not stated",
+      "Yes, for your portion of the underlying",
+      "Not stated",
+      "Not stated",
+      "Solana",
+    ],
+  },
+  {
+    name: "Jupiter recurring",
+    note: "a plan of single-token orders",
+    href: "https://developers.jup.ag/docs/recurring/best-practices",
+    cells: [
+      "No basket token: each order buys one token into your wallet",
+      "You set up your own orders",
+      "Not needed: you hold the tokens",
+      "Swaps at the route's price; 0.1% per order",
+      "Yes, but at least $50 per order and 2 orders: a five-stock plan starts at $250 a month. The API does not support Token-2022 mints such as xStocks",
       "Solana",
     ],
   },
@@ -257,27 +326,41 @@ function Stage({
   );
 }
 
-function AuctionVisual() {
+function AuctionVisual({ sell = false }: { sell?: boolean } = {}) {
   // Shares the buyer receives over the auction: from 2% above fair to 2% below.
   const W = 520, H = 260, pad = 36;
   const y = (v: number) => pad + ((1.03 - v) / 0.06) * (H - 2 * pad);
   const x = (t: number) => pad + t * (W - 2 * pad);
   return (
     <figure className="rounded-[var(--radius-panel)] border border-line bg-surface p-5">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Shares offered fall from 2% above fair to 2% below over the auction; a filler takes it near fair">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={sell ? "Dollars offered for the shares fall from 2% above fair to 2% below over the auction; a filler takes it near fair" : "Shares offered fall from 2% above fair to 2% below over the auction; a filler takes it near fair"}>
         <line x1={pad} x2={W - pad} y1={y(1)} y2={y(1)} stroke="var(--color-line-strong)" strokeDasharray="4 4" />
-        <text x={W - pad} y={y(1) - 8} textAnchor="end" fontSize="13" fill="var(--color-ink-3)">fair count at mainnet prices</text>
+        <text x={W - pad} y={y(1) - 8} textAnchor="end" fontSize="13" fill="var(--color-ink-3)">{sell ? "fair value at mainnet prices" : "fair count at mainnet prices"}</text>
         <line x1={x(0)} y1={y(1.02)} x2={x(1)} y2={y(0.98)} stroke="var(--color-bind)" strokeWidth="3" strokeLinecap="round" />
         <circle cx={x(0.55)} cy={y(1.02 - 0.04 * 0.55)} r="7" fill="var(--color-gain)" />
-        <text x={x(0.55) + 12} y={y(1.02 - 0.04 * 0.55) + 22} fontSize="13" fill="var(--color-ink)">a filler delivers the stocks</text>
+        <text
+          x={sell ? x(0.55) - 12 : x(0.55) + 12}
+          y={sell ? y(1.02 - 0.04 * 0.55) + 28 : y(1.02 - 0.04 * 0.55) + 22}
+          textAnchor={sell ? "end" : "start"}
+          fontSize="13"
+          fill="var(--color-ink)"
+        >
+          {sell ? "a filler pays and takes the shares" : "a filler delivers the stocks"}
+        </text>
         <text x={x(0)} y={y(1.02) - 12} fontSize="13" fill="var(--color-ink-2)">+2%</text>
-        <text x={x(1)} y={y(0.98) + 22} textAnchor="end" fontSize="13" fill="var(--color-ink-2)">−2%, the buyer&apos;s floor</text>
+        <text x={x(1)} y={y(0.98) + 22} textAnchor="end" fontSize="13" fill="var(--color-ink-2)">{sell ? "−2%, the seller’s floor" : "−2%, the buyer’s floor"}</text>
         <text x={x(0)} y={H - 6} fontSize="12" fill="var(--color-ink-3)">0s</text>
         <text x={x(1)} y={H - 6} textAnchor="end" fontSize="12" fill="var(--color-ink-3)">90s</text>
       </svg>
-      <figcaption className="mt-2 text-sm text-ink-3">Shares offered for the same dollars, over the auction.</figcaption>
+      <figcaption className="mt-2 text-sm text-ink-3">
+        {sell ? "Dollars offered for the same shares, over the auction." : "Shares offered for the same dollars, over the auction."}
+      </figcaption>
     </figure>
   );
+}
+
+function SellVisual() {
+  return <AuctionVisual sell />;
 }
 
 function PlanVisual() {
@@ -456,18 +539,19 @@ export default async function MethodPage() {
       <header className="max-w-[62ch]">
         <h1 className="display text-hero leading-[0.95] text-ink">How it works</h1>
         <p className="mt-6 text-lg leading-[1.65] text-ink-2">
-          Six steps, the same six as on the home page, take a list of companies
-          to a token you can hold, buy with dollars and buy every month; the last
-          two are markets that sit beside it. The first five have already happened on{" "}
-          {WRITE_CLUSTER} and link to the transaction or account that proves
-          them; the sixth runs against Panta&rsquo;s sandbox. The running example is{" "}
+          Seven steps, the same seven as on the home page, take a list of companies
+          to a token you can hold, buy or sell for dollars and buy every month; the
+          last two are markets that sit beside it. The first six have already
+          happened on {WRITE_CLUSTER} and link to the transaction or account that
+          proves them; the seventh runs against Panta&rsquo;s sandbox. The running
+          example is{" "}
           <Link
             href={`/basket/${EXAMPLE}`}
             className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
           >
-            {basket?.name ?? "Frontier Labs"}
+            {basket?.name ?? "The Big Five"}
           </Link>
-          , a basket of pre-IPO companies.
+          , five listed megacaps in one share.
         </p>
         <p className="display mt-8 border-l-2 border-bind pl-5 text-xl leading-snug text-ink sm:text-2xl">
           The one thing Sheaf does differently: every share is backed by the exact stocks its recipe
@@ -531,7 +615,7 @@ export default async function MethodPage() {
           id="create"
           title="Create shares in kind"
           on="Token-2022 vault · mint_shares, redeem_shares"
-          proof={{ label: "A creation with a PreStocks fee grossed up", href: explorerTx(EXAMPLE_MINT_TX) }}
+          proof={{ label: "A PreStocks creation, its transfer fee grossed up", href: explorerTx(EXAMPLE_MINT_TX) }}
           visual={
             <div className="space-y-4">
               <CreateVisual basket={basket} />
@@ -586,6 +670,26 @@ export default async function MethodPage() {
 
         <Stage
           n={4}
+          id="sell"
+          title="Sell for dollars"
+          on="Sell order"
+          proof={{ label: "A sale for dollars on Explorer", href: explorerTx(EXAMPLE_SELL_TX) }}
+          visual={<SellVisual />}
+        >
+          <p>
+            The way out is the way in, reversed. A holder escrows shares and asks for dollars that start a
+            little above fair value and fall over ninety seconds to a floor the seller chose.
+          </p>
+          <p>
+            Any filler can pay the current amount and take the shares, and can redeem them for the stocks
+            whenever it likes. If nobody fills in time, the shares go back to the seller. There is no protocol
+            fee on a sale; the filler keeps whatever spread the seller&rsquo;s band allows. Redeeming for the
+            stocks themselves is always free.
+          </p>
+        </Stage>
+
+        <Stage
+          n={5}
           id="plans"
           title="Then every month"
           on="Monthly plan"
@@ -593,16 +697,18 @@ export default async function MethodPage() {
         >
           <p>
             A plan is that dollar order on a schedule: an amount, a period and a number of runs. Opening it
-            approves exactly the amount per run for its runs, and nothing else.
+            approves exactly the amount per run for its runs, and nothing else. A plan run is the same auction,
+            stretched to 30 minutes so any filler has time (four minutes on the demo pace that runs every five
+            minutes).
           </p>
           <p>
-            When a run is due anyone may send it, and the person who does is repaid the rent when the order
-            closes. Each fill resets the plan&apos;s reference to the price the market actually cleared at, so
+            When a run is due anyone may send it, and the person who does is repaid the small account deposit
+            when the order closes. Each fill resets the plan&apos;s reference to the price the market actually cleared at, so
             next month starts from where this month landed, without the program reading a price.
           </p>
         </Stage>
         <Stage
-          n={5}
+          n={6}
           id="market"
           title="Open a launch market"
           on="Launch market"
@@ -626,8 +732,8 @@ export default async function MethodPage() {
           </p>
           <p className="text-sm text-ink-3">
             The market shown is {LAUNCH_EXAMPLE.name}&rsquo;s, on this curve.
-            The first launches, {basket?.name ?? "Frontier Labs"}&rsquo; among
-            them, opened on an earlier curve that graduates at{" "}
+            The first launches, The Big Five&rsquo;s (since graduated) and
+            Frontier Labs&rsquo; among them, opened on an earlier curve that graduates at{" "}
             {FIRST_GRADUATION} times NAV with a {FIRST_OPEN_FEE}% opening fee, and
             keep it.
           </p>
@@ -654,7 +760,7 @@ export default async function MethodPage() {
         </Stage>
 
         <Stage
-          n={6}
+          n={7}
           id="predict"
           title="Bet on it"
           on="Prediction market · Panta"
@@ -863,6 +969,22 @@ export default async function MethodPage() {
             Create a basket
           </Link>
         </div>
+      </section>
+
+      <section className="border-t border-line py-12">
+        <p className="max-w-[62ch] text-sm leading-relaxed text-ink-2">
+          Built by Rohan Borade, solo, in India. The code, the program and every script behind these pages are
+          on{" "}
+          <a
+            href="https://github.com/RohanGlitched"
+            target="_blank"
+            rel="noreferrer"
+            className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink-2"
+          >
+            GitHub
+          </a>
+          .
+        </p>
       </section>
     </div>
   );

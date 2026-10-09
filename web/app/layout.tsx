@@ -29,11 +29,11 @@ const host = Host_Grotesk({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Sheaf: index funds of tokenized stocks",
+    default: "Sheaf: baskets of tokenized stocks",
     template: "%s | Sheaf",
   },
   description:
-    "Bind up to eight tokenized stocks into one share, backed by the real stocks in an onchain vault and redeemable for them any time. On Solana, with vaults on every chain where stocks are tokenized.",
+    "Baskets of tokenized stocks, like a unit investment trust: up to eight stocks bound into one share, backed by the stocks in an onchain vault and redeemable for them any time. On Solana devnet, with vaults on five EVM testnets.",
   openGraph: {
     title: "Sheaf",
     description:

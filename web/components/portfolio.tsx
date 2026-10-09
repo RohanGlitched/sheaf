@@ -371,13 +371,16 @@ export function Portfolio() {
             Everything you own, unwrapped
           </h1>
           <p className="mt-4 max-w-[52ch] text-base leading-relaxed text-ink-2">
-            Balances read from the chain, valued at live mainnet prices.
+            Balances read from devnet, valued at live mainnet prices. Everything
+            here is test funds: devnet mirror tokens and test dollars from the
+            faucet, worth nothing.
           </p>
         </div>
         <div className="text-right">
           <p className="tnum display text-hero leading-none text-ink">
             {money(view.total)}
           </p>
+          <p className="mt-1 text-xs text-ink-3">if these were the real stocks · test funds</p>
           <p
             className="tnum mt-2 text-sm"
             style={{
@@ -439,7 +442,7 @@ export function Portfolio() {
             <Figure
               label="Loose tokens"
               value={money(view.looseValue)}
-              note="Equities not inside a basket yet"
+              note="Test tokens not inside a basket yet"
             />
             <Figure
               label="Companies underneath"
@@ -596,8 +599,8 @@ export function Portfolio() {
             <div>
               <h2 className="display text-title text-ink">Loose tokens</h2>
               <p className="mt-3 max-w-[54ch] text-sm leading-relaxed text-ink-2">
-                Equities sitting in your wallet on their own. These are what a
-                basket is made from.
+                Test tokens sitting in your wallet on their own: devnet mirrors of
+                the real stocks, from the faucet. These are what a basket is made from.
               </p>
             </div>
             <FaucetButton

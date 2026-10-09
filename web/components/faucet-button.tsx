@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { FAUCET_TOKENS_PER_CLAIM } from "@/lib/mirror";
 import { explorerTx } from "@/lib/config";
@@ -12,6 +12,11 @@ import { explorerTx } from "@/lib/config";
  * this does. The button asks the server to mint the exact tickers the person is
  * short of, and says what happened in a sentence either way.
  */
+/** How long "Sent." stays up, even if the page re-renders the button after the balances reload. */
+const SENT_MS = 5_000;
+/** The last claim, kept outside the component so a remounted button still shows it. */
+let lastSent: { signature: string; at: number } | null = null;
+
 export function FaucetButton({
   symbols,
   onDone,
@@ -24,7 +29,17 @@ export function FaucetButton({
   const { publicKey, connected } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signature, setSignature] = useState<string | null>(null);
+  const [signature, setSignature] = useState<string | null>(() =>
+    lastSent && Date.now() - lastSent.at < SENT_MS ? lastSent.signature : null,
+  );
+
+  // Clear the confirmation once it has been up for its five seconds, counted from the claim.
+  useEffect(() => {
+    if (!signature) return;
+    const left = lastSent && lastSent.signature === signature ? SENT_MS - (Date.now() - lastSent.at) : SENT_MS;
+    const timer = setTimeout(() => setSignature(null), Math.max(0, left));
+    return () => clearTimeout(timer);
+  }, [signature]);
 
   async function claim() {
     if (!publicKey) return;
@@ -45,6 +60,7 @@ export function FaucetButton({
         setError(body.error ?? "The faucet did not answer.");
         return;
       }
+      lastSent = { signature: body.signature, at: Date.now() };
       setSignature(body.signature);
       onDone?.();
     } catch {
@@ -80,7 +96,7 @@ export function FaucetButton({
       )}
       {signature && (
         <p className="mt-2 text-xs leading-relaxed text-gain">
-          Sent.{" "}
+          Sent: test tokens, worth nothing, are in your wallet.{" "}
           <a
             href={explorerTx(signature)}
             target="_blank"

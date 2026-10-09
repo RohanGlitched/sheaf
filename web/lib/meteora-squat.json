@@ -26,5 +26,18 @@
     "reason": "50% of its graduated liquidity is not permanently locked and can be withdrawn after graduation.",
     "note": "Opened by the basket's own creator (the house key) on the v2 curve and fees, with one rogue term: half the graduated LP withdrawable. The creator check passes; checkLaunch rejects it on its terms.",
     "at": "2026-10-09T10:05:36.040Z"
+  },
+  "rogueAnchor": {
+    "slot": 1,
+    "basket": "EjoW8Gy9tJTctrtWcUJtkUiee5t9RFeCB3nbamutvghE",
+    "creator": "B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L",
+    "pool": "HGECig2uZGtNG4dsHVqbPQLWfW3V1U9ESazBx3dAEfxo",
+    "signature": "4fuB2dGqG8SuUEXsTY4QiRLNy2og6ESqWNQDBWhR7dPCppyqQ4BP6EVpLVdfqUPMpHUFVhbUhnSbYREj3M9edvan",
+    "costSol": 0.01458952,
+    "rogueTerm": "opening market cap 2.269990 SOL: 2x the real launch's, so the curve opens at 1x NAV, not 0.5x",
+    "reason": "The curve opened at 0.99x the basket's NAV, not 0.5x.",
+    "deviationPct": 98.97,
+    "note": "Opened by the basket's own creator (the house key) on the exact v2 terms with every price doubled. The creator and terms checks pass; the anchor check rejects it, and the basket's real launch stays slot 0.",
+    "at": "2026-10-09T14:54:29.572Z"
   }
 }

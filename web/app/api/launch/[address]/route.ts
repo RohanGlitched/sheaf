@@ -1,11 +1,16 @@
 import { Connection } from "@solana/web3.js";
 import { WRITE_RPC } from "@/lib/config";
-import { PRESET_NAMES, findLaunch, launchName, launchSymbol, preIpoCompanies, readDbcState } from "@/lib/dbc";
+import { PRESET_NAMES, launchName, launchSymbol, preIpoCompanies } from "@/lib/dbc";
+import { clientIp, rateLimiter } from "@/lib/evm-server";
 import { LAUNCH_METADATA_SITE } from "@/lib/launch";
 import { fetchBasketAt } from "@/lib/sheaf";
-import { anchorFor } from "../anchor";
+import { resolveLaunch } from "../anchor";
 
 export const dynamic = "force-dynamic";
+
+/** 30 reads a minute per IP: a cold read fans out to the chain, two price APIs and the NAV history. */
+const perIp = rateLimiter(60_000, 30);
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /**
  * Token metadata for a basket's launch token, which points its mint's URI
@@ -19,24 +24,32 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request, { params }: { params: Promise<{ address: string }> }) {
   const { address } = await params;
+  const url = new URL(req.url);
+  if (!BASE58.test(address)) return Response.json({ error: "Not a basket address." }, { status: 400 });
+  // One URL per launch, so the edge cache always answers: anything after "?" is dropped.
+  if (url.search) return Response.redirect(`${url.origin}${url.pathname}`, 308);
+  const ip = clientIp(req);
+  const limit = perIp.check(ip);
+  if (!limit.ok) {
+    return Response.json({ error: "Too many requests." }, { status: 429, headers: { "retry-after": String(limit.retryInSec) } });
+  }
+  perIp.hit(ip);
   const basket = await fetchBasketAt(address).catch(() => null);
   if (!basket) return Response.json({ error: "No basket at that address." }, { status: 404 });
 
   const page = `${LAUNCH_METADATA_SITE}/basket/${basket.address}`;
   const preIpo = preIpoCompanies(basket);
   const connection = new Connection(WRITE_RPC, "confirmed");
-  const { launch } = await findLaunch(connection, basket).catch(() => ({ launch: null }));
-  const state = launch ? await readDbcState(connection, launch.info, basket.creator).catch(() => null) : null;
-  const anchor =
-    launch && state
-      ? await anchorFor({
-          connection,
-          origin: new URL(req.url).origin,
-          basket: basket.address,
-          pool: launch.info.pool,
-          state,
-        }).catch(() => null)
-      : null;
+  const resolved = await resolveLaunch(connection, url.origin, basket).catch(() => null);
+  const launch = resolved?.launch ?? null;
+  const state = resolved?.state ?? null;
+  const anchor = resolved?.anchor ?? null;
+  // Pools on the published terms that the anchor refused, so a reader (and the card) can skip them.
+  const rejected = [...(resolved?.rejected ?? new Map<string, string>())].map(([pool, reason]) => ({
+    pool,
+    reason,
+    anchor: resolved?.anchors.get(pool) ?? null,
+  }));
 
   const attributes = [
     { trait_type: "basket", value: `${basket.name} (${basket.symbol})` },
@@ -65,16 +78,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
       image: `${page}/opengraph-image`,
       external_url: page,
       attributes,
-      provenance: launch
+      provenance: launch || rejected.length
         ? {
-            pool: launch.info.pool,
-            config: launch.info.config,
-            mint: launch.info.baseMint,
-            slot: launch.info.slot ?? 0,
+            pool: launch?.info.pool ?? null,
+            config: launch?.info.config ?? null,
+            mint: launch?.info.baseMint ?? null,
+            slot: launch ? (launch.info.slot ?? 0) : null,
             preset: state?.preset ? PRESET_NAMES[state.preset] : null,
             anchor,
+            rejected,
             method:
-              "openedAt is the pool's activation_point; navSolAtOpen is the curve's opening market cap / 0.5; solUsdAtOpen is SOL's price in that hour (Coinbase candles, else Kraken); navUsdAtClose is navProof's navPerShare.listed. The anchor is verified when navSolAtOpen x solUsdAtOpen is within 20% of navUsdAtClose.",
+              "openedAt is the pool's activation_point; navSolAtOpen is the curve's opening market cap / 0.5; solUsdAtOpen is SOL's price in that hour (Coinbase candles, else Kraken); navUsdAtClose is navProof's navPerShare.listed. The anchor is verified when navSolAtOpen x solUsdAtOpen is within 10% of navUsdAtClose.",
           }
         : null,
     },

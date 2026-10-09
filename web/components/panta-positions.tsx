@@ -5,6 +5,7 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { FixtureTag, PantaSteps, PoweredByPanta, type Step } from "./panta-steps";
 import { pantaGet, pantaPost, short, type PantaMode } from "@/lib/panta-client";
 import { compileForSigning, signatureOf, type PantaIx } from "@/lib/panta-sign";
+import { BrowserWalletName } from "@/lib/browser-wallet";
 
 type Row = {
   marketId: string;
@@ -41,7 +42,7 @@ const mono = (s: ReactNode) => <span className="font-mono text-[11px]">{s}</span
  * anyone else's behalf.
  */
 export function PantaPositions() {
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction, wallet, select, connect } = useWallet();
   const { connection } = useConnection();
   const me = publicKey?.toBase58() ?? null;
   const [mode, setMode] = useState<PantaMode | null>(null);
@@ -52,7 +53,12 @@ export function PantaPositions() {
   const [claim, setClaim] = useState<Claim | null>(null);
 
   const load = useCallback(async () => {
-    if (!me) return;
+    if (!me) {
+      // Walletless: only the mode, so the preview knows whether Panta is configured.
+      const r = await pantaGet<{ mode: PantaMode }>("/api/panta");
+      setMode(r.ok ? r.data.mode : "off");
+      return;
+    }
     const r = await pantaGet<{ mode: PantaMode; fixture?: boolean; positions: Row[] }>(`/api/panta/positions?wallet=${me}`);
     if (!r.ok) {
       setError(r.error);
@@ -106,7 +112,53 @@ export function PantaPositions() {
     }
   }
 
-  if (!me || mode === "off") return null;
+  if (mode === "off") return null;
+
+  // No wallet yet: show what this section is and how to fill it, rather than nothing.
+  if (!me) {
+    const startBrowserWallet = () => {
+      if (wallet?.adapter.name !== BrowserWalletName) {
+        select(BrowserWalletName);
+        return;
+      }
+      void connect().catch(() => {
+        /* the wallet reports its own rejection */
+      });
+    };
+    return (
+      <section className="mt-16">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="display text-title text-ink">Predictions</h2>
+            <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-ink-2">
+              Your shares in Panta prediction markets, such as whether a basket beats SPY this week, appear
+              here: valued at the side&apos;s current price, and claimable here once a market resolves in
+              your favor.
+            </p>
+          </div>
+          <PoweredByPanta />
+        </div>
+        <div className="mt-7 border border-dashed border-line-strong/60 px-6 py-8">
+          <p className="text-ink">Connect a wallet to read its Panta positions.</p>
+          <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-ink-2">
+            Sheaf asks Panta <code className="text-xs">GET /positions/?wallet=&lt;your address&gt;</code> and
+            shows what comes back. With no wallet app, one click makes a devnet wallet in this browser, with
+            test funds only, and the whole Panta flow on a basket page works with it.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={startBrowserWallet}
+              className="rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep"
+            >
+              Use a wallet in this browser
+            </button>
+            <span className="text-xs text-ink-3">or connect Phantom, Solflare or Backpack from the top bar</span>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const claimSteps = (c: Claim): Step[] => [
     {
