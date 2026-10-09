@@ -6,7 +6,7 @@ const root = new URL("../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, 
 const src = join(root, "evm", "deployments");
 const dst = join(root, "web", "lib", "deployments");
 mkdirSync(dst, { recursive: true });
-const names = readdirSync(src).filter((f) => f.endsWith(".json") && !/local|hardhat/i.test(f));
+const names = readdirSync(src).filter((f) => f.endsWith(".json") && !/local|hardhat|bridges/i.test(f));
 for (const f of names) writeFileSync(join(dst, f), readFileSync(join(src, f)));
 const idents = names.map((f) => f.replace(/\.json$/, ""));
 writeFileSync(
