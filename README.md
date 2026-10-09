@@ -4,7 +4,7 @@
 
 **Baskets of tokenized stocks.** Bind up to eight tokenized stocks into one share, backed in kind by an onchain vault and redeemable for those stocks at any time. Each basket is a fixed recipe, like a unit investment trust: no manager and no rebalancing; a new mix is a new basket.
 
-[**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
+[**Open Sheaf**](https://sheaf.world) · [How it works](https://sheaf.world/method) · [Ledger](https://sheaf.world/ledger) · [Chains](https://sheaf.world/chains) · [Program reference](docs/program.md)
 
 ![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![74 program tests](https://img.shields.io/badge/program%20tests-74%20%2B%2016%20unit-3438c9?style=flat-square) ![174 EVM tests](https://img.shields.io/badge/EVM%20tests-174%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
 
@@ -18,15 +18,15 @@ Tokenized stocks now trade around the clock on Solana and several EVM chains, bu
 
 | | |
 |---|---|
-| App | [sheaf-index.vercel.app](https://sheaf-index.vercel.app): connect any Solana wallet set to devnet, or choose **Use a wallet in this browser** (nothing to install); an empty wallet gets test SOL and test dollars in one click |
-| Create a basket | [/compose](https://sheaf-index.vercel.app/compose): 28 tokenized stocks (20 xStocks, 8 PreStocks pre-IPO tokens such as OpenAI, Anthropic, SpaceX) |
-| Browse | [/explore](https://sheaf-index.vercel.app/explore) · [/plans](https://sheaf-index.vercel.app/plans) · [/predict](https://sheaf-index.vercel.app/predict) · [/portfolio](https://sheaf-index.vercel.app/portfolio) |
-| Proof | [/ledger](https://sheaf-index.vercel.app/ledger) (every program event, decoded from the chain and cached) · [/business](https://sheaf-index.vercel.app/business) (fees, the protocol-fee claim receipt) · [/live](https://sheaf-index.vercel.app/live) (mainnet xStock trades through Solami) · [/chains](https://sheaf-index.vercel.app/chains) (each EVM vault read from its own chain) |
+| App | [sheaf.world](https://sheaf.world): connect any Solana wallet set to devnet, or choose **Use a wallet in this browser** (nothing to install); an empty wallet gets test SOL and test dollars in one click |
+| Create a basket | [/compose](https://sheaf.world/compose): 28 tokenized stocks (20 xStocks, 8 PreStocks pre-IPO tokens such as OpenAI, Anthropic, SpaceX) |
+| Browse | [/explore](https://sheaf.world/explore) · [/plans](https://sheaf.world/plans) · [/predict](https://sheaf.world/predict) · [/portfolio](https://sheaf.world/portfolio) |
+| Proof | [/ledger](https://sheaf.world/ledger) (every program event, decoded from the chain and cached) · [/business](https://sheaf.world/business) (fees, the protocol-fee claim receipt) · [/live](https://sheaf.world/live) (mainnet xStock trades through Solami) · [/chains](https://sheaf.world/chains) (each EVM vault read from its own chain) |
 | Program | [`GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz`](https://explorer.solana.com/address/GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz?cluster=devnet) on Solana devnet |
 
 Try it in two minutes on Solana: **Connect** → **Use a wallet in this browser** → **Get test SOL and test dollars**. Open **The Big Five**, buy $20 with dollars; a filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Sell some back for dollars from the same panel, or start a **Monthly** plan on a 5-minute period to watch it run.
 
-On Robinhood Chain or Arbitrum Sepolia: open [/chains](https://sheaf-index.vercel.app/chains), pick a basket, connect (or use a wallet in this browser), take test stocks and dollars from the faucet, then create shares in kind or place a dollar auction the house fills. On Tempo: open the MAG8 basket and run the monthly plan panel; the chain itself refuses an overpay, an early run and any call outside the plan.
+On Robinhood Chain or Arbitrum Sepolia: open [/chains](https://sheaf.world/chains), pick a basket, connect (or use a wallet in this browser), take test stocks and dollars from the faucet, then create shares in kind or place a dollar auction the house fills. On Tempo: open the MAG8 basket and run the monthly plan panel; the chain itself refuses an overpay, an early run and any call outside the plan.
 
 ## How it works
 
@@ -56,7 +56,7 @@ Every instruction, account, seed, event and error is in [docs/program.md](docs/p
 What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
-- **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
+- **History.** [/ledger](https://sheaf.world/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
 - **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 74 integration tests as mocha counts them (`anchor test`) and `lib.rs` 16 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 174 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
 - **EVM vaults.** The same vault and recipe as Solidity contracts, deployed and source-verified on five testnets. The EVM v3 dollar desk runs the same Dutch auction as Solana, with a 0.10% protocol fee on fills paid to a separate treasury key (`0xEcb6…7355`) held by the founder and kept off the server; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable. `PlanDeskV3` holds monthly plans whose amount, interval and owner's hard price limits are on chain, with bounds that trail each fill. The earlier v2 desks (whose fee went to the house key) and the v1 fixed-price desk stay live beside them; all addresses are in evm/README.md:
@@ -77,7 +77,7 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 |---|---|---|
 | **Meteora** | Each basket can open a Dynamic Bonding Curve priced from its own NAV (opens at 0.5× NAV, graduates at 5× NAV into a DAMM v2 pool with all LP permanently locked). Launch addresses derive from the basket, so discovery needs no indexer, and a pool only counts if the basket's creator opened it. One launch has been taken through its whole life on devnet. | [docs/meteora.md](docs/meteora.md) |
 | **Panta** | Each basket whose holdings are all listed carries a market, "Will this basket beat SPY this week?". It resolves from the basket's recipe (its units written into the rule) valued at two week-ending NYSE closes (adjusted closes × each mint's multiplier, read on mainnet through Solami) against SPY's adjusted close, published with every input at `/api/nav/<basket>?at=<close>`. Baskets holding pre-IPO companies get no market. Discovery, quotes, create, trade, positions and claims run through Panta's API against its sandbox (`pk_test_` key), where the wallet signs a stand-in that is never broadcast. | [docs/panta.md](docs/panta.md) |
-| **Solami** | Mainnet reads go through Solami's RPC: every xStock's dividend multiplier (which sets NAV) and a live tape of tokenized-stock trades, decoded every few seconds. Watch it at [/live](https://sheaf-index.vercel.app/live). The same key reads the dividend multipliers behind every basket's value and every Panta resolution. | [docs/solami.md](docs/solami.md) |
+| **Solami** | Mainnet reads go through Solami's RPC: every xStock's dividend multiplier (which sets NAV) and a live tape of tokenized-stock trades, decoded every few seconds. Watch it at [/live](https://sheaf.world/live). The same key reads the dividend multipliers behind every basket's value and every Panta resolution. | [docs/solami.md](docs/solami.md) |
 
 ## Chains
 
@@ -94,7 +94,7 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 
 ## Business
 
-Full breakdown with sources: [/business](https://sheaf-index.vercel.app/business).
+Full breakdown with sources: [/business](https://sheaf.world/business).
 
 | Who earns | What | Source |
 |---|---|---|
@@ -153,7 +153,7 @@ node scripts/filler.mjs --keypair ~/.config/solana/id.json --edge-bps 20
 | `--edge-bps` | `20` | minimum margin over the stocks' cost |
 | `--cash-mint` | `CASH_MINT` from `web/lib/cash.generated.ts` | the only cash mint it fills; every other mint is skipped |
 | `--rpc` | `https://api.devnet.solana.com` | write cluster |
-| `--site` | `https://sheaf-index.vercel.app` | source of mainnet quotes |
+| `--site` | `https://sheaf.world` | source of mainnet quotes |
 | `--dry-run` | off | print what it would fill; sign nothing |
 | `--once` | off | one pass, then exit |
 
@@ -171,7 +171,7 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 
 ## India
 
-India's monthly-plan habit (10 crore SIP accounts, ₹32,297 crore a month; AMFI, Aug 2026) meets a capped fund route to US stocks. Sheaf's plan form takes rupee amounts and the [/plans](https://sheaf-index.vercel.app/plans) page sets out the rules with sources: Indian residents face the LRS limit, TCS, 30% crypto tax plus 1% TDS and an unsettled FEMA position, so the first users are Indians abroad where xStocks are sold and the wallets that serve them; residents come once the rules are clear. The page carries an India waitlist.
+India's monthly-plan habit (10 crore SIP accounts, ₹32,297 crore a month; AMFI, Aug 2026) meets a capped fund route to US stocks. Sheaf's plan form takes rupee amounts and the [/plans](https://sheaf.world/plans) page sets out the rules with sources: Indian residents face the LRS limit, TCS, 30% crypto tax plus 1% TDS and an unsettled FEMA position, so the first users are Indians abroad where xStocks are sold and the wallets that serve them; residents come once the rules are clear. The page carries an India waitlist.
 
 ## Who builds it
 

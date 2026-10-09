@@ -18,7 +18,7 @@ export type Platform = keyof typeof PLATFORMS;
 export const QUOTE_MAX = 200;
 /** A signature is fresh when its date is at most this many days from today (UTC). */
 export const FRESH_DAYS = 2;
-export const SITE_LINE = "sheaf-index.vercel.app/voices";
+export const SITE_LINE = "sheaf.world/voices";
 
 /**
  * How the signing wallet was made, as the signing page reports it: "browser" for

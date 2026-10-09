@@ -6,4 +6,4 @@ out=$(npx vercel --prod --yes 2>&1)
 url=$(printf "%s" "$out" | grep -o "sheaf-[a-z0-9]*-rohanglitcheds-projects.vercel.app" | head -1)
 [ -n "$url" ] || { printf "%s\n" "$out" | tail -20; exit 1; }
 npx vercel alias set "$url" sheaf-index.vercel.app >/dev/null
-echo "live: https://sheaf-index.vercel.app -> $url"
+echo "live: https://sheaf.world and https://sheaf-index.vercel.app -> $url"

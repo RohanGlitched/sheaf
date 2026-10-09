@@ -360,7 +360,7 @@ export class BrowserWalletAdapter extends BaseMessageSignerWalletAdapter<"Browse
   /** Lets code holding only the adapter tell this wallet from an installed one. */
   readonly isBrowserWallet = true;
   name = BrowserWalletName;
-  url = "https://sheaf-index.vercel.app";
+  url = "https://sheaf.world";
   icon = ICON;
   supportedTransactionVersions: ReadonlySet<TransactionVersion> = new Set<TransactionVersion>(["legacy", 0]);
 

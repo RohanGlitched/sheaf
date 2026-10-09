@@ -27,7 +27,7 @@ const VERIFY_SNIPPET = `// npm i tweetnacl bs58
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 
-const { voices } = await (await fetch("https://sheaf-index.vercel.app/api/voices")).json();
+const { voices } = await (await fetch("https://sheaf.world/api/voices")).json();
 for (const v of voices) {
   const ok = nacl.sign.detached.verify(
     new TextEncoder().encode(v.message),

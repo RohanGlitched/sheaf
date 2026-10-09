@@ -5,7 +5,7 @@ const { chromium } = require("I:/Programs/ListofHackathon/hackathons/01-arbitrum
 const fs = require("fs");
 const path = require("path");
 
-const BASE = process.argv[2] || "https://sheaf-index.vercel.app";
+const BASE = process.argv[2] || "https://sheaf.world";
 const OUT = path.join(__dirname, "..", ".judge", "pages");
 fs.mkdirSync(OUT, { recursive: true });
 const ROUTES = [

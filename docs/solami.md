@@ -8,7 +8,7 @@ Sheaf reads Solana mainnet through [Solami](https://solami.dev).
 
 If the read fails, `/api/nav?at=` answers 503 rather than use Jupiter's copy. `/api/market` then reports the reason as `chainError`.
 
-The second thing Solami supplies is the live tape of tokenized-stock trades, on its own page at **[/live](https://sheaf-index.vercel.app/live)**. That page shows the tape full width, with the Solami figures open, and is the page to watch (or record) it on.
+The second thing Solami supplies is the live tape of tokenized-stock trades, on its own page at **[/live](https://sheaf.world/live)**. That page shows the tape full width, with the Solami figures open, and is the page to watch (or record) it on.
 
 ### What Sheaf uses, exactly
 
@@ -76,7 +76,7 @@ A new serverless instance starts with nothing in memory. Four things keep the ta
 
   ```bash
   node scripts/tape-seed.mjs                                 # against http://localhost:3900
-  node scripts/tape-seed.mjs https://sheaf-index.vercel.app 40   # against production
+  node scripts/tape-seed.mjs https://sheaf.world 40   # against production
   ```
 
   Run it during US market hours (09:30 to 16:00 New York, which is 19:00 to 01:30 IST in winter and an hour earlier in summer), then redeploy. The script warns if markets are closed. `TAPE_SEED_OUT=<path>` writes somewhere else, for a dry run.
@@ -124,7 +124,7 @@ On the client, `live-tape.tsx` merges new prints into what is already on screen 
 ### Proof that the answers come from Solami
 
 ```bash
-curl -s https://sheaf-index.vercel.app/api/tape | jq '{slot, via, fallback, stale, backlog, proof}'
+curl -s https://sheaf.world/api/tape | jq '{slot, via, fallback, stale, backlog, proof}'
 ```
 
 A real answer from a local dev server on Oct 9, 2026:
@@ -178,7 +178,7 @@ Raw round trip is measured the same careful way: same call, same instant, warm s
 The earlier claim in this doc, that Solami "rate-limited none of 100+ calls", held on one dev instance at 240 ms pacing. It did not hold in production, where several warm instances share the key: 7 of 67 calls on one instance answered 429 (the retry recovered them). That is what the slower spacing (now 667 ms) addresses. What the public RPC cannot offer is the budget. Solana documents it as not meant for production apps, at 100 requests per 10 s per IP and 40 for any single method, shared with everyone on the same IP.
 
 ```bash
-curl -s https://sheaf-index.vercel.app/api/market | jq .chain
+curl -s https://sheaf.world/api/market | jq .chain
 # {"slot":454781334,"via":"solami"}
 ```
 

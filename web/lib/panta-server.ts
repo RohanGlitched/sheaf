@@ -23,7 +23,7 @@ const BASE = process.env.PANTA_API_BASE ?? "https://live-api.panta.market/api/v1
 const KEY = process.env.PANTA_API_KEY?.trim() ?? "";
 
 /** The public origin Panta can reach, for sourcesOfTruth and the market image. */
-export const PUBLIC_SITE = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://sheaf-index.vercel.app").replace(/\/$/, "");
+export const PUBLIC_SITE = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://sheaf.world").replace(/\/$/, "");
 
 export type PantaMode = "live" | "sandbox" | "off";
 export const pantaMode = (): PantaMode => (!KEY ? "off" : KEY.startsWith("pk_live_") ? "live" : "sandbox");

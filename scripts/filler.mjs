@@ -22,7 +22,7 @@
  *   --edge-bps <n>       minimum margin over cost, in basis points (default 20)
  *   --cash-mint <addr>   the only cash mint it accepts (default CASH_MINT in web/lib/cash.generated.ts)
  *   --rpc <url>          write cluster (default https://api.devnet.solana.com)
- *   --site <url>         where mainnet quotes and lookup tables come from (default https://sheaf-index.vercel.app)
+ *   --site <url>         where mainnet quotes and lookup tables come from (default https://sheaf.world)
  *   --dry-run            price and simulate, print what it would fill, sign and send nothing
  *   --once               one pass, then exit
  *
@@ -77,7 +77,7 @@ function defaultCashMint() {
 }
 
 const RPC = arg("rpc", "https://api.devnet.solana.com");
-const SITE = arg("site", "https://sheaf-index.vercel.app").replace(/\/$/, "");
+const SITE = arg("site", "https://sheaf.world").replace(/\/$/, "");
 const EDGE_BPS = Number(arg("edge-bps", "20"));
 const CASH_MINT = new PublicKey(arg("cash-mint", null) ?? defaultCashMint());
 const DRY_RUN = flag("dry-run");

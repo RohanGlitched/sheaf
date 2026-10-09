@@ -12,7 +12,7 @@
 //
 // Usage: node scripts/tape-seed.mjs [baseUrl] [count]
 //   baseUrl defaults to http://localhost:3900, count to 40. Against production:
-//   node scripts/tape-seed.mjs https://sheaf-index.vercel.app 40
+//   node scripts/tape-seed.mjs https://sheaf.world 40
 //   Run it during US market hours (it warns otherwise), then redeploy.
 // Plain fetch, no dependencies; works in Windows node or WSL.
 

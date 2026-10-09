@@ -142,9 +142,9 @@ For a real sponsored market, the steps already in place carry over unchanged:
 ### Try it
 
 ```bash
-curl -s https://sheaf-index.vercel.app/api/panta | jq '{mode, fixture, category}'
-curl -s https://sheaf-index.vercel.app/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ | jq '{question, navPerShare, trailingWeek, resolution}'
+curl -s https://sheaf.world/api/panta | jq '{mode, fixture, category}'
+curl -s https://sheaf.world/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ | jq '{question, navPerShare, trailingWeek, resolution}'
 # The value at the Oct 8, 2026 close (any time after it and before the next close names the same day):
-curl -s 'https://sheaf-index.vercel.app/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ?at=1791489600' | jq '{closeDay, navPerShare, spy}'
+curl -s 'https://sheaf.world/api/nav/FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ?at=1791489600' | jq '{closeDay, navPerShare, spy}'
 # {"closeDay":"2026-10-08","navPerShare":{"listed":100.15053},"spy":{"token":"SPYx","closeDay":"2026-10-08","close":…,"adjClose":773.93}}
 ```

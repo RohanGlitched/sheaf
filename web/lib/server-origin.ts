@@ -1,12 +1,13 @@
 import "server-only";
 
 /**
- * This site's pages, by exact origin: production, the local dev server (only
+ * This site's pages, by exact origin: production (sheaf.world, and the Vercel
+ * address it started on), the local dev server (only
  * outside a production build), and this project's own Vercel previews
  * (sheaf-<hash>-rohanglitcheds-projects.vercel.app).
  * Anyone can deploy sheaf-anything.vercel.app, so nothing looser is accepted.
  */
-const EXACT = new Set(["https://sheaf-index.vercel.app", ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3900"] : [])]);
+const EXACT = new Set(["https://sheaf.world", "https://www.sheaf.world", "https://sheaf-index.vercel.app", ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3900"] : [])]);
 const PREVIEW = /^sheaf-[a-z0-9]+-rohanglitcheds-projects\.vercel\.app$/;
 
 export function isSiteOrigin(origin: string): boolean {
