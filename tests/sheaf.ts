@@ -1515,6 +1515,193 @@ describe("sheaf", () => {
       assert.equal(ev.by.toBase58(), stranger.publicKey.toBase58());
     });
 
+    // ---------------------------------------------------------- sell desk
+
+    describe("sell orders", () => {
+      const sellPda = (seller: PublicKey, nonce: number) =>
+        PublicKey.findProgramAddressSync(
+          [Buffer.from("sell"), basket.toBuffer(), seller.toBuffer(), u64le(nonce)],
+          program.programId,
+        )[0];
+      const shareEscrow = (order: PublicKey) =>
+        getAssociatedTokenAddressSync(shareMint, order, true, TOKEN_2022_PROGRAM_ID);
+      const holderCash = () => getAssociatedTokenAddressSync(cashMint, holder.publicKey, true, TOKEN_PROGRAM_ID);
+      let sellNonce = 9_000;
+
+      async function placeSell(o: { shares: bigint; start: bigint; end: bigint; t0: number; t1: number; nonce?: number }) {
+        const nonce = o.nonce ?? sellNonce++;
+        const order = sellPda(holder.publicKey, nonce);
+        const sig = await program.methods
+          .placeSellOrder(bn(nonce), bn(o.shares), bn(o.start), bn(o.end), bn(o.t0), bn(o.t1))
+          .accountsPartial({
+            seller: holder.publicKey,
+            basket,
+            sellOrder: order,
+            shareMint,
+            sellerShareAccount: holderShareAta,
+            escrow: shareEscrow(order),
+            cashMint,
+            shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+            cashTokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([holder])
+          .rpc();
+        return { order, sig };
+      }
+
+      const fillSell = (order: PublicKey, post: TransactionInstruction[] = []) =>
+        program.methods
+          .fillSellOrder()
+          .accountsPartial({
+            filler: filler.publicKey,
+            sellOrder: order,
+            basket,
+            shareMint,
+            escrow: shareEscrow(order),
+            fillerShareAccount: fillerShareAta,
+            seller: holder.publicKey,
+            sellerCashAccount: holderCash(),
+            cashMint,
+            fillerCashAccount: fillerCash,
+            rentPayer: holder.publicKey,
+            shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+            cashTokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .preInstructions([CU])
+          .postInstructions(post)
+          .signers([filler])
+          .rpc();
+
+      const cancelSell = (order: PublicKey, by: Keypair, to = holderShareAta) =>
+        program.methods
+          .cancelSellOrder()
+          .accountsPartial({
+            caller: by.publicKey,
+            sellOrder: order,
+            basket,
+            shareMint,
+            escrow: shareEscrow(order),
+            seller: holder.publicKey,
+            sellerShareAccount: to,
+            rentPayer: holder.publicKey,
+            shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .signers([by])
+          .rpc();
+
+      it("escrows exactly the shares offered", async () => {
+        const now = await chainNow();
+        const before = await rawBalance(holderShareAta);
+        const { order } = await placeSell({ shares: 300_000n, start: 40n * USDC, end: 30n * USDC, t0: now, t1: now + 600 });
+        assert.equal((before - (await rawBalance(holderShareAta))).toString(), "300000");
+        assert.equal((await rawBalance(shareEscrow(order))).toString(), "300000");
+        const o = await program.account.sellOrder.fetch(order);
+        assert.equal(o.shares.toString(), "300000");
+        assert.equal(o.endCash.toString(), (30n * USDC).toString(), "the seller's floor");
+        await cancelSell(order, holder);
+      });
+
+      it("refuses a rising or floorless sell auction, and an empty one", async () => {
+        const now = await chainNow();
+        await expectError(placeSell({ shares: 1n, start: 1n, end: 2n, t0: now, t1: now + 60 }), "BadAuctionShares");
+        await expectError(placeSell({ shares: 1n, start: 1n, end: 0n, t0: now, t1: now + 60 }), "BadAuctionShares");
+        await expectError(placeSell({ shares: 0n, start: 2n, end: 1n, t0: now, t1: now + 60 }), "ZeroShares");
+      });
+
+      it("pays the seller exactly the auction's cash into a cash account the filler opens, and the filler can redeem in kind in the same transaction", async () => {
+        const now = await chainNow();
+        const shares = 500_000n;
+        const o = { s: 60n * USDC, e: 50n * USDC, t0: now - 5, t1: now + 600 };
+        const { order } = await placeSell({ shares, start: o.s, end: o.e, t0: o.t0, t1: o.t1 });
+        assert.isTrue(await gone(holderCash()), "the seller has no cash account yet");
+
+        const fillerCashBefore = await balance(fillerCash);
+        const fillerComponents = await Promise.all(fillerComponentAtas.map((a) => rawBalance(a)));
+        const fillerSharesBefore = await rawBalance(fillerShareAta);
+        const holderLamports = await lamports(holder.publicKey);
+        const rent = (await lamports(order)) + (await lamports(shareEscrow(order)));
+        // Redeem what the fill hands over, in the same transaction.
+        const redeem = await program.methods
+          .redeemShares(bn(shares))
+          .accountsPartial({
+            basket,
+            shareMint,
+            owner: filler.publicKey,
+            ownerShareAccount: fillerShareAta,
+            shareTokenProgram: TOKEN_2022_PROGRAM_ID,
+            componentTokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .remainingAccounts(
+            components.flatMap((mint, i) => [
+              { pubkey: mint, isSigner: false, isWritable: false },
+              { pubkey: vaultFor(basket, mint), isSigner: false, isWritable: true },
+              { pubkey: fillerComponentAtas[i], isSigner: false, isWritable: true },
+            ]),
+          )
+          .instruction();
+        const sig = await fillSell(order, [redeem]);
+        const ev = await eventOf(sig, "SellOrderFilled");
+        const due = requiredAt(o, Number(ev.filledAt));
+        assert.equal(ev.cash.toString(), due.toString(), "the auction's count at the fill");
+        assert.isTrue(due < o.s && due > o.e, "between the endpoints");
+        assert.equal((await balance(holderCash())).toString(), due.toString(), "the seller nets it");
+        assert.equal((fillerCashBefore - (await balance(fillerCash))).toString(), due.toString());
+        assert.equal((await rawBalance(fillerShareAta)).toString(), fillerSharesBefore.toString(), "taken and redeemed");
+        for (let i = 0; i < components.length; i++) {
+          assert.equal(
+            ((await rawBalance(fillerComponentAtas[i])) - fillerComponents[i]).toString(),
+            ((BigInt(unitsPerShare[i].toString()) * shares) / BigInt(ONE_SHARE)).toString(),
+            `component ${i} redeemed`,
+          );
+        }
+        assert.isTrue(await gone(order), "order closed");
+        assert.isTrue(await gone(shareEscrow(order)), "escrow closed");
+        // The order's and escrow's rent went back to the seller who paid it.
+        assert.equal(((await lamports(holder.publicKey)) - holderLamports).toString(), rent.toString());
+      });
+
+      it("returns the shares: to the seller at any time, and after expiry to anyone, but only into the seller's own share account", async () => {
+        let now = await chainNow();
+        const mine = await placeSell({ shares: 1_000n, start: 2n * USDC, end: USDC, t0: now, t1: now + 600 });
+        await expectError(cancelSell(mine.order, stranger), "OrderNotExpired");
+        const before = await rawBalance(holderShareAta);
+        await cancelSell(mine.order, holder);
+        assert.equal(((await rawBalance(holderShareAta)) - before).toString(), "1000");
+
+        now = await chainNow();
+        const { order } = await placeSell({ shares: 2_000n, start: 2n * USDC, end: USDC, t0: now, t1: now + 2 });
+        await waitUntil(now + 3);
+        await expectError(fillSell(order), "OrderExpired");
+        // A side share account the stranger opens in the seller's name.
+        const side = Keypair.generate();
+        await sendAndConfirmTransaction(
+          provider.connection,
+          new Transaction().add(
+            SystemProgram.createAccount({
+              fromPubkey: stranger.publicKey,
+              newAccountPubkey: side.publicKey,
+              space: ACCOUNT_SIZE,
+              lamports: await provider.connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE),
+              programId: TOKEN_2022_PROGRAM_ID,
+            }),
+            createInitializeAccount3Instruction(side.publicKey, shareMint, holder.publicKey, TOKEN_2022_PROGRAM_ID),
+          ),
+          [stranger, side],
+        );
+        await expectError(cancelSell(order, stranger, side.publicKey), "RefundNotToSellerAta");
+        const back = await rawBalance(holderShareAta);
+        const sig = await cancelSell(order, stranger);
+        assert.equal(((await rawBalance(holderShareAta)) - back).toString(), "2000");
+        const ev = await eventOf(sig, "SellOrderCancelled");
+        assert.isTrue(ev.expired);
+        assert.isTrue(await gone(order));
+      });
+    });
+
     describe("fills that must fail", () => {
       let order: PublicKey;
       before(async () => {
@@ -1795,6 +1982,12 @@ describe("sheaf", () => {
         assert.equal(p.refSharesPerCashE9.toString(), rate.toString(), "reference follows the fill");
         assert.equal(ev.planRefSharesPerCashE9.toString(), rate.toString());
         assert.equal(p.fills, 1);
+        // A plan opened today trails: its bounds move to ±6% of the new reference.
+        assert.equal(p.minRefSharesPerCashE9.toString(), ((rate * 9_400n) / 10_000n).toString(), "trailing floor");
+        assert.equal(p.maxRefSharesPerCashE9.toString(), ((rate * 10_600n) / 10_000n).toString(), "trailing ceiling");
+        const raw = (await provider.connection.getAccountInfo(plan, "processed"))!.data;
+        assert.equal(raw.length, 304, "296-byte plan plus its 8-byte tail");
+        assert.equal(raw.readUInt16LE(296), 600, "trail_step_bps");
         assert.equal(
           ((await lamports(cranker.publicKey)) - crankerLamports).toString(),
           rent.toString(),

@@ -11,6 +11,9 @@ plans on top of them.
 | Hardening upgrade | devnet slot 509084920, tx `2ia49PHW3qtstt4LM1EocsYtKH6zVPd4NCcdZH7tsVtZkfsrF1eHvTzS1J8WW8p9wihgh872ZTxb4hrmczxKHt1b`; 517,800-byte program; upgrade authority `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` (a single key: the program is upgradeable) |
 | Real-issuer upgrade | devnet slot 509118619, tx `4BWEZTsENAXhe9GtFtX5uSN2x6teejqs8ya4z9w8dMj3wu5WLej9sA7BFQTvJDio2dCajeii5r8FN8P6udPpiGX7`; 515,664-byte build in the same 517,800-byte program account (no extend); on-chain IDL upgraded. Accepts real xStocks and PreStocks under their issuers (`KNOWN_ISSUERS`), refuses issuer powers held by anyone else, gates cash transfer-fee and hook authorities, refuses legacy SPL Token share mints. No account layout changed; existing baskets, orders and plans decode and work unchanged |
 | Protocol-fee upgrade | devnet slot 509146643, tx `VLvor95XugCfKvLxwZXHpbZCBWhbMbSc74R36UrKe5vnb3p1MjtG3XaraXPaVCYU9SwBUn3dgrh9TWucXrnPCes`; `devnet` build, 532,128 bytes (program account auto-extended from 517,800), sha256 `f9ccc2eb…5933ba`; on-chain IDL upgraded. Adds the fixed 0.10% protocol creation fee and `claim_protocol_fee`, gates a component's transfer-fee authority, makes the default build mainnet-safe, sends third-party refunds only to the buyer's ATA, makes `update_plan` a new terms epoch, embeds security.txt. `Basket` gained two fields inside its existing headroom; no account changed size, and all 8 live baskets (fee 0), 7 plans and 2 legacy plans decode; simulated mints succeed on old and new baskets |
+| Sell-desk upgrade | devnet slot 509175740, tx `2EfT8FqxZw49UzYL4fsH8LCphNWt3vPnR2cgTcH4k7RSkAYAaF19rgzRur9abJPBPV7crshQUTiALRZX5FLZZmRB`; `devnet` build, 608,520 bytes (auto-extended from 532,128), sha256 `72806cf5…0806d8` (matches `solana program dump`); on-chain IDL upgraded. Adds the dollar exit (`place_sell_order`, `fill_sell_order`, `cancel_sell_order`, account `SellOrder`) and trailing plan bounds for new plans (8-byte plan tail, step 600 bps). No existing account changed: all 10 baskets, 9 plans (296 B, fixed bounds), 2 legacy plans and 1 order decode; simulated `mint_shares` succeeds on BIG5 (no protocol fee) and MAG7 (protocol fee), and a simulated place + fill of a sell order on BIG5 paid a fresh seller $10.18 into a cash account the filler opened |
+| Protocol fee, live | "The Magnificent Seven" (MAG7) `v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x`, created after the fee (creator 0.25%, protocol 0.10%, 7 equal-weight mirrors). In-kind mint of 10 shares `3n9GAvTimHGnMszhLykUedqifeupbpsxLp4GfaWeEwRpDVppEpbo8qyyvsRnEfuvSMdj4GyYDypRepTUVvinYZ5K` accrued 10,000 raw fee units; the house plan `46ZFfiJNxz61wQKL2KhwW9YbvuCENVmR85cvbSwyvtHg` ($25 every 15 min) was filled by the keeper through the basket's lookup table `7TazFm9hYKnv8Y6iQie3XNZKeSZq2nxnvSsFCMmnNq5N` (v0, 18 addresses looked up) in `43umSv1QNUSckXytPiijisV8FhirgujwxwpEFUVkXpUKps6fiVm4shqATxQGAe3jwZxL1WhmTMn71ZxLReC3jdhM`, accruing 245 more; `claim_protocol_fee` minted all 10,245 to the treasury's share account `EYiUUNiynqrEpzMyyu5fd5QXNDTTS9XsMGv9P62T5knQ` in `5zZHGfEUcixiJb3xPmg9cFczjW6rfxFqyAeZU4iyQkeu6SnKGsGGEB8DYT66dLYhUr3rLARPYP6TiMgkopYCyx8n`. Receipts: `web/lib/fee-receipts.json` |
+| Verifiable build | Not yet published. `scripts/handoff-upgrade-authority.mjs` holds the `solana-verify build` / `verify-from-repo` commands and the hand-off of the upgrade authority to a Squads vault, to run after the final upgrade |
 | Source | `programs/sheaf/src/lib.rs` |
 | IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`; on chain at `Brx9QqE7Hzh9ReaoNvk9BMSM5Ci1U2C6qx6qukciugBS`, `anchor idl fetch`) |
 | Tests | `tests/sheaf.ts`, `tests/mainnet-clone.ts` (against real mainnet xStock and PreStocks mints) and `tests/tx-size.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`, and again with `--features devnet`) |
@@ -61,6 +64,8 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
 | `Order` (plan) | `["plan_order", plan, nonce_le_u64]`. Plan orders placed before the hardening release used the user form; the program signs for either | `run_plan` | `fill_order`, `cancel_order` |
 | Order escrow | ATA of the **order PDA** for the cash mint, under the cash token program | same instruction as the order (`init_if_needed`) | same instruction as the order |
 | `Plan` | `["plan", basket, owner, plan_id_le_u64]` | `open_plan` | `close_plan` (`close_legacy_plan` for a pre-hardening plan) |
+| `SellOrder` | `["sell", basket, seller, nonce_le_u64]` | `place_sell_order` | `fill_sell_order`, `cancel_sell_order` |
+| Sell escrow | ATA of the **sell-order PDA** for the share mint (Token-2022) | `place_sell_order` (`init_if_needed`) | same instruction as the sell order |
 
 ### `Basket`
 
@@ -97,7 +102,7 @@ Old clients that stop decoding at `bump` are unaffected.
 | `cash_mint`, `cash_token_program`, `cash_account` | the owner's cash account the plan is the SPL delegate of |
 | `plan_id` | owner-chosen, part of the seeds |
 | `cash_per_run`, `period_secs`, `runs_total`, `runs_left`, `next_run_ts` | schedule |
-| `ref_shares_per_cash_e9` | reference rate; replaced by the filled rate after every plan fill, clamped to `[min, max]` |
+| `ref_shares_per_cash_e9` | reference rate; replaced by the filled rate after every plan fill, clamped to `[min, max]` (on a trailing plan, `[min, max]` then move to the new reference ± the step) |
 | `band_bps` | half-width of each run's auction around the reference, `<= 5000` |
 | `auction_secs` | length of each run's auction |
 | `last_order` | most recent order the plan placed |
@@ -112,6 +117,37 @@ longer decodes as `Plan`: `run_plan`, `close_plan` and `update_plan` refuse
 it (`AccountDidNotDeserialize`), a fill of one of its open orders still
 succeeds and simply leaves it alone, and its owner closes it with
 `close_legacy_plan`. `Basket` and `Order` are byte-for-byte unchanged.
+
+**Trailing bounds (tail).** A plan opened since the sell-desk upgrade is
+allocated 304 bytes: the 296-byte `Plan` plus an 8-byte tail holding
+`trail_step_bps: u16` (= `PLAN_STEP_BPS = 600`) and 6 reserved bytes. The
+struct, and so the IDL and every decoder, is unchanged; the tail is read by
+offset (`plan_trail_step`, `decodePlan`'s `trailStepBps`). After every fill of
+such a plan, `apply_plan_fill` clamps the filled rate into `[min, max]`,
+makes it the reference, and moves the bounds to
+`min = floor(ref × 0.94)`, `max = floor(ref × 1.06)`. So the plan follows the
+market as it fills, and no single run moves its reference more than 6%. A
+296-byte plan (opened earlier) has no tail, reads step 0 and keeps the
+owner's fixed bounds. The trade-off is stated plainly: fixed bounds stop a
+plan once the market leaves them (a ±6% window is left within a month about
+half the time at 30% volatility); trailing bounds keep it running, but a
+filler with no competition can walk the reference by up to the band (≤ the
+step) per run, which is what fixed bounds were for. A gap move larger than
+the band between runs still needs the owner's Re-centre (`update_plan`),
+because no auction inside the band reaches fair. The owner can always set
+new bounds with `update_plan`; trailing then continues from them.
+
+### `SellOrder`
+
+| Field | Meaning |
+|---|---|
+| `basket`, `seller` | the basket whose shares are offered, and who offers them |
+| `rent_payer` | the seller; gets the order's and escrow's rent back on close |
+| `cash_mint`, `cash_token_program` | the cash the seller wants |
+| `nonce` | seller-chosen, part of the seeds |
+| `shares` | shares escrowed (measured by balance delta) |
+| `start_cash`, `end_cash` | cash the seller **receives** at `start_ts` and at `end_ts`; `start_cash >= end_cash > 0`; `end_cash` is the seller's floor |
+| `start_ts`, `end_ts`, `created_at`, `bump` | as for `Order` |
 
 ---
 
@@ -378,6 +414,65 @@ at or after `created_at`, so an order placed before the re-centre still
 fills but can't write the old market's rate over the owner's update (tested).
 The plan's opening time stays in its `PlanOpened` event. Emits `PlanUpdated`.
 
+### `place_sell_order(nonce, shares, start_cash, end_cash, start_ts, end_ts)`
+
+| Account | Constraint |
+|---|---|
+| `seller` | signer, pays rent |
+| `basket` | a `Basket` |
+| `sell_order` | `init`, seeds `["sell", basket, seller, nonce]` |
+| `share_mint` | = `basket.share_mint`, owned by `share_token_program` |
+| `seller_share_account` | mint = share mint, **owner = seller** |
+| `escrow` | `init_if_needed` ATA (mint = share mint, authority = `sell_order`) |
+| `cash_mint` | owned by `cash_token_program`; passes the cash policy (§8) |
+| `share_token_program`, `cash_token_program`, `associated_token_program`, `system_program` | |
+
+The dollar exit. The seller escrows `shares` and posts a Dutch auction that
+mirrors the buy side in reverse: the cash the seller must **receive** is
+`start_cash` until `start_ts`, decays linearly (rounded in the seller's
+favour, as for buys) to `end_cash` at `end_ts`, and the order can't be filled
+after `end_ts`. The first filler for whom the deal is worth it pays, so the
+seller's worst case is `end_cash`, the floor they chose (a client sets
+`start ≈ fair + band` and `end ≈ fair − band`). Same window rules as
+`place_order`. No protocol fee: leaving a basket is free, as redemption is.
+Emits `SellOrderPlaced`.
+
+### `fill_sell_order()`
+
+| Account | Constraint |
+|---|---|
+| `filler` | signer, mut: pays the cash, and the seller's cash account's rent if it is new |
+| `sell_order` | `has_one` basket, seller, rent_payer, cash_mint; closed to `rent_payer` |
+| `basket`, `share_mint` | `share_mint = basket.share_mint` |
+| `escrow` | the sell order's share ATA |
+| `filler_share_account` | any share account (the filler signs, so it is theirs to choose) |
+| `seller` | = `sell_order.seller` |
+| `seller_cash_account` | **the seller's canonical cash ATA**, `init_if_needed` with `payer = filler` |
+| `cash_mint`, `filler_cash_account` | the filler's cash account, owner = filler |
+| `rent_payer` | = `sell_order.rent_payer` |
+| `share_token_program`, `cash_token_program`, `associated_token_program`, `system_program` | |
+
+Permissionless. `now <= end_ts` (`OrderExpired`), the cash policy is
+re-checked, then `cash = required(now)` is sent to the seller's ATA, grossed
+up for any cash transfer fee, and the seller's balance delta must be at least
+`cash` (`SellerPaidShort`). Only then is the whole escrow released to the
+filler's share account and the escrow and order closed (rent to the seller).
+The filler may put `redeem_shares` in the same transaction to take the
+components in kind straight away (tested). Emits `SellOrderFilled`.
+
+### `cancel_sell_order()`
+
+| Account | Constraint |
+|---|---|
+| `caller` | signer |
+| `sell_order` | `has_one` basket, seller, rent_payer; closed to `rent_payer` |
+| `basket`, `share_mint`, `escrow`, `seller` | as in fill |
+| `seller_share_account` | mint = share mint, owner = seller; when the caller isn't the seller, the seller's **canonical** share ATA (`RefundNotToSellerAta`) |
+| `rent_payer`, `share_token_program` | |
+
+The seller may cancel at any time; anyone may after `end_ts`. The escrowed
+shares go back and both accounts close. Emits `SellOrderCancelled`.
+
 ### `claim_protocol_fee()`
 
 | Account | Constraint |
@@ -556,6 +651,10 @@ shares. A unit test checks exactness and minimality for every `net` in
 | `PlanOpened` | plan, basket, owner, cash_mint, cash_account, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, allowance, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanUpdated` | plan, owner, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanRun` | plan, order, run (1-based), cash, start_shares, end_shares, start_ts, end_ts, ref_shares_per_cash_e9, runs_left, next_run_ts |
+| `PlanTrail` | plan, step_bps. Emitted by `open_plan` (600) |
+| `SellOrderPlaced` | sell_order, basket, seller, cash_mint, nonce, shares, start_cash, end_cash, start_ts, end_ts |
+| `SellOrderFilled` | sell_order, basket, seller, filler, shares, cash (the seller received), cash_paid (the filler sent, fee-grossed), price (raw cash per whole share), filled_at |
+| `SellOrderCancelled` | sell_order, basket, seller, by, shares_returned, expired |
 | `PlanClosed` | plan, owner, runs_done, runs_left, revoked. Emitted by `close_plan` and `close_legacy_plan` |
 | `BasketFeeTerms` | basket, creator_fee_bps, protocol_fee_bps, treasury. Emitted by `create_basket` |
 | `ProtocolFeeAccrued` | basket, shares, accrued (running total). Emitted by `mint_shares` and `fill_order` when the protocol's share is non-zero |
@@ -630,6 +729,8 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6051 | NothingToClaim | `claim_protocol_fee` on a basket with nothing accrued |
 | 6052 | TreasuryMismatch | `claim_protocol_fee` with a treasury other than `TREASURY` |
 | 6053 | RefundNotToBuyerAta | a third party's refund aimed at a buyer-owned account that isn't the buyer's associated cash account |
+| 6054 | RefundNotToSellerAta | a third party's return of a sell order's shares aimed at a seller-owned account that isn't the seller's associated share account |
+| 6055 | SellerPaidShort | the seller's cash account received less than the sell auction asks |
 
 Anchor's own constraint errors also apply: `ConstraintTokenOwner` (a refund to a
 non-buyer account), `ConstraintAssociated` (shares to a non-canonical account),
@@ -799,10 +900,12 @@ valid fill fail.
 
 ## 9. Tests
 
-`anchor test` runs 67 integration tests: 8 against real mainnet mints
-(`tests/mainnet-clone.ts`), 11 basket tests, 2 protocol-fee tests, 28 desk and
-plan tests, 14 hardening tests and 4 transaction-size measurements
-(`tests/tx-size.ts`). `cargo test -p sheaf --lib` runs 12 unit tests, on both
+`anchor test` runs 71 integration tests, as mocha counts them: 8 against real
+mainnet mints (`tests/mainnet-clone.ts`), 11 basket tests, 2 protocol-fee
+tests, 28 desk and plan tests, 4 sell-order tests, 14 hardening tests and 4
+transaction-size measurements (`tests/tx-size.ts`; one `it` in a loop runs at
+6, 7 and 8 components, which is why the source has two fewer `it(` than mocha
+reports). `cargo test -p sheaf --lib` runs 14 unit tests, on both
 the default and the `devnet` build: the auction line, the gross-up, the fee
 split (every `g < 50,000` at five fee pairs, and the two-fee gross-up for
 every `net` in `1..20,000`), the plan bounds and floor, the three extension
@@ -811,7 +914,26 @@ under each known issuer and under a stranger, a transfer-fee authority, a
 freeze authority, malformed lengths and unknown types), the transfer-fee
 schedule read by number, the issuer keys and treasury themselves (the
 default build trusts no stand-in), the Basket fee fields fitting the
-headroom and reading 0 on an old account, and the size of the plan layout.
+headroom and reading 0 on an old account, trailing versus fixed plan bounds
+over ten fills (and one fill never moving a trailing reference more than
+6%), the plan tail reading 0 on a 296-byte plan, and the size of the plan
+layout.
+
+**Sell orders.** Escrow of exactly the shares; rising, floorless and empty
+auctions refused; a fill mid-auction pays the seller exactly the auction's
+count into a cash account the filler opens, and the filler redeems the
+shares in kind in the same transaction (component deltas checked); both
+accounts close with the rent back to the seller; a fill after expiry fails;
+the seller cancels any time, a stranger only after expiry and only into the
+seller's ATA. **Trailing plans:** a new plan is 304 bytes with step 600, and
+after its first fill the bounds are exactly ±6% of the filled rate.
+
+**CI.** The GitHub job runs the same `anchor test` from a clean clone. It
+used to run `anchor keys sync` first, which rewrote `declare_id` to a fresh
+key while the validator loads the program at the Anchor.toml address, so
+every test failed with `DeclaredProgramIdMismatch` (exit 8 = 8 failing
+suites). Reproduced from a clean clone with a throwaway wallet: without the
+sync, 67 of 67 passed.
 
 **Protocol fee.** Every desk fill and mint checks the buyer's or depositor's
 shares, the creator's fee and the protocol's accrual exactly (`feeSplit`

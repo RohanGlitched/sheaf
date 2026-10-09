@@ -290,7 +290,8 @@ export const TEMPO_SIP_V2 = {
   cashPerRun: 10_100_000n,
   /** The plan's own schedule: one run per 30 days, enforced by PlanDesk (TooSoon). */
   interval: 30n * 86_400n,
-  auctionSecs: 3_600n,
+  /** Four minutes, as the Solana demo plan: the house reaches its price (fair plus 0.15%) about 2.5 minutes in. */
+  auctionSecs: 240n,
   bandBps: 200,
   /** The visitor's cap, as a fraction of the fair count at authorization: no run below 97% of it. */
   capBps: 9_700,

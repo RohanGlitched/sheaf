@@ -1,8 +1,11 @@
 name: Keeper
 
-# Runs due monthly plans and fills fair dollar orders every few minutes, by
-# calling the site's keeper. Everything it does is permissionless on chain; this
-# only makes sure someone does it when no visitor is on the page.
+# A backup trigger, not the scheduler. The keeper (/api/keeper: run due plans,
+# fill fair dollar orders, refund expired ones) and the EVM keeper are called
+# every minute by two Google Cloud Scheduler jobs. GitHub's cron below often
+# runs late or is skipped under load, so it is only a fallback for when those
+# jobs are paused; it can also be run by hand (Actions > Keeper > Run
+# workflow). Everything the keeper does is permissionless on chain.
 on:
   schedule:
     - cron: "*/5 * * * *"

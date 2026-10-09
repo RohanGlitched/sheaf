@@ -65,7 +65,9 @@ jobs:
         # The devnet deployment is built with `anchor build -- --features devnet`.
         run: |
           solana-keygen new --no-bip39-passphrase --silent -o ~/.config/solana/id.json
-          anchor keys sync
+          # No `anchor keys sync`: it would rewrite declare_id to a fresh key,
+          # while the test validator loads the program at the Anchor.toml
+          # address (GaYNg5...) and the fixtures are owned by that id.
           anchor test
 
   evm:

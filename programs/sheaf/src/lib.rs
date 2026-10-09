@@ -102,6 +102,14 @@ pub const RATE_SCALE: u64 = 1_000_000_000;
 pub const MAX_BAND_BPS: u16 = 5_000;
 /// No order (or plan auction) may close more than 30 days out.
 pub const MAX_ORDER_SECS: i64 = 30 * 24 * 60 * 60;
+/// A plan opened since trailing bounds existed keeps its rate bounds this far
+/// either side of its last fill: after every fill, `min = ref × (1 − step)` and
+/// `max = ref × (1 + step)`. A plan follows the market, and no single run can
+/// move its reference more than 6%. Plans opened earlier keep fixed bounds.
+pub const PLAN_STEP_BPS: u16 = 600;
+/// Bytes after a `Plan`'s serialized fields: `trail_step_bps: u16` and 6
+/// reserved. Plans opened before trailing bounds have no tail and read 0.
+pub const PLAN_TAIL_LEN: usize = 8;
 
 /// Backed Finance (xStocks): permanent delegate, confidential-transfer,
 /// transfer-hook and metadata authority on every xStock mint.
@@ -602,11 +610,11 @@ pub mod sheaf {
             // A plan that has since been closed, or that still has the
             // pre-hardening layout, is simply not updated: the buyer's fill
             // must never depend on it.
-            let decoded = if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
+            let (decoded, step) = if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
                 let data = plan_info.try_borrow_data()?;
-                Plan::try_deserialize(&mut &data[..]).ok()
+                (Plan::try_deserialize(&mut &data[..]).ok(), plan_trail_step(&data))
             } else {
-                None
+                (None, 0)
             };
             if let Some(mut plan) = decoded {
                 // Same plan, and the same incarnation of it: an order left
@@ -618,14 +626,13 @@ pub mod sheaf {
                     && order.created_at >= plan.created_at
                 {
                     // A rate that does not fit (or rounds to zero) is not
-                    // recorded, and a recorded rate stays inside the owner's
-                    // bounds, so no run of fills can walk it past them.
+                    // recorded, and a recorded rate stays inside the plan's
+                    // bounds. Fixed-bound plans keep the owner's bounds for
+                    // good; trailing plans move them to the new reference
+                    // ± their step, so no single run moves it further.
                     let rate = shares_per_cash_e9(shares_out, order.cash_amount).unwrap_or(0);
                     if rate > 0 {
-                        let rate = rate
-                            .max(plan.min_ref_shares_per_cash_e9)
-                            .min(plan.max_ref_shares_per_cash_e9);
-                        plan.ref_shares_per_cash_e9 = rate;
+                        let rate = apply_plan_fill(&mut plan, rate, step)?;
                         plan.fills = plan.fills.saturating_add(1);
                         plan.last_fill_ts = now;
                         let mut data = plan_info.try_borrow_mut_data()?;
@@ -822,6 +829,18 @@ pub mod sheaf {
             min_ref_shares_per_cash_e9,
             max_ref_shares_per_cash_e9,
         });
+
+        // The trailing step lives after the struct, so plans opened before it
+        // existed (and their clients) are untouched.
+        {
+            let info = ctx.accounts.plan.to_account_info();
+            let mut data = info.try_borrow_mut_data()?;
+            data[PLAN_TAIL_AT..PLAN_TAIL_AT + 2].copy_from_slice(&PLAN_STEP_BPS.to_le_bytes());
+        }
+        emit!(PlanTrail {
+            plan: plan_key,
+            step_bps: PLAN_STEP_BPS,
+        });
         Ok(())
     }
 
@@ -983,6 +1002,196 @@ pub mod sheaf {
             runs_done: plan.runs_total - plan.runs_left,
             runs_left: plan.runs_left,
             revoked,
+        });
+        Ok(())
+    }
+
+    // ----------------------------------------------------------- sell desk
+
+    /// Escrow `shares` and post a Dutch auction for dollars: the cash the
+    /// seller must **receive** is `start_cash` until `start_ts`, decays
+    /// linearly to `end_cash` at `end_ts`, and the order cannot be filled
+    /// after `end_ts`. The seller's worst case is `end_cash`, their floor.
+    /// No protocol fee: leaving a basket is free.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_sell_order(
+        ctx: Context<PlaceSellOrder>,
+        nonce: u64,
+        shares: u64,
+        start_cash: u64,
+        end_cash: u64,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<()> {
+        require!(shares > 0, SheafError::ZeroShares);
+        let now = Clock::get()?.unix_timestamp;
+        validate_auction(start_cash, end_cash, start_ts, end_ts, now)?;
+        // The seller is paid in this cash: nobody may be able to seize it,
+        // block it, or change its fee once a filler has priced the order.
+        check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
+
+        let before = ctx.accounts.escrow.amount;
+        token_interface::transfer_checked(
+            CpiContext::new(
+                ctx.accounts.share_token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.seller_share_account.to_account_info(),
+                    mint: ctx.accounts.share_mint.to_account_info(),
+                    to: ctx.accounts.escrow.to_account_info(),
+                    authority: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            shares,
+            SHARE_DECIMALS,
+        )?;
+        ctx.accounts.escrow.reload()?;
+        let escrowed = ctx
+            .accounts
+            .escrow
+            .amount
+            .checked_sub(before)
+            .ok_or(SheafError::MathOverflow)?;
+        require!(escrowed > 0, SheafError::ZeroShares);
+
+        let key = ctx.accounts.sell_order.key();
+        let order = &mut ctx.accounts.sell_order;
+        order.basket = ctx.accounts.basket.key();
+        order.seller = ctx.accounts.seller.key();
+        order.rent_payer = ctx.accounts.seller.key();
+        order.cash_mint = ctx.accounts.cash_mint.key();
+        order.cash_token_program = ctx.accounts.cash_token_program.key();
+        order.nonce = nonce;
+        order.shares = escrowed;
+        order.start_cash = start_cash;
+        order.end_cash = end_cash;
+        order.start_ts = start_ts;
+        order.end_ts = end_ts;
+        order.created_at = now;
+        order.bump = ctx.bumps.sell_order;
+
+        emit!(SellOrderPlaced {
+            sell_order: key,
+            basket: order.basket,
+            seller: order.seller,
+            cash_mint: order.cash_mint,
+            nonce,
+            shares: escrowed,
+            start_cash,
+            end_cash,
+            start_ts,
+            end_ts,
+        });
+        Ok(())
+    }
+
+    /// Fill a sell order: the filler pays the seller the auction's current
+    /// cash (into the seller's canonical cash account, created here if need
+    /// be, grossed up for any transfer fee so the seller nets it) and takes the
+    /// escrowed shares. Permissionless. The filler may redeem the shares in
+    /// kind with `redeem_shares` in the same transaction.
+    pub fn fill_sell_order(ctx: Context<FillSellOrder>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let key = ctx.accounts.sell_order.key();
+        let order: SellOrder = (**ctx.accounts.sell_order).clone();
+        require!(now <= order.end_ts, SheafError::OrderExpired);
+        check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
+
+        let cash_due = required_shares(order.start_cash, order.end_cash, order.start_ts, order.end_ts, now)?;
+        let send = gross_for_transfer_fee(
+            &ctx.accounts.cash_mint.to_account_info(),
+            cash_due,
+            Clock::get()?.epoch,
+        )?;
+        let before = ctx.accounts.seller_cash_account.amount;
+        token_interface::transfer_checked(
+            CpiContext::new(
+                ctx.accounts.cash_token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.filler_cash_account.to_account_info(),
+                    mint: ctx.accounts.cash_mint.to_account_info(),
+                    to: ctx.accounts.seller_cash_account.to_account_info(),
+                    authority: ctx.accounts.filler.to_account_info(),
+                },
+            ),
+            send,
+            ctx.accounts.cash_mint.decimals,
+        )?;
+        ctx.accounts.seller_cash_account.reload()?;
+        let received = ctx
+            .accounts
+            .seller_cash_account
+            .amount
+            .checked_sub(before)
+            .ok_or(SheafError::MathOverflow)?;
+        require!(received >= cash_due, SheafError::SellerPaidShort);
+
+        // Only then do the shares leave escrow.
+        let shares = release_sell_escrow(
+            &order,
+            key,
+            ctx.accounts.sell_order.to_account_info(),
+            &ctx.accounts.escrow,
+            &ctx.accounts.share_mint,
+            ctx.accounts.filler_share_account.to_account_info(),
+            ctx.accounts.rent_payer.to_account_info(),
+            ctx.accounts.share_token_program.to_account_info(),
+        )?;
+
+        emit!(SellOrderFilled {
+            sell_order: key,
+            basket: order.basket,
+            seller: order.seller,
+            filler: ctx.accounts.filler.key(),
+            shares,
+            cash: cash_due,
+            cash_paid: send,
+            price: if order.shares == 0 { u64::MAX } else { mul_div_floor(cash_due, ONE_SHARE, order.shares).unwrap_or(u64::MAX) },
+            filled_at: now,
+        });
+        Ok(())
+    }
+
+    /// Cancel a sell order and return the shares. The seller may cancel at
+    /// any time; after `end_ts` anyone may, and then the shares go only to
+    /// the seller's canonical share account.
+    pub fn cancel_sell_order(ctx: Context<CancelSellOrder>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let key = ctx.accounts.sell_order.key();
+        let order: SellOrder = (**ctx.accounts.sell_order).clone();
+        let by = ctx.accounts.caller.key();
+        let expired = now > order.end_ts;
+        require!(by == order.seller || expired, SheafError::OrderNotExpired);
+        if by != order.seller {
+            let (canonical, _) = Pubkey::find_program_address(
+                &[
+                    order.seller.as_ref(),
+                    ctx.accounts.share_token_program.key().as_ref(),
+                    ctx.accounts.share_mint.key().as_ref(),
+                ],
+                &anchor_spl::associated_token::ID,
+            );
+            require!(
+                ctx.accounts.seller_share_account.key() == canonical,
+                SheafError::RefundNotToSellerAta
+            );
+        }
+        let shares = release_sell_escrow(
+            &order,
+            key,
+            ctx.accounts.sell_order.to_account_info(),
+            &ctx.accounts.escrow,
+            &ctx.accounts.share_mint,
+            ctx.accounts.seller_share_account.to_account_info(),
+            ctx.accounts.rent_payer.to_account_info(),
+            ctx.accounts.share_token_program.to_account_info(),
+        )?;
+        emit!(SellOrderCancelled {
+            sell_order: key,
+            basket: order.basket,
+            seller: order.seller,
+            by,
+            shares_returned: shares,
+            expired,
         });
         Ok(())
     }
@@ -1320,7 +1529,7 @@ pub struct OpenPlan<'info> {
     #[account(
         init,
         payer = owner,
-        space = 8 + Plan::INIT_SPACE,
+        space = PLAN_TAIL_AT + PLAN_TAIL_LEN,
         seeds = [b"plan", basket.key().as_ref(), owner.key().as_ref(), &plan_id.to_le_bytes()],
         bump,
     )]
@@ -1402,6 +1611,181 @@ pub struct UpdatePlan<'info> {
 
     #[account(mut, has_one = owner @ SheafError::PlanAccountMismatch)]
     pub plan: Box<Account<'info, Plan>>,
+}
+
+#[derive(Accounts)]
+#[instruction(nonce: u64)]
+pub struct PlaceSellOrder<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+
+    pub basket: Box<Account<'info, Basket>>,
+
+    #[account(
+        init,
+        payer = seller,
+        space = 8 + SellOrder::INIT_SPACE,
+        seeds = [b"sell", basket.key().as_ref(), seller.key().as_ref(), &nonce.to_le_bytes()],
+        bump,
+    )]
+    pub sell_order: Box<Account<'info, SellOrder>>,
+
+    #[account(
+        address = basket.share_mint @ SheafError::ShareMintMismatch,
+        mint::token_program = share_token_program,
+    )]
+    pub share_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        token::mint = share_mint,
+        token::authority = seller,
+        token::token_program = share_token_program,
+    )]
+    pub seller_share_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// The sell order's own share account. `init_if_needed`, so someone
+    /// creating it first cannot block the order; measured by balance delta.
+    #[account(
+        init_if_needed,
+        payer = seller,
+        associated_token::mint = share_mint,
+        associated_token::authority = sell_order,
+        associated_token::token_program = share_token_program,
+    )]
+    pub escrow: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(mint::token_program = cash_token_program)]
+    pub cash_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    pub share_token_program: Interface<'info, TokenInterface>,
+    pub cash_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FillSellOrder<'info> {
+    /// Pays the seller, and the rent of the seller's cash account if it is new.
+    #[account(mut)]
+    pub filler: Signer<'info>,
+
+    #[account(
+        mut,
+        close = rent_payer,
+        has_one = basket @ SheafError::OrderAccountMismatch,
+        has_one = seller @ SheafError::OrderAccountMismatch,
+        has_one = rent_payer @ SheafError::OrderAccountMismatch,
+        has_one = cash_mint @ SheafError::OrderAccountMismatch,
+    )]
+    pub sell_order: Box<Account<'info, SellOrder>>,
+
+    pub basket: Box<Account<'info, Basket>>,
+
+    #[account(
+        address = basket.share_mint @ SheafError::ShareMintMismatch,
+        mint::token_program = share_token_program,
+    )]
+    pub share_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        associated_token::mint = share_mint,
+        associated_token::authority = sell_order,
+        associated_token::token_program = share_token_program,
+    )]
+    pub escrow: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Where the filler wants the shares. The filler signs, so it is theirs to pick.
+    #[account(
+        mut,
+        token::mint = share_mint,
+        token::token_program = share_token_program,
+    )]
+    pub filler_share_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// CHECK: pinned to `sell_order.seller`.
+    pub seller: UncheckedAccount<'info>,
+
+    /// The seller is paid only into their canonical cash account, which the
+    /// filler creates if it does not exist yet.
+    #[account(
+        init_if_needed,
+        payer = filler,
+        associated_token::mint = cash_mint,
+        associated_token::authority = seller,
+        associated_token::token_program = cash_token_program,
+    )]
+    pub seller_cash_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(mint::token_program = cash_token_program)]
+    pub cash_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        token::mint = cash_mint,
+        token::authority = filler,
+        token::token_program = cash_token_program,
+    )]
+    pub filler_cash_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(mut)]
+    /// CHECK: pinned to `sell_order.rent_payer`; receives the order's rent.
+    pub rent_payer: UncheckedAccount<'info>,
+
+    pub share_token_program: Interface<'info, TokenInterface>,
+    pub cash_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CancelSellOrder<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        close = rent_payer,
+        has_one = basket @ SheafError::OrderAccountMismatch,
+        has_one = seller @ SheafError::OrderAccountMismatch,
+        has_one = rent_payer @ SheafError::OrderAccountMismatch,
+    )]
+    pub sell_order: Box<Account<'info, SellOrder>>,
+
+    pub basket: Box<Account<'info, Basket>>,
+
+    #[account(
+        address = basket.share_mint @ SheafError::ShareMintMismatch,
+        mint::token_program = share_token_program,
+    )]
+    pub share_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        associated_token::mint = share_mint,
+        associated_token::authority = sell_order,
+        associated_token::token_program = share_token_program,
+    )]
+    pub escrow: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// CHECK: pinned to `sell_order.seller`.
+    pub seller: UncheckedAccount<'info>,
+
+    /// A share account the seller owns; for anyone but the seller, their
+    /// canonical one (checked in the handler).
+    #[account(
+        mut,
+        token::mint = share_mint,
+        token::authority = seller,
+        token::token_program = share_token_program,
+    )]
+    pub seller_share_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(mut)]
+    /// CHECK: pinned to `sell_order.rent_payer`; receives the order's rent.
+    pub rent_payer: UncheckedAccount<'info>,
+
+    pub share_token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -1565,10 +1949,110 @@ pub struct Plan {
     pub max_ref_shares_per_cash_e9: u64,
 }
 
+/// A holder's offer to sell shares for cash, escrowed in the sell order's
+/// own share account (its associated token account for the share mint).
+#[account]
+#[derive(InitSpace)]
+pub struct SellOrder {
+    pub basket: Pubkey,
+    /// Receives the cash (in their canonical cash account) or the shares back.
+    pub seller: Pubkey,
+    /// Paid the order's and escrow's rent; gets both back when it closes.
+    pub rent_payer: Pubkey,
+    pub cash_mint: Pubkey,
+    pub cash_token_program: Pubkey,
+    pub nonce: u64,
+    /// Shares escrowed.
+    pub shares: u64,
+    /// Cash the seller must receive at `start_ts`.
+    pub start_cash: u64,
+    /// Cash the seller must receive at `end_ts`: the seller's floor.
+    pub end_cash: u64,
+    pub start_ts: i64,
+    pub end_ts: i64,
+    pub created_at: i64,
+    pub bump: u8,
+}
+
+/// Where a plan's tail (`trail_step_bps`) starts: right after the struct.
+pub const PLAN_TAIL_AT: usize = 8 + Plan::INIT_SPACE;
+
+/// A plan's trailing step, from its tail; 0 (fixed bounds) when it has none.
+pub fn plan_trail_step(data: &[u8]) -> u16 {
+    match data.get(PLAN_TAIL_AT..PLAN_TAIL_AT + 2) {
+        Some(b) => u16::from_le_bytes([b[0], b[1]]),
+        None => 0,
+    }
+}
+
+/// Record a plan fill at `rate`: clamp it into the plan's bounds and make it
+/// the reference. With a trailing step, the bounds then move to
+/// `rate × (1 ± step)`, so the next fill can move the reference at most that
+/// far; with step 0 they stay the owner's. Returns the recorded rate.
+pub fn apply_plan_fill(plan: &mut Plan, rate: u64, step_bps: u16) -> Result<u64> {
+    let rate = rate
+        .max(plan.min_ref_shares_per_cash_e9)
+        .min(plan.max_ref_shares_per_cash_e9);
+    plan.ref_shares_per_cash_e9 = rate;
+    if step_bps > 0 && (step_bps as u64) < BPS {
+        plan.min_ref_shares_per_cash_e9 = mul_div_floor(rate, BPS - step_bps as u64, BPS)?.max(1);
+        plan.max_ref_shares_per_cash_e9 = mul_div_floor(rate, BPS + step_bps as u64, BPS)?.max(rate);
+    }
+    Ok(rate)
+}
+
 /// Size of a `Plan` account written before `min_ref`/`max_ref` existed.
 pub const LEGACY_PLAN_LEN: usize = 280;
 
 // ------------------------------------------------------------------ events
+
+/// A plan's trailing step, set when it is opened.
+#[event]
+pub struct PlanTrail {
+    pub plan: Pubkey,
+    pub step_bps: u16,
+}
+
+#[event]
+pub struct SellOrderPlaced {
+    pub sell_order: Pubkey,
+    pub basket: Pubkey,
+    pub seller: Pubkey,
+    pub cash_mint: Pubkey,
+    pub nonce: u64,
+    pub shares: u64,
+    pub start_cash: u64,
+    pub end_cash: u64,
+    pub start_ts: i64,
+    pub end_ts: i64,
+}
+
+#[event]
+pub struct SellOrderFilled {
+    pub sell_order: Pubkey,
+    pub basket: Pubkey,
+    pub seller: Pubkey,
+    pub filler: Pubkey,
+    /// Shares the filler took.
+    pub shares: u64,
+    /// Cash the seller received (the auction's count at `filled_at`).
+    pub cash: u64,
+    /// Cash the filler sent, grossed up for any transfer fee.
+    pub cash_paid: u64,
+    /// Raw cash per whole share, floored, saturating.
+    pub price: u64,
+    pub filled_at: i64,
+}
+
+#[event]
+pub struct SellOrderCancelled {
+    pub sell_order: Pubkey,
+    pub basket: Pubkey,
+    pub seller: Pubkey,
+    pub by: Pubkey,
+    pub shares_returned: u64,
+    pub expired: bool,
+}
 
 /// The fee terms a basket was created with. Both are fixed for its lifetime.
 #[event]
@@ -2222,6 +2706,59 @@ fn drain_and_close_escrow<'info>(
     Ok(amount)
 }
 
+/// Send a sell order's whole escrow to `to` and close the escrow, rent to
+/// `rent_to`. Signed by the sell-order PDA. Returns the shares sent.
+#[allow(clippy::too_many_arguments)]
+fn release_sell_escrow<'info>(
+    order: &SellOrder,
+    order_key: Pubkey,
+    order_info: AccountInfo<'info>,
+    escrow: &InterfaceAccount<'info, TokenAccount>,
+    share_mint: &InterfaceAccount<'info, Mint>,
+    to: AccountInfo<'info>,
+    rent_to: AccountInfo<'info>,
+    share_token_program: AccountInfo<'info>,
+) -> Result<u64> {
+    let nonce_bytes = order.nonce.to_le_bytes();
+    let bump = [order.bump];
+    let seeds: &[&[u8]] = &[
+        b"sell",
+        order.basket.as_ref(),
+        order.seller.as_ref(),
+        &nonce_bytes,
+        &bump,
+    ];
+    let signer_seeds: &[&[&[u8]]] = &[seeds];
+    let _ = order_key;
+    let amount = escrow.amount;
+    if amount > 0 {
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                share_token_program.clone(),
+                TransferChecked {
+                    from: escrow.to_account_info(),
+                    mint: share_mint.to_account_info(),
+                    to,
+                    authority: order_info.clone(),
+                },
+                signer_seeds,
+            ),
+            amount,
+            SHARE_DECIMALS,
+        )?;
+    }
+    token_interface::close_account(CpiContext::new_with_signer(
+        share_token_program,
+        CloseAccount {
+            account: escrow.to_account_info(),
+            destination: rent_to,
+            authority: order_info,
+        },
+        signer_seeds,
+    ))?;
+    Ok(amount)
+}
+
 fn emit_order_placed(order: &Order, order_key: Pubkey) {
     emit!(OrderPlaced {
         order: order_key,
@@ -2635,6 +3172,10 @@ pub enum SheafError {
     TreasuryMismatch,
     #[msg("A third party's refund must go to the buyer's associated cash account")]
     RefundNotToBuyerAta,
+    #[msg("A third party's return must go to the seller's associated share account")]
+    RefundNotToSellerAta,
+    #[msg("The seller would receive less cash than the auction asks")]
+    SellerPaidShort,
 }
 
 #[cfg(test)]
@@ -2972,6 +3513,81 @@ mod tests {
         let read = Basket::try_deserialize(&mut &account[..]).unwrap();
         assert_eq!((read.protocol_fee_bps, read.protocol_fee_accrued), (0, 0));
         assert_eq!(read.bump, 254);
+    }
+
+    fn plan_at(r: u64, min: u64, max: u64) -> Plan {
+        Plan {
+            owner: Pubkey::default(),
+            basket: Pubkey::default(),
+            cash_mint: Pubkey::default(),
+            cash_token_program: Pubkey::default(),
+            cash_account: Pubkey::default(),
+            plan_id: 0,
+            cash_per_run: 100_000_000,
+            period_secs: 60,
+            runs_total: 10,
+            runs_left: 10,
+            next_run_ts: 0,
+            ref_shares_per_cash_e9: r,
+            band_bps: 200,
+            auction_secs: 60,
+            last_order: None,
+            fills: 0,
+            last_fill_ts: 0,
+            created_at: 0,
+            bump: 0,
+            min_ref_shares_per_cash_e9: min,
+            max_ref_shares_per_cash_e9: max,
+        }
+    }
+
+    #[test]
+    fn trailing_bounds_follow_fills_and_fixed_bounds_do_not() {
+        // A plan opened at 0.004 with ±6% bounds.
+        let (r, lo, hi) = (4_000_000u64, 3_760_000u64, 4_240_000u64);
+
+        // Fixed (an old plan, step 0): a market falling 2% a run halts at the floor.
+        let mut fixed = plan_at(r, lo, hi);
+        for _ in 0..10 {
+            let next = fixed.ref_shares_per_cash_e9 * 102 / 100; // shares per cash rise as the price falls
+            apply_plan_fill(&mut fixed, next, 0).unwrap();
+        }
+        assert_eq!(fixed.ref_shares_per_cash_e9, hi, "pinned at the owner's ceiling");
+        assert_eq!((fixed.min_ref_shares_per_cash_e9, fixed.max_ref_shares_per_cash_e9), (lo, hi));
+
+        // Trailing: the same market is followed, and the bounds move with it.
+        let mut trail = plan_at(r, lo, hi);
+        let mut expect = r;
+        for _ in 0..10 {
+            let next = trail.ref_shares_per_cash_e9 * 102 / 100;
+            expect = next;
+            apply_plan_fill(&mut trail, next, PLAN_STEP_BPS).unwrap();
+            let rr = trail.ref_shares_per_cash_e9;
+            assert_eq!(trail.min_ref_shares_per_cash_e9, rr * 9_400 / 10_000);
+            assert_eq!(trail.max_ref_shares_per_cash_e9, rr * 10_600 / 10_000);
+        }
+        assert_eq!(trail.ref_shares_per_cash_e9, expect);
+        assert!(trail.ref_shares_per_cash_e9 > hi, "past the opening ceiling");
+
+        // No single fill moves a trailing plan more than the step.
+        let mut jump = plan_at(r, r * 9_400 / 10_000, r * 10_600 / 10_000);
+        apply_plan_fill(&mut jump, r * 2, PLAN_STEP_BPS).unwrap();
+        assert_eq!(jump.ref_shares_per_cash_e9, r * 10_600 / 10_000);
+        apply_plan_fill(&mut jump, 1, PLAN_STEP_BPS).unwrap();
+        assert_eq!(jump.ref_shares_per_cash_e9, (r * 10_600 / 10_000) * 9_400 / 10_000);
+    }
+
+    #[test]
+    fn plan_tail_reads_zero_on_old_plans() {
+        assert_eq!(plan_trail_step(&vec![0u8; 8 + Plan::INIT_SPACE]), 0, "a 296-byte plan has no tail");
+        let mut new = vec![0u8; PLAN_TAIL_AT + PLAN_TAIL_LEN];
+        new[PLAN_TAIL_AT..PLAN_TAIL_AT + 2].copy_from_slice(&PLAN_STEP_BPS.to_le_bytes());
+        assert_eq!(plan_trail_step(&new), PLAN_STEP_BPS);
+        // The struct still decodes from the longer account.
+        let mut buf = Vec::new();
+        plan_at(1, 1, 1).try_serialize(&mut buf).unwrap();
+        buf.resize(PLAN_TAIL_AT + PLAN_TAIL_LEN, 0);
+        assert!(Plan::try_deserialize(&mut &buf[..]).is_ok());
     }
 
     #[test]
