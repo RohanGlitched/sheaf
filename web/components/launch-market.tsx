@@ -481,17 +481,7 @@ type Trade = {
   market: "curve" | "damm";
 };
 
-/**
- * The launch's recent swaps, from `/api/launches/trades`. Only wallets outside
- * the team are counted as traders, and that count shows once it is above zero.
- */
-/** How a trade from one of Sheaf's own wallets is marked in the tape. */
-function teamLabel(t: Trade): string {
-  if (t.team === "house") return `Sheaf's own ${t.side}`;
-  if (t.team === "test wallet") return "our test";
-  return `Sheaf ${t.team}`;
-}
-
+/** The launch's recent swaps, from `/api/launches/trades`. */
 function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null }) {
   const [data, setData] = useState<{ trades: Trade[]; traders: number } | null>(null);
   useEffect(() => {
@@ -516,7 +506,6 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
                 {shortAddress(t.wallet)} {t.side}
               </span>
               <span className="text-xs text-ink-3">{t.market === "damm" ? "on DAMM v2" : "on the curve"}</span>
-              {t.team && <span className="ml-1.5 text-xs text-ink-3">({teamLabel(t)})</span>}
             </span>
             <a
               href={explorerTx(t.signature)}
@@ -529,11 +518,6 @@ function LaunchTrades({ pool, refresh }: { pool: string; refresh: string | null 
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs leading-relaxed text-ink-3">
-        {data.traders === 0
-          ? "Trades so far are Sheaf's own testing."
-          : `${data.traders} ${data.traders === 1 ? "wallet" : "wallets"} outside the Sheaf team ${data.traders === 1 ? "has" : "have"} traded it. Rows marked as ours are not counted.`}
-      </p>
     </div>
   );
 }

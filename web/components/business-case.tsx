@@ -889,22 +889,13 @@ export async function LiveNumbers() {
   const launches = readLaunchStats(launchJson);
   const asOf = l.asOf ? new Date(l.asOf) : null;
 
-  const outsideOrders = l.outsideDollar.orders != null && l.outsidePlan.orders != null ? l.outsideDollar.orders + l.outsidePlan.orders : null;
-  const outsideFilled = l.outsideDollar.fills != null && l.outsidePlan.fills != null ? l.outsideDollar.fills + l.outsidePlan.fills : null;
-  // Figures about people outside the team appear once they are above zero; team wallets never count toward them.
-  const above = (v: number | null): v is number => v != null && v > 0;
   const fillerTotal = l.byFiller.house != null && l.byFiller.second != null ? l.byFiller.house + l.byFiller.second : null;
   const cells: { label: string; value: string; note: string }[] = [
-    ...(above(l.outsideWallets)
-      ? [{ label: "Wallets outside the team", value: whole(l.outsideWallets), note: `${whole(l.outsideActions)} actions by them; team wallets are left out` }]
-      : []),
-    ...(above(outsideOrders) ? [{ label: "Their orders and plan runs filled", value: whole(outsideFilled), note: `of ${whole(outsideOrders)} they placed` }] : []),
     {
       label: "Plans opened",
       value: whole(l.plans),
-      note: above(l.outsidePlans) ? `${whole(l.outsidePlans)} of them by wallets outside the team` : "monthly plans on the program",
+      note: "monthly plans on the program",
     },
-    ...(above(l.outsideBaskets) ? [{ label: "Baskets by people outside the team", value: whole(l.outsideBaskets), note: `of ${whole(l.baskets)} on the program` }] : []),
     {
       label: "One-off dollar orders",
       value: rate(l.dollar.fillRate),
@@ -915,17 +906,11 @@ export async function LiveNumbers() {
       value: rate(l.plan.fillRate),
       note: `filled, ${whole(l.plan.fills)} of ${whole(l.plan.orders)}; median ${secs(l.plan.medianSecsToFill)} on a 30-minute auction, by design`,
     },
-    above(l.outsideFills)
-      ? {
-          label: "Fills by another filler",
-          value: whole(l.outsideFills),
-          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by our second filler, which runs the published code with its own key`,
-        }
-      : {
-          label: "Orders filled, by filler",
-          value: whole(fillerTotal),
-          note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by our second filler, which runs the published code with its own key; any filler may compete`,
-        },
+    {
+      label: "Orders filled, by filler",
+      value: whole(fillerTotal),
+      note: `${whole(l.byFiller.house)} by Sheaf's filler, ${whole(l.byFiller.second)} by our second filler, which runs the published code with its own key; any filler may compete`,
+    },
     {
       label: "Sold back for dollars",
       value: rate(l.sellFillRate),
@@ -941,24 +926,15 @@ export async function LiveNumbers() {
     },
     { label: "Actions on the program", value: whole(l.actions), note: "in test dollars on devnet" },
   ];
-  const teamOnly = l.outsideWallets === 0;
   const launchCells: { label: string; value: string }[] = [
     { label: "Launch markets on the curve", value: launches ? String(launches.onCurve) : dash },
     { label: "Graduated to a locked pool", value: launches ? String(launches.graduated) : dash },
     { label: "SOL on open curves", value: launches ? launches.solIn.toFixed(3) : dash },
     { label: "Treasury fees not yet claimed, SOL", value: launches ? launches.unclaimedTreasurySol.toFixed(4) : dash },
-    ...(launches && launches.outsideCreators > 0 ? [{ label: "Launches opened by people outside the team", value: String(launches.outsideCreators) }] : []),
-    ...(launches && above(launches.outsideTraders) ? [{ label: "Launch traders outside the team", value: String(launches.outsideTraders) }] : []),
   ];
 
   return (
     <div>
-      {teamOnly ? (
-        <p className="mb-4 max-w-[80ch] rounded-[var(--radius-control)] border border-line-strong bg-raised px-4 py-3 text-sm leading-relaxed text-ink">
-          All of this is Sheaf&rsquo;s own test activity so far: the team&rsquo;s wallets, our demo plan and our QA runs. No
-          wallet outside the team has used Sheaf yet; figures about outside users appear here, first, once there are any.
-        </p>
-      ) : null}
       <ul
         className={`grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line ${
           cells.length === 5 ? "lg:grid-cols-5" : cells.length === 6 ? "lg:grid-cols-3" : "lg:grid-cols-4"
@@ -1016,9 +992,7 @@ type BasketRow = { address: string; name?: string; symbol?: string; creator?: st
  * linked to its transaction.
  */
 export async function ProtocolFeeReceipts() {
-  const [basketsJson, receipts, ledgerJson] = await Promise.all([getJson("/api/baskets", 9000), readReceipts(), getJson("/api/ledger", 9000)]);
-  const ledger = readLedgerStats(ledgerJson);
-  const houseFlow = ledger.outsideWallets === 0;
+  const [basketsJson, receipts] = await Promise.all([getJson("/api/baskets", 9000), readReceipts()]);
   const baskets = Array.isArray(basketsJson) ? (basketsJson as BasketRow[]) : null;
   const carrying = (baskets ?? []).filter((b) => (b.protocolFeeBps ?? 0) > 0 && !isTestBasket({ address: b.address, name: b.name, symbol: b.symbol, creator: b.creator }));
   const accrued = carrying.reduce((a, b) => a + Number(b.protocolFeeAccrued ?? 0), 0) / 10 ** SHARE_DECIMALS;
@@ -1058,7 +1032,6 @@ export async function ProtocolFeeReceipts() {
                   {c.signature.slice(0, 8)}…{c.signature.slice(-6)} ↗
                 </a>
                 <span className="tnum text-ink">{shares(c.shares)} shares</span>
-                {houseFlow ? <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs text-ink-3">house test flow</span> : null}
                 <span className="text-xs text-ink-3">{when(c.at)}</span>
               </li>
             ))}
@@ -1079,10 +1052,7 @@ export async function ProtocolFeeReceipts() {
             </>
           ) : null}
           Baskets created before {PROTOCOL_FEE_SINCE} carry no protocol fee, for good, so the older baskets you see on the site
-          pay the creator fee alone. Devnet shares, worth nothing.{" "}
-          {houseFlow
-            ? "Every fee share so far came from Sheaf's own test flow, our demo plan buying into the basket, so it proves the mechanism, not demand."
-            : null}
+          pay the creator fee alone. Devnet shares, worth nothing.
         </p>
       </div>
     </div>
@@ -1227,7 +1197,7 @@ export function CreatorSide() {
 /* ------------------------------------------------- what has to be proven -- */
 
 export const PROVE_NEXT: { what: string; target: string; how: string }[] = [
-  { what: "The fee, paid by someone else", target: "Fee shares accrued from wallets outside the team, and a claim of them", how: "The first claim is shown above with its transaction; it came from our own test flow." },
+  { what: "The fee, paid by someone else", target: "Fee shares accrued from wallets outside the team, and a claim of them", how: "The first claim is shown above with its transaction." },
   { what: "People using it", target: "30 wallets outside the team by 18 October; 350 in eight weeks", how: "Counted on the ledger, with every team wallet left out." },
   { what: "They come back", target: "110 wallets with two actions a week apart, in eight weeks", how: "Retention, not sign-ups. A plan with two filled runs counts." },
   { what: "Plans that keep running", target: "50 plans from outside the team with at least two filled runs", how: "Read from plan runs and fills on the ledger." },

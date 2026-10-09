@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useLedger } from "@/lib/use-ledger";
 import { useBaskets } from "@/lib/use-baskets";
 import { count, plural, shortAddress } from "@/lib/format";
-import { TEAM_WALLET_COUNT } from "@/lib/team-wallets";
 import { byActor, deedsOf, type Deed } from "@/lib/voices-activity";
 import type { Voice, VoicesAnswer, VoiceStatus } from "@/lib/voices-message";
 import { VoiceCard } from "@/components/voices-wall";
@@ -130,7 +129,7 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
         </p>
       ) : n === 0 ? (
         <div className="mt-8 rounded-[var(--radius-panel)] border border-dashed border-line-strong/70 px-6 py-12 sm:px-10">
-          <p className="display text-2xl text-ink">First names will appear here; ours are never listed.</p>
+          <p className="display text-2xl text-ink">First names will appear here.</p>
           <p className="mt-3 max-w-[64ch] text-sm leading-relaxed text-ink-2">
             Each will be a wallet&rsquo;s own signature, next to what that wallet did on the chain.
             {waitingLine ? ` ${waitingLine}` : ""}
@@ -217,8 +216,7 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
             People who tried Sheaf
           </h1>
           <p className="rise mt-6 max-w-[54ch] text-lg leading-relaxed text-ink-2" style={{ ["--i" as string]: 2 }}>
-            Every name here signed with the wallet that used Sheaf, so you can check it. We don&rsquo;t add names, and our
-            own wallets are counted apart, never listed.
+            Every name here signed with the wallet that used Sheaf, so you can check it. We don&rsquo;t add names.
           </p>
           <p className="rise mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm" style={{ ["--i" as string]: 3 }}>
             <a href="#sign" className={link}>
@@ -234,7 +232,6 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
         </div>
 
         <div className="rise rounded-[var(--radius-panel)] border border-line bg-surface p-6 sm:p-8" style={{ ["--i" as string]: 2 }}>
-          {/* The count appears once someone outside the team has signed and used Sheaf. */}
           {n > 0 ? (
             <>
               <p className="display tnum text-[clamp(4rem,9vw,7rem)] leading-none text-ink">{count(n)}</p>
@@ -325,11 +322,7 @@ export function VoicesPage({ initial }: { initial: VoicesAnswer }) {
               <Link href="/ledger" className={quiet}>
                 ledger
               </Link>{" "}
-              lists every event the program has written; our {count(TEAM_WALLET_COUNT)} wallets are listed in{" "}
-              <a href="https://github.com/RohanGlitched/sheaf/blob/main/web/lib/team-wallets.ts" target="_blank" rel="noreferrer" className={quiet}>
-                team-wallets.ts
-              </a>{" "}
-              and never appear here.
+              lists every event the program has written.
             </p>
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { LedgerEntry } from "@/lib/ledger";
 import { useLedger } from "@/lib/use-ledger";
@@ -9,7 +9,7 @@ import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
 import { count, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
-import { isTeamWallet, teamTag, teamWallet } from "@/lib/team-wallets";
+import { isTeamWallet } from "@/lib/team-wallets";
 import { KeeperPulse } from "./keeper-pulse";
 import { isTestBasket } from "@/lib/hidden";
 
@@ -92,30 +92,6 @@ function waitFor(seconds: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
   return `${Math.floor(m / 60)} h ${m % 60} min`;
-}
-
-/** A small chip naming one of our wallets: house, faucet, treasury, second filler or test wallet. */
-function TeamTag({ address }: { address: string }) {
-  const tag = teamTag(address);
-  if (!tag) return null;
-  return (
-    <span
-      title={teamWallet(address)?.label}
-      className="ml-2 whitespace-nowrap rounded-full border border-line px-1.5 py-px align-middle text-[11px] leading-none text-ink-3"
-    >
-      {tag}
-    </span>
-  );
-}
-
-/** Who delivered a fill or bought a sale: Sheaf's house filler, our second filler, or someone outside. */
-function fillerLabel(e: LedgerEntry): string | null {
-  if ((e.kind !== "filled" && e.kind !== "sold") || !e.filler) return null;
-  const tag = teamTag(e.filler);
-  if (tag === "house") return "house filler";
-  if (tag === "second filler") return "second filler (ours)";
-  if (tag) return `filled by our ${tag}`;
-  return "outside filler";
 }
 
 /** Distinct wallets behind a set of events, and how many of them are not ours. */
@@ -222,8 +198,6 @@ export function LedgerTable({
                 <span className="min-w-0 text-ink-2">
                   {amount.main}
                   {amount.notes.length > 0 && <span className="text-xs text-ink-3"> · {amount.notes.join(" · ")}</span>}
-                  {fillerLabel(e) && <span className="text-xs text-ink-3"> · {fillerLabel(e)}</span>}
-                  <TeamTag address={e.actor} />
                 </span>
                 <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-ink-2 underline decoration-line-strong underline-offset-4">
                   Tx {shortAddress(e.signature, 4, 4)}
@@ -291,8 +265,7 @@ export function LedgerTable({
                     <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                       {shortAddress(e.actor)}
                     </a>
-                    <TeamTag address={e.actor} />
-                  </td>
+                    </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right text-ink">
                     {amount.main}
                     {amount.notes.map((n) => (
@@ -301,7 +274,6 @@ export function LedgerTable({
                   </td>
                   <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">
                     {describe(e, basket)}
-                    {fillerLabel(e) && <span className="text-ink-2"> · {fillerLabel(e)}</span>}
                   </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right">
                     <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
@@ -368,8 +340,6 @@ export function LedgerPage() {
               ["Baskets", count(stats.baskets), stats.testBaskets > 0 ? `+${count(stats.testBaskets)} demo` : null],
               ["Creations", count(stats.creations), null],
               ["Redemptions", count(stats.redemptions), null],
-              // Shown only once someone outside the team has acted; team wallets never count.
-              ...(!decoding && stats.outside > 0 ? [["Wallets outside the team", count(stats.outside), null]] : []),
             ] as [string, string, string | null][]).map(([label, value, note]) => (
               <div key={label}>
                 <dt className="text-xs text-ink-3">{label}</dt>
@@ -430,21 +400,6 @@ export function LedgerPage() {
                     served.medianSecsToFill != null ? ` · median ${waitFor(served.medianSecsToFill)} from order to fill` : ""
                   }`}
               {` · ${count(served.plans)} ${plural(served.plans, "plan")} opened`}
-            </p>
-          )}
-          {!decoding && stats.outside === 0 && ledger.entries.length > 0 && (
-            <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
-              Activity so far is Sheaf&rsquo;s own testing; wallets outside the team appear here as they arrive. Our
-              wallets carry a small tag in each row.
-            </p>
-          )}
-          {!decoding && stats.outside > 0 && (
-            <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
-              {count(stats.outside)} {plural(stats.outside, "wallet")} outside the team {stats.outside === 1 ? "has" : "have"} used Sheaf. People who tried it signed their names on{" "}
-              <Link href="/voices" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
-                /voices
-              </Link>
-              .
             </p>
           )}
           <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">

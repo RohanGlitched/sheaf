@@ -20,33 +20,18 @@ import {
 } from "@/lib/evm";
 import { quantity, shortAddress, timeAgo } from "@/lib/format";
 import { useKeeperKick } from "@/lib/use-keeper-kick";
-import { teamTag, teamWallet } from "@/lib/team-wallets";
 import { KeeperPulse } from "./keeper-pulse";
 import type { EvmWallet } from "./evm-wallet";
 
 const th = "px-3 py-3 font-normal sm:px-4";
 const td = "px-3 py-3 sm:px-4";
 
-/** "ours" beside a wallet the team runs (the house, a deploy key or one of our test wallets), with what it is on hover. */
-function OursTag({ address }: { address: string }) {
-  const w = teamWallet(address);
-  if (!w) return null;
-  return (
-    <span
-      className="ml-1.5 whitespace-nowrap rounded-full bg-sunk px-1.5 py-0.5 text-[10px] leading-none text-ink-3"
-      title={`${teamTag(address) ?? "ours"}: ${w.label}. Not counted as an outside buyer.`}
-    >
-      ours
-    </span>
-  );
-}
-
 /**
  * The creation desks' books, read straight from the contracts. First the auction
  * desks, newest first (v3, whose protocol fee goes to a cold treasury, then v2), each
  * auction's count falling live; under them the v1 desk's fixed-price orders, which
  * still settle exactly as before. The house filler is just one participant; anyone
- * holding the components can fill. Wallets the team runs carry a small "ours" tag.
+ * holding the components can fill.
  */
 export function EvmDeskBook({
   d,
@@ -154,7 +139,6 @@ export function EvmDeskBook({
       <a href={`${d.explorer}/address/${address}`} target="_blank" rel="noreferrer" className="hover:underline">
         {me && address.toLowerCase() === me ? "you" : shortAddress(address, 6, 4)}
       </a>
-      <OursTag address={address} />
     </td>
   );
 
@@ -199,17 +183,7 @@ export function EvmDeskBook({
     </thead>
   );
 
-  // On phones the buyer column is hidden, so the "ours" tag rides with the order number.
-  const idCell = (id: number, buyer: string) => (
-    <td className={`tnum ${td} text-ink-2`}>
-      #{id}
-      {teamWallet(buyer) && (
-        <span className="block sm:hidden">
-          <OursTag address={buyer} />
-        </span>
-      )}
-    </td>
-  );
+  const idCell = (id: number) => <td className={`tnum ${td} text-ink-2`}>#{id}</td>;
 
   const rowClass = (b: string) => `border-b border-line/60 last:border-0 ${b.toLowerCase() === basket.address.toLowerCase() ? "" : "text-ink-3"}`;
   const deskLink = (label: string, address: string) => (
@@ -232,7 +206,7 @@ export function EvmDeskBook({
             const range = `${quantity(fromRaw(o.startShares), 4)} → ${quantity(fromRaw(o.endShares), 4)}`;
             return (
               <tr key={o.id} className={rowClass(o.basket)}>
-                {idCell(o.id, o.buyer)}
+                {idCell(o.id)}
                 <td className={td}>{symbolOf(o.basket)}</td>
                 <td className={`tnum ${td} text-right`}>
                   {o.status === "Filled" ? (
@@ -281,7 +255,7 @@ export function EvmDeskBook({
             posts a Dutch auction: the shares they must receive start high and fall until a participant delivers the components in kind and
             collects the escrow. The shares are minted straight to the buyer, less the creator fee and the 0.10% protocol fee. The house filler
             is one such participant and fills at fair plus 0.15%
-            {d.tokenSource === "real" ? ", only while it holds enough of Robinhood's tokens" : ""}. Wallets we run are tagged &ldquo;ours&rdquo;.
+            {d.tokenSource === "real" ? ", only while it holds enough of Robinhood's tokens" : ""}.
           </p>
           <KeeperPulse which="evm" className="mt-4" />
         </div>
@@ -341,7 +315,7 @@ export function EvmDeskBook({
                 const expired = now > 0 && o.expiry < now;
                 return (
                   <tr key={o.id} className={rowClass(o.basket)}>
-                    {idCell(o.id, o.buyer)}
+                    {idCell(o.id)}
                     <td className={td}>{symbolOf(o.basket)}</td>
                     <td className={`tnum ${td} text-right`}>{quantity(fromRaw(o.shares), 4)}</td>
                     <td className={`tnum ${td} text-right`}>

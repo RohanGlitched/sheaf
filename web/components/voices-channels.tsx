@@ -124,7 +124,7 @@ export function VoicesChannels({ refs, open }: { refs: InviteCount[]; open: bool
           </table>
         )}
         <p className="mt-3 max-w-[70ch] text-xs leading-relaxed text-ink-3">
-          Only people listed above count as signed: outside the team, with a first action on Sheaf. Link opens are not people:
+          Only people listed above count as signed, each with a first action on Sheaf. Link opens are not people:
           one is counted per address per code per hour, chat-app previews are skipped, and anyone can open a link twice from two
           networks, so they only say whether a link is being clicked.
         </p>

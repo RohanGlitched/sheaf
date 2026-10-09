@@ -133,16 +133,7 @@ export default function PlansPage() {
           </dl>
         </div>
 
-        <div className="mt-20">
-          <h2 className="display text-title max-w-[22ch] text-ink">What Sheaf measures from India</h2>
-          <p className="mt-4 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-            Measured before any launch: what visitors&apos; plans commit, read live from devnet, and who asks to be told when
-            Sheaf can serve them. Each figure appears here once it is above zero; the team&apos;s own demo plans are never added in.
-          </p>
-          <div className="mt-8">
-            <IndiaTraction />
-          </div>
-        </div>
+        <IndiaTraction />
 
         <div className="mt-20 grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
           <IndiaRules />

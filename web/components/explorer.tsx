@@ -80,7 +80,7 @@ export function Explorer() {
   const [sort, setSort] = useState<SortKey>("held");
   const [query, setQuery] = useState("");
   const [showTests, setShowTests] = useState(false);
-  const { ledger, decoding } = useLedger();
+  const { ledger } = useLedger();
   const traction = useMemo(() => (ledger ? walletCounts(ledger.entries) : null), [ledger]);
   const split = useMemo(() => splitTestBaskets(baskets ?? []), [baskets]);
   const testCount = split.tests;
@@ -182,19 +182,6 @@ export function Explorer() {
                 {traction ? count(traction.actions) : "…"}
               </dd>
             </div>
-            {/* The ledger states the count either way; here it shows once someone outside the team has acted. */}
-            {traction && traction.outside > 0 && (
-            <div>
-              <dt className="text-xs text-ink-3">
-                <Link href="/ledger" className="underline decoration-line-strong underline-offset-4 hover:text-ink-2">
-                  Wallets outside the team
-                </Link>
-              </dt>
-              <dd className="display mt-1 text-xl text-ink">
-                {decoding ? "…" : count(traction.outside)}
-              </dd>
-            </div>
-            )}
           </dl>
         )}
       </div>

@@ -18,7 +18,7 @@ import { PlanSheaf } from "./plan-sheaf";
 import { planTerms, hardBpsForPeriod } from "./plan-form";
 import { ConnectButton } from "./connect-button";
 import { KeeperPulse } from "./keeper-pulse";
-import { teamTag, teamWallet } from "@/lib/team-wallets";
+import { teamWallet } from "@/lib/team-wallets";
 
 /**
  * Five broken test plans: two from before the hardening release and three from
@@ -36,16 +36,7 @@ const HIDDEN_TEST_PLANS = new Set([
 /** How long the keeper leaves a buyer's own expired order for them to return, before returning it itself. */
 const REFUND_GRACE_SECS = 10 * 60;
 
-/** True for a plan one of the team's own wallets opened; those never count toward the outside figures. */
-const isTeamPlan = (owner: string) => teamWallet(owner) != null && teamTag(owner) != null;
 const isHouse = (address: string) => teamWallet(address)?.role === "house";
-
-/** The small tag on a team plan: the house's own demo, or one of our test wallets. Null for anyone else's. */
-function teamPill(owner: string): string | null {
-  if (!isTeamPlan(owner)) return null;
-  const role = teamWallet(owner)?.role;
-  return role === "house" ? "Sheaf demo" : role === "test" ? "our test" : "Sheaf";
-}
 
 /** A plan whose reference sits further than this from today's fair rate is offered a re-center. */
 const RECENTER_DRIFT = 0.02;
@@ -166,14 +157,6 @@ function PlanCard({
             <Link href={`/basket/${plan.basket}`} className="display text-xl text-ink hover:underline">
               {basketName}
             </Link>
-            {teamPill(plan.owner) && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] leading-none ${isHouse(plan.owner) ? "bg-bind-wash text-bind" : "bg-sunk text-ink-3"}`}
-                title={isHouse(plan.owner) ? "The house's own demo plan, run by the keeper on its schedule" : "Opened by one of the team's test wallets"}
-              >
-                {teamPill(plan.owner)}
-              </span>
-            )}
             {plan.periodSecs < 86400 && (
               <span
                 className="rounded-full border border-line px-2 py-0.5 text-[11px] leading-none text-ink-3"
@@ -410,15 +393,12 @@ export function PlansBoard() {
   const mineLegacy = visible.filter((p) => p.owner === me && folded(p));
   const othersLegacy = visible.filter((p) => p.owner !== me && folded(p));
   const due = live.filter((p) => p.runsLeft > 0 && now >= p.nextRunTs && !pendingFor(p));
-  // The team's own plans are tallied apart, so the outside figures below only ever count other people's.
-  const tally = (list: Plan[]) => ({
-    running: list.filter((p) => p.runsLeft > 0).length,
-    fills: list.reduce((n, p) => n + p.fills, 0),
+  const totals = {
+    running: live.filter((p) => p.runsLeft > 0).length,
+    fills: live.reduce((n, p) => n + p.fills, 0),
     // Every fill spends exactly one run's dollars, so this is what plans have actually put in.
-    invested: list.reduce((sum, p) => sum + fromCashRaw(p.cashPerRun) * p.fills, 0),
-  });
-  const ours = tally(live.filter((p) => isTeamPlan(p.owner)));
-  const outside = tally(live.filter((p) => !isTeamPlan(p.owner)));
+    invested: live.reduce((sum, p) => sum + fromCashRaw(p.cashPerRun) * p.fills, 0),
+  };
   const nameOf = (p: Plan) => byBasket.get(p.basket)?.name ?? shortAddress(p.basket);
 
   async function act(plan: Plan, build: () => Transaction, done: string, explainAs?: { action?: "cancel" }) {
@@ -506,22 +486,17 @@ export function PlansBoard() {
     );
   };
 
-  // Once anyone outside the team has a plan, their figures lead and ours follow; until then the totals stand
-  // alone, with one quiet line under the strip saying whose activity it is.
-  const hasOutside = outside.running + outside.fills > 0;
-  const lead = (o: number, x: number, show: (n: number) => string) =>
-    hasOutside ? { value: show(x), note: `from wallets outside the team, plus ${show(o)} ours` } : { value: show(o + x), note: null };
-  const stats = [
-    { label: "Plans running", ...lead(ours.running, outside.running, count) },
-    { label: "Runs filled", ...lead(ours.fills, outside.fills, count) },
-    { label: "Dollars put in by plans", ...lead(ours.invested, outside.invested, money) },
+  const stats: { label: string; value: string; note: string | null }[] = [
+    { label: "Plans running", value: count(totals.running), note: null },
+    { label: "Runs filled", value: count(totals.fills), note: null },
+    { label: "Dollars put in by plans", value: money(totals.invested), note: null },
     { label: "Due right now", value: count(due.length), note: "anyone may run a due plan" },
   ];
 
   return (
     <div>
       <KeeperPulse which="solana" className="mb-4" />
-      <dl className={`${plans != null && !hasOutside ? "mb-3" : "mb-14"} grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4`}>
+      <dl className={`mb-14 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line lg:grid-cols-4`}>
         {stats.map((s) => (
           <div key={s.label} className="bg-surface px-4 py-4 sm:px-5">
             <dt className="text-xs text-ink-3">{s.label}</dt>
@@ -530,7 +505,6 @@ export function PlansBoard() {
           </div>
         ))}
       </dl>
-      {plans != null && !hasOutside && <p className="mb-14 text-xs text-ink-3">Activity so far is Sheaf&apos;s own testing.</p>}
       <div className="grid gap-14 lg:grid-cols-2">
         <section className="min-w-0">
           <h2 className="display text-title text-ink">Your plans</h2>

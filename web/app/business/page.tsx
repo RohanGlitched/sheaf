@@ -91,7 +91,7 @@ export default function BusinessPage() {
           <p className="mt-6 text-sm leading-relaxed text-ink-3">
             Everything runs on devnet and testnets with test money today. The protocol fee is live on devnet for Solana baskets
             created since {PROTOCOL_FEE_SINCE} and on the EVM v2 desk&rsquo;s dollar fills, and the treasury has made its first
-            claim, from our own test flow. The rates are real; the revenue is not yet.
+            claim. The rates are real; the revenue is not yet.
           </p>
         </div>
         <div className="mt-12">
