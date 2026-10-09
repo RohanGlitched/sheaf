@@ -187,7 +187,7 @@ Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window op
 programs/sheaf   the Solana program (Anchor, Token-2022)
 tests            74 integration tests
 web              Next.js app: pages, the house keeper, the RPC proxy, share images
-evm              Solidity vaults, desks, plans and mirrors for EVM chains, 158 tests
+evm              Solidity vaults, desks, plans and mirrors for EVM chains, 174 tests
 scripts          devnet setup, the reference filler, Meteora lifecycle scripts
 docs             program reference, Meteora, Panta, Solami
 ```
