@@ -1,5 +1,7 @@
 "use client";
 
+import sheafIdl from "./sheaf-idl.json";
+
 /**
  * Transaction builders.
  *
@@ -487,6 +489,9 @@ export function explainError(error: unknown): string {
   if (custom) {
     const code = parseInt(custom[1], 16);
     if (SHEAF_ERRORS[code]) return SHEAF_ERRORS[code];
+    // Every other program error carries its own message in the IDL.
+    const fromIdl = (sheafIdl.errors as { code: number; msg?: string }[]).find((e) => e.code === code)?.msg;
+    if (fromIdl) return `${fromIdl}.`;
   }
   for (const [code, message] of Object.entries(SHEAF_ERRORS)) {
     if (raw.includes(code)) return message;

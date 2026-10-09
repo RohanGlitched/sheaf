@@ -18,9 +18,18 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
+  AccountState,
+  createInitializeDefaultAccountStateInstruction,
+  createInitializeMintCloseAuthorityInstruction,
+  createInitializeNonTransferableMintInstruction,
+  createInitializePausableConfigInstruction,
+  createInitializePermanentDelegateInstruction,
+  createInitializeTransferHookInstruction,
+  createThawAccountInstruction,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   MINT_SIZE,
   TOKEN_PROGRAM_ID,
@@ -944,6 +953,11 @@ describe("sheaf", () => {
         [Buffer.from("order"), basket.toBuffer(), owner.toBuffer(), u64le(nonce)],
         program.programId,
       )[0];
+    const planOrderPda = (plan: PublicKey, nonce: number) =>
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("plan_order"), plan.toBuffer(), u64le(nonce)],
+        program.programId,
+      )[0];
     const planPda = (owner: PublicKey, planId: number) =>
       PublicKey.findProgramAddressSync(
         [Buffer.from("plan"), basket.toBuffer(), owner.toBuffer(), u64le(planId)],
@@ -1468,6 +1482,8 @@ describe("sheaf", () => {
         ref: 4_000_000n, // 0.004 raw shares per raw cash unit: $250 a share
         band: 300n,
         auction: 120,
+        min: 2_000_000n, // never accept fewer than 0.002 shares per raw cash unit ($500 a share)
+        max: 8_000_000n,
       };
       const bounds = (cash: bigint, ref: bigint) => ({
         s: (cash * ref * (10_000n + PLAN.band)) / (1_000_000_000n * 10_000n),
@@ -1486,7 +1502,7 @@ describe("sheaf", () => {
       ) {
         const p = { ...PLAN, ...args };
         return program.methods
-          .openPlan(bn(planId), bn(p.cash), bn(p.period), p.runs, bn(p.ref), Number(p.band), bn(p.auction))
+          .openPlan(bn(planId), bn(p.cash), bn(p.period), p.runs, bn(p.ref), Number(p.band), bn(p.auction), bn(p.min), bn(p.max))
           .accountsPartial({
             owner: who.publicKey,
             basket,
@@ -1508,7 +1524,7 @@ describe("sheaf", () => {
         cashProgram = TOKEN_PROGRAM_ID,
         owner = saver.publicKey,
       ) {
-        const order = orderPda(owner, nonce);
+        const order = planOrderPda(p, nonce);
         const sig = await program.methods
           .runPlan(bn(nonce))
           .accountsPartial({
@@ -1552,7 +1568,7 @@ describe("sheaf", () => {
         await expectError(openPlan(90, { band: 5_001n }), "BandTooWide");
         await expectError(openPlan(91, { runs: 0 }), "BadPlanSchedule");
         await expectError(openPlan(92, { ref: 0n }), "BadReferenceRate");
-        await expectError(openPlan(93, { cash: 1n, ref: 1n }), "PlanAmountTooSmall");
+        await expectError(openPlan(93, { cash: 1n, ref: 1n, min: 1n, max: 1n }), "PlanAmountTooSmall");
       });
 
       it("opens a plan and delegates exactly cash × runs to it in the same instruction", async () => {
@@ -1723,6 +1739,394 @@ describe("sheaf", () => {
           ((await balance(cash22, TOKEN_2022_PROGRAM_ID)) - balBefore).toString(),
           (received - fee(received)).toString(),
         );
+      });
+
+      // ========================================================== hardening
+      //
+      // Negative tests for the hardening release: every mint the program
+      // accepts is vetted for extensions that would give someone a lever over
+      // other people's value, plans have owner-set rate bounds and can be
+      // re-centred, and plan orders live in their own namespace.
+      describe("hardening", () => {
+        const hodler = Keypair.generate();
+        let hodlerCash: PublicKey;
+
+        type Ext = {
+          name: string;
+          type: ExtensionType;
+          init: (mint: PublicKey) => TransactionInstruction;
+          freeze?: boolean;
+        };
+        const EXT: Record<string, Ext> = {
+          permanentDelegate: {
+            name: "PermanentDelegate",
+            type: ExtensionType.PermanentDelegate,
+            init: (m) => createInitializePermanentDelegateInstruction(m, payer.publicKey, TOKEN_2022_PROGRAM_ID),
+          },
+          pausable: {
+            name: "Pausable",
+            type: ExtensionType.PausableConfig,
+            init: (m) => createInitializePausableConfigInstruction(m, payer.publicKey, TOKEN_2022_PROGRAM_ID),
+          },
+          closeAuthority: {
+            name: "MintCloseAuthority",
+            type: ExtensionType.MintCloseAuthority,
+            init: (m) => createInitializeMintCloseAuthorityInstruction(m, payer.publicKey, TOKEN_2022_PROGRAM_ID),
+          },
+          transferHook: {
+            name: "TransferHook",
+            type: ExtensionType.TransferHook,
+            // Any program id will do: the point is that one is set.
+            init: (m) =>
+              createInitializeTransferHookInstruction(m, payer.publicKey, Keypair.generate().publicKey, TOKEN_2022_PROGRAM_ID),
+          },
+          scaled: {
+            name: "ScaledUiAmount",
+            type: ExtensionType.ScaledUiAmountConfig,
+            init: (m) => createInitializeScaledUiAmountConfigInstruction(m, payer.publicKey, 2, TOKEN_2022_PROGRAM_ID),
+          },
+          nonTransferable: {
+            name: "NonTransferable",
+            type: ExtensionType.NonTransferable,
+            init: (m) => createInitializeNonTransferableMintInstruction(m, TOKEN_2022_PROGRAM_ID),
+          },
+          frozenByDefault: {
+            name: "DefaultAccountState(Frozen)",
+            type: ExtensionType.DefaultAccountState,
+            init: (m) => createInitializeDefaultAccountStateInstruction(m, AccountState.Frozen, TOKEN_2022_PROGRAM_ID),
+            freeze: true,
+          },
+          openByDefault: {
+            name: "DefaultAccountState(Initialized)",
+            type: ExtensionType.DefaultAccountState,
+            init: (m) => createInitializeDefaultAccountStateInstruction(m, AccountState.Initialized, TOKEN_2022_PROGRAM_ID),
+            freeze: true,
+          },
+        };
+
+        /** A bare Token-2022 mint carrying exactly the given extensions. */
+        async function mintWith(exts: Ext[], decimals: number, authority: PublicKey) {
+          const mint = Keypair.generate();
+          const space = getMintLen(exts.map((e) => e.type));
+          const tx = new Transaction().add(
+            SystemProgram.createAccount({
+              fromPubkey: payer.publicKey,
+              newAccountPubkey: mint.publicKey,
+              space,
+              lamports: await provider.connection.getMinimumBalanceForRentExemption(space),
+              programId: TOKEN_2022_PROGRAM_ID,
+            }),
+            ...exts.map((e) => e.init(mint.publicKey)),
+            createInitializeMint2Instruction(
+              mint.publicKey,
+              decimals,
+              authority,
+              exts.some((e) => e.freeze) ? payer.publicKey : null,
+              TOKEN_2022_PROGRAM_ID,
+            ),
+          );
+          await sendAndConfirmTransaction(provider.connection, tx, [payer, mint]);
+          return mint.publicKey;
+        }
+
+        async function createBasketWith(
+          symbol: string,
+          share: PublicKey,
+          componentMints: PublicKey[],
+          componentProgram = TOKEN_2022_PROGRAM_ID,
+        ) {
+          const weights = componentMints.map((_, i) =>
+            i === 0 ? 10_000 - 1_000 * (componentMints.length - 1) : 1_000,
+          );
+          return program.methods
+            .createBasket(
+              `Hardening ${symbol}`,
+              symbol,
+              0,
+              componentMints.map((mint, i) => ({ mint, unitsPerShare: bn(1_000_000), weightBps: weights[i] })),
+            )
+            .accountsPartial({
+              creator: payer.publicKey,
+              basket: basketPda(payer.publicKey, symbol),
+              shareMint: share,
+              componentTokenProgram: componentProgram,
+              systemProgram: SystemProgram.programId,
+            })
+            .remainingAccounts(componentMints.map((m) => ({ pubkey: m, isSigner: false, isWritable: false })))
+            .rpc();
+        }
+
+        /** A Token-2022 cash mint with `exts`, and a funded, usable account for `owner`. */
+        async function hostileCash(exts: Ext[], owner: PublicKey) {
+          const mint = await mintWith(exts, CASH_DECIMALS, payer.publicKey);
+          const ata = getAssociatedTokenAddressSync(mint, owner, true, TOKEN_2022_PROGRAM_ID);
+          const tx = new Transaction().add(
+            createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, ata, owner, mint, TOKEN_2022_PROGRAM_ID),
+          );
+          if (exts.some((e) => e.freeze)) {
+            tx.add(createThawAccountInstruction(ata, mint, payer.publicKey, [], TOKEN_2022_PROGRAM_ID));
+          }
+          tx.add(createMintToInstruction(mint, ata, payer.publicKey, 1_000n * USDC, [], TOKEN_2022_PROGRAM_ID));
+          await sendAndConfirmTransaction(provider.connection, tx, [payer]);
+          return { mint, ata };
+        }
+
+        before(async () => {
+          await airdrop(hodler.publicKey);
+          hodlerCash = await fundToken(cashMint, hodler.publicKey, 1_000n * USDC, TOKEN_PROGRAM_ID);
+          await fundToken(shareMint, hodler.publicKey, 0n, TOKEN_2022_PROGRAM_ID);
+        });
+
+        // ---------------------------------------------------- share mints (H1)
+
+        it("refuses a share mint carrying any extension beyond metadata", async () => {
+          const banned = [
+            EXT.permanentDelegate,
+            EXT.pausable,
+            EXT.closeAuthority,
+            EXT.transferHook,
+            EXT.scaled,
+            EXT.nonTransferable,
+          ];
+          for (let i = 0; i < banned.length; i++) {
+            const symbol = `SX${i}`;
+            const share = await mintWith([banned[i]], 6, basketPda(payer.publicKey, symbol));
+            await expectError(createBasketWith(symbol, share, [components[0]]), "ShareMintExtension");
+          }
+        });
+
+        it("refuses a share mint that is not a mint of a token program", async () => {
+          // A token account is owned by the token program and long enough to
+          // look like a mint; it must still be refused.
+          await expectError(
+            createBasketWith("SXTA", holderComponentAtas[0], [components[0]]),
+            "MalformedMint",
+          );
+          await expectError(
+            createBasketWith("SXSYS", Keypair.generate().publicKey, [components[0]]),
+            "ShareMintProgram",
+          );
+        });
+
+        it("accepts a plain legacy SPL Token share mint", async () => {
+          const symbol = "SXSPL";
+          const mint = Keypair.generate();
+          await sendAndConfirmTransaction(
+            provider.connection,
+            new Transaction().add(
+              SystemProgram.createAccount({
+                fromPubkey: payer.publicKey,
+                newAccountPubkey: mint.publicKey,
+                space: MINT_SIZE,
+                lamports: await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE),
+                programId: TOKEN_PROGRAM_ID,
+              }),
+              createInitializeMint2Instruction(mint.publicKey, 6, basketPda(payer.publicKey, symbol), null, TOKEN_PROGRAM_ID),
+            ),
+            [payer, mint],
+          );
+          await createBasketWith(symbol, mint.publicKey, [components[0]]);
+          const b = await program.account.basket.fetch(basketPda(payer.publicKey, symbol));
+          assert.equal(b.shareMint.toBase58(), mint.publicKey.toBase58());
+        });
+
+        // ------------------------------------------------ component mints (M8)
+
+        it("refuses component mints that could drain, pause or brick the vault", async () => {
+          // One valid share mint, reused: a refused create_basket consumes nothing.
+          const symbol = "CXT";
+          const share = await mintWith([], 6, basketPda(payer.publicKey, symbol));
+          for (const bad of [EXT.permanentDelegate, EXT.pausable, EXT.frozenByDefault, EXT.transferHook, EXT.nonTransferable]) {
+            const mint = await mintWith([bad], 8, payer.publicKey);
+            await expectError(
+              createBasketWith(symbol, share, [components[0], mint]),
+              "ComponentMintExtension",
+            );
+          }
+          // A token account posing as a component mint.
+          await expectError(
+            createBasketWith(symbol, share, [components[0], holderComponentAtas[1]]),
+            "MalformedMint",
+          );
+          // What xStocks and PreStocks mirrors carry (metadata, ScaledUiAmount,
+          // TransferFee), plus an "initialised" default account state, is fine.
+          const open = await mintWith([EXT.openByDefault], 8, payer.publicKey);
+          await createBasketWith(symbol, share, [components[0], components[2], open]);
+        });
+
+        // ----------------------------------------------------- cash mints (H2)
+
+        it("refuses cash a third party could seize, freeze or block, at place_order", async () => {
+          const now = await chainNow();
+          for (const bad of [EXT.permanentDelegate, EXT.pausable, EXT.frozenByDefault, EXT.transferHook]) {
+            const { mint, ata } = await hostileCash([bad], hodler.publicKey);
+            await expectError(
+              place({
+                who: hodler,
+                from: ata,
+                mint,
+                cashProgram: TOKEN_2022_PROGRAM_ID,
+                cash: 10n * USDC,
+                start: 50_000n,
+                end: 40_000n,
+                t0: now,
+                t1: now + 600,
+              }),
+              "CashMintExtension",
+            );
+          }
+        });
+
+        it("refuses the same cash mints at open_plan", async () => {
+          for (const bad of [EXT.permanentDelegate, EXT.pausable, EXT.frozenByDefault]) {
+            const { mint, ata } = await hostileCash([bad], hodler.publicKey);
+            await expectError(
+              openPlan(500, {}, hodler, () => ata, () => mint, TOKEN_2022_PROGRAM_ID),
+              "CashMintExtension",
+            );
+          }
+        });
+
+        // --------------------------------------------------- window bounds (H3)
+
+        it("refuses orders and plan auctions that close more than 30 days out", async () => {
+          const now = await chainNow();
+          const DAY = 24 * 60 * 60;
+          await expectError(
+            place({ who: hodler, from: hodlerCash, cash: USDC, start: 2n, end: 1n, t0: now, t1: now + 31 * DAY }),
+            "BadAuctionWindow",
+          );
+          await expectError(openPlan(501, { auction: 31 * DAY }, hodler, () => hodlerCash), "BadPlanSchedule");
+        });
+
+        // ----------------------------------------------- plan rate bounds (M1)
+
+        it("requires 0 < min <= reference <= max", async () => {
+          const who = hodler;
+          const acct = () => hodlerCash;
+          await expectError(openPlan(502, { min: 0n }, who, acct), "BadReferenceBounds");
+          await expectError(openPlan(503, { min: PLAN.ref + 1n }, who, acct), "BadReferenceBounds");
+          await expectError(openPlan(504, { max: PLAN.ref - 1n }, who, acct), "BadReferenceBounds");
+        });
+
+        it("never lets a run's auction end below the owner's floor, nor a fill push the reference past the ceiling", async () => {
+          // A ±30% band would end the auction at 280,000 shares per 100 USDC;
+          // the owner's floor of 0.0036 lifts it to 360,000. The ceiling is
+          // the reference itself, so a fill at a richer rate cannot raise it.
+          const id = 60;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, { band: 3_000n, min: 3_600_000n, max: PLAN.ref }, hodler, () => hodlerCash);
+          const { order } = await runPlan(p, 6001, () => hodlerCash);
+          const o = await program.account.order.fetch(order);
+          assert.equal(o.endShares.toString(), "360000", "the floor, not the band");
+          assert.equal(o.startShares.toString(), "520000");
+
+          const sig = await fill(order, { owner: hodler.publicKey, rentPayer: cranker.publicKey, plan: p });
+          const ev = await eventOf(sig, "OrderFilled");
+          const filledRate = (BigInt(ev.shares.toString()) * 1_000_000_000n) / PLAN.cash;
+          assert.isTrue(filledRate > PLAN.ref, "filled richer than the reference");
+          const after = await program.account.plan.fetch(p);
+          assert.equal(after.refSharesPerCashE9.toString(), PLAN.ref.toString(), "clamped to the ceiling");
+          assert.equal(ev.planRefSharesPerCashE9.toString(), PLAN.ref.toString());
+          await closePlan(p, hodler, () => hodlerCash);
+        });
+
+        // ------------------------------------------------- update_plan (M2)
+
+        it("lets only the owner re-centre a plan, under open_plan's rules, and the next run follows", async () => {
+          const id = 61;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, {}, hodler, () => hodlerCash);
+          const update = (by: Keypair, ref: bigint, band: number, auction: number, min: bigint, max: bigint) =>
+            program.methods
+              .updatePlan(bn(ref), band, bn(auction), bn(min), bn(max))
+              .accountsPartial({ owner: by.publicKey, plan: p })
+              .signers([by])
+              .rpc();
+
+          await expectError(update(stranger, 5_000_000n, 1_000, 60, 4_500_000n, 6_000_000n), "PlanAccountMismatch");
+          await expectError(update(hodler, 5_000_000n, 1_000, 60, 5_500_000n, 6_000_000n), "BadReferenceBounds");
+          await expectError(update(hodler, 5_000_000n, 6_000, 60, 4_500_000n, 6_000_000n), "BandTooWide");
+
+          const sig = await update(hodler, 5_000_000n, 1_000, 60, 4_500_000n, 6_000_000n);
+          const ev = await eventOf(sig, "PlanUpdated");
+          assert.equal(ev.refSharesPerCashE9.toString(), "5000000");
+          const after = await program.account.plan.fetch(p);
+          assert.equal(after.refSharesPerCashE9.toString(), "5000000");
+          assert.equal(after.bandBps, 1_000);
+          assert.equal(after.auctionSecs.toNumber(), 60);
+          assert.equal(after.minRefSharesPerCashE9.toString(), "4500000");
+          assert.equal(after.maxRefSharesPerCashE9.toString(), "6000000");
+          assert.equal(after.runsLeft, PLAN.runs, "schedule untouched");
+
+          // The next run uses the new terms: 100 USDC × 0.005 ± 10%.
+          // Plan orders and the owner's own orders no longer share nonces.
+          const { order } = await runPlan(p, 4242, () => hodlerCash);
+          const o = await program.account.order.fetch(order);
+          assert.equal(o.startShares.toString(), "550000");
+          assert.equal(o.endShares.toString(), "450000");
+          assert.equal(o.endTs.toNumber() - o.startTs.toNumber(), 60);
+          const now = await chainNow();
+          const mine = await place({
+            who: hodler,
+            from: hodlerCash,
+            nonce: 4242,
+            cash: USDC,
+            start: 2n,
+            end: 1n,
+            t0: now,
+            t1: now + 600,
+          });
+          assert.notEqual(mine.order.toBase58(), order.toBase58(), "same nonce, separate namespaces");
+          assert.equal(order.toBase58(), planOrderPda(p, 4242).toBase58());
+
+          // Tidy up: the owner can cancel both.
+          const refund = { by: hodler, owner: hodler.publicKey, refundTo: hodlerCash };
+          await cancel(order, { ...refund, rentPayer: cranker.publicKey });
+          await cancel(mine.order, refund);
+          await closePlan(p, hodler, () => hodlerCash);
+        });
+
+        // ---------------------------------------------- stale plan orders (L1)
+
+        it("does not let an order from a closed plan steer the plan reopened under the same id", async () => {
+          const id = 62;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, {}, hodler, () => hodlerCash);
+          const { order } = await runPlan(p, 6201, () => hodlerCash);
+          const placedAt = (await program.account.order.fetch(order)).createdAt.toNumber();
+          await closePlan(p, hodler, () => hodlerCash);
+          await waitUntil(placedAt + 1);
+          await openPlan(id, {}, hodler, () => hodlerCash);
+
+          const sig = await fill(order, { owner: hodler.publicKey, rentPayer: cranker.publicKey, plan: p });
+          const ev = await eventOf(sig, "OrderFilled");
+          assert.isNull(ev.planRefSharesPerCashE9, "the stale order did not touch the new plan");
+          const reopened = await program.account.plan.fetch(p);
+          assert.equal(reopened.refSharesPerCashE9.toString(), PLAN.ref.toString());
+          assert.equal(reopened.fills, 0);
+          await closePlan(p, hodler, () => hodlerCash);
+        });
+
+        it("refuses close_legacy_plan on a current-layout plan", async () => {
+          const id = 63;
+          const p = planPda(hodler.publicKey, id);
+          await openPlan(id, {}, hodler, () => hodlerCash);
+          await expectError(
+            program.methods
+              .closeLegacyPlan()
+              .accountsPartial({
+                owner: hodler.publicKey,
+                plan: p,
+                ownerCashAccount: hodlerCash,
+                cashTokenProgram: TOKEN_PROGRAM_ID,
+              })
+              .signers([hodler])
+              .rpc(),
+            "NotLegacyPlan",
+          );
+          await closePlan(p, hodler, () => hodlerCash);
+        });
       });
     });
   });

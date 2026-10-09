@@ -105,7 +105,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
   const plans = lowOnSol ? [] : await fetchPlans(connection);
   for (const plan of plans) {
     if (budget <= 0) break;
-    if (plan.runsLeft <= 0 || now < plan.nextRunTs) continue;
+    if (plan.legacy || plan.runsLeft <= 0 || now < plan.nextRunTs) continue;
     if (plan.cashMint !== CASH_MINT || !known.has(plan.basket) || plan.periodSecs < 60 || plan.auctionSecs > 7200 || plan.cashPerRun < 1_000_000n) continue;
     try {
       const { ix } = runPlanIx({ cranker: keeper.publicKey, plan, nonce: freshNonce() });

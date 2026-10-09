@@ -19,4 +19,7 @@ cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "NODE_OPTIONS=--no-experimental-strip-types pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+# Invoked through node_modules/.bin with absolute paths, so it also works when
+# node_modules is a symlink to another checkout (pnpm exec resolves the
+# package root through the link and then finds no test files).
+test = 'NODE_OPTIONS=--no-experimental-strip-types "$PWD/node_modules/.bin/ts-mocha" -p "$PWD/tsconfig.json" -t 1000000 "$PWD"/tests/*.ts'

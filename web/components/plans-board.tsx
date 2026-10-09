@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { fetchPlans, fetchOrders, runPlanIx, closePlanIx, cancelOrderIx, freshNonce, type Plan, type Order } from "@/lib/desk";
+import { fetchPlans, fetchOrders, runPlanIx, closePlanIx, closeLegacyPlanIx, cancelOrderIx, freshNonce, type Plan, type Order } from "@/lib/desk";
 import { useBaskets } from "@/lib/use-baskets";
 import { confirmSignature } from "@/lib/confirm";
 import { explainError } from "@/lib/tx";
@@ -52,7 +52,7 @@ function PlanCard({
   busy: boolean;
 }) {
   const ran = plan.runsTotal - plan.runsLeft;
-  const due = plan.runsLeft > 0 && now >= plan.nextRunTs && !pending;
+  const due = !plan.legacy && plan.runsLeft > 0 && now >= plan.nextRunTs && !pending;
   return (
     <li className="flex gap-5 rounded-[var(--radius-panel)] border border-line bg-surface p-5">
       <div className="size-28 shrink-0">
@@ -71,6 +71,11 @@ function PlanCard({
           {plan.fills} of {plan.runsTotal} filled, {ran} run
           {plan.runsLeft > 0 ? ` · next run ${due ? "is due now" : until(plan.nextRunTs, now)}` : " · finished"}
         </p>
+        {plan.legacy && (
+          <p className="mt-2 text-sm text-ink-2">
+            Opened before the program&apos;s hardening release, so it no longer runs. {mine ? "Close it to cancel its allowance." : "Its owner can close it."}
+          </p>
+        )}
         {pending && (
           <p className="mt-2 text-sm text-ink-2">
             This run&apos;s {money(fromCashRaw(pending.cashAmount))} order for {basketSymbol} is open to fillers for another{" "}
@@ -94,7 +99,7 @@ function PlanCard({
             </button>
           )}
           {mine && (
-            <button type="button" onClick={() => onClose(plan)} disabled={busy} className="rounded-[var(--radius-control)] border border-line-strong px-3.5 py-2 text-ink hover:border-ink-3 disabled:opacity-60">
+            <button type="button" onClick={() => onClose(plan)} disabled={busy} data-legacy={plan.legacy || undefined} className="rounded-[var(--radius-control)] border border-line-strong px-3.5 py-2 text-ink hover:border-ink-3 disabled:opacity-60">
               Close plan
             </button>
           )}
@@ -160,7 +165,11 @@ export function PlansBoard() {
 
   const run = (p: Plan) =>
     act(() => new Transaction().add(runPlanIx({ cranker: publicKey!, plan: p, nonce: freshNonce() }).ix), "Ran it. The order is out; a filler will take it within the auction.");
-  const close = (p: Plan) => act(() => new Transaction().add(closePlanIx({ owner: publicKey!, plan: p })), "Closed. The plan can no longer spend anything.");
+  const close = (p: Plan) =>
+    act(
+      () => new Transaction().add(p.legacy ? closeLegacyPlanIx({ owner: publicKey!, plan: p }) : closePlanIx({ owner: publicKey!, plan: p })),
+      "Closed. The plan can no longer spend anything.",
+    );
   const refund = (o: Order) => act(() => new Transaction().add(cancelOrderIx({ caller: publicKey!, order: o })), "Returned. The dollars went back to the plan owner.");
 
   const card = (p: Plan, own: boolean) => {

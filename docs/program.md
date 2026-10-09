@@ -7,9 +7,10 @@ plans on top of them.
 | | |
 |---|---|
 | Program ID (devnet) | `GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz` |
-| Deployed | devnet slot 508915971, tx `Af2eUxjUzrcYVRxuZMt3DdfKdv3w3PhZEpqxr4oD6bX6LvVac6YLhAc1wHxjwgHSK6ECh68uaPDmn93ya6qfdHG`; 484,568-byte program; upgrade authority `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` |
+| Deployed | first deploy: devnet slot 508915971, tx `Af2eUxjUzrcYVRxuZMt3DdfKdv3w3PhZEpqxr4oD6bX6LvVac6YLhAc1wHxjwgHSK6ECh68uaPDmn93ya6qfdHG` |
+| Hardening upgrade | devnet slot 509084920, tx `2ia49PHW3qtstt4LM1EocsYtKH6zVPd4NCcdZH7tsVtZkfsrF1eHvTzS1J8WW8p9wihgh872ZTxb4hrmczxKHt1b`; 517,800-byte program; upgrade authority `7md5ecBazJtGoHEkRvQaVSdNz7pyJrbmrHgx1L5NVJb4` (a single key: the program is upgradeable) |
 | Source | `programs/sheaf/src/lib.rs` |
-| IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`) |
+| IDL | `target/idl/sheaf.json` (copied to `web/lib/sheaf-idl.json`; on chain at `Brx9QqE7Hzh9ReaoNvk9BMSM5Ci1U2C6qx6qukciugBS`, `anchor idl fetch`) |
 | Tests | `tests/sheaf.ts` (integration, `anchor test`), `#[cfg(test)]` unit tests in `lib.rs` (`cargo test -p sheaf --lib`) |
 
 The program never reads a price. Baskets are minted and redeemed in kind, so
@@ -26,7 +27,9 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
   one whole share. Up to 8 components, all on one token program.
 - **Creator fee**: `creator_fee_bps <= 100` (1%), taken in newly minted shares,
   never out of the vault, so backing per share is unchanged by it.
-- **Cash**: any SPL Token or Token-2022 mint (USDC, PYUSD, ...).
+- **Cash**: any SPL Token or Token-2022 mint that cannot seize, freeze or
+  block an escrow (§8). USDC qualifies. A mint with a permanent delegate,
+  such as PYUSD, does not.
 - **Reference rate** (plans): `ref_shares_per_cash_e9` = raw share units per raw
   cash unit, times 10^9. With 6-decimal cash and 6-decimal shares, a share price
   of P cash per share means `ref = 10^9 / P`. For example, $250 a share gives
@@ -40,9 +43,10 @@ reference rate is learned from its own fills, so there is no oracle anywhere.
 |---|---|---|---|
 | `Basket` | `["basket", creator, symbol]` | `create_basket` | never |
 | Component vault | ATA of the basket PDA for each component mint (canonical; checked by `verify_vault`) | the client (idempotent ATA create) | never |
-| `Order` | `["order", basket, buyer, nonce_le_u64]` | `place_order`, `run_plan` | `fill_order`, `cancel_order` |
+| `Order` (user) | `["order", basket, buyer, nonce_le_u64]` | `place_order` | `fill_order`, `cancel_order` |
+| `Order` (plan) | `["plan_order", plan, nonce_le_u64]`. Plan orders placed before the hardening release used the user form; the program signs for either | `run_plan` | `fill_order`, `cancel_order` |
 | Order escrow | ATA of the **order PDA** for the cash mint, under the cash token program | same instruction as the order (`init_if_needed`) | same instruction as the order |
-| `Plan` | `["plan", basket, owner, plan_id_le_u64]` | `open_plan` | `close_plan` |
+| `Plan` | `["plan", basket, owner, plan_id_le_u64]` | `open_plan` | `close_plan` (`close_legacy_plan` for a pre-hardening plan) |
 
 ### `Basket`
 
@@ -59,7 +63,7 @@ created_at, mint_count, redeem_count, bump`.
 | `rent_payer` | paid the order's and escrow's rent and gets both back on close: the buyer for `place_order`, the cranker for `run_plan` |
 | `cash_mint`, `cash_token_program` | the cash being paid |
 | `plan` | `Some(plan)` if a plan placed the order |
-| `nonce` | caller-chosen, part of the seeds |
+| `nonce` | caller-chosen, part of the seeds (each namespace has its own) |
 | `cash_amount` | cash **actually received** into escrow (net of any Token-2022 transfer fee) |
 | `start_shares`, `end_shares` | shares the buyer receives at `start_ts` and at `end_ts`; `start_shares >= end_shares > 0` |
 | `start_ts`, `end_ts` | auction window, unix seconds; `start_ts < end_ts` |
@@ -73,12 +77,21 @@ created_at, mint_count, redeem_count, bump`.
 | `cash_mint`, `cash_token_program`, `cash_account` | the owner's cash account the plan is the SPL delegate of |
 | `plan_id` | owner-chosen, part of the seeds |
 | `cash_per_run`, `period_secs`, `runs_total`, `runs_left`, `next_run_ts` | schedule |
-| `ref_shares_per_cash_e9` | reference rate; replaced by the filled rate after every plan fill |
+| `ref_shares_per_cash_e9` | reference rate; replaced by the filled rate after every plan fill, clamped to `[min, max]` |
 | `band_bps` | half-width of each run's auction around the reference, `<= 5000` |
 | `auction_secs` | length of each run's auction |
 | `last_order` | most recent order the plan placed |
 | `fills`, `last_fill_ts` | how many plan orders have filled, and when the last one did |
 | `created_at`, `bump` | |
+| `min_ref_shares_per_cash_e9` | the owner's floor: no run's auction ends below `cash × min / 10^9` shares, and fills never move the reference under it |
+| `max_ref_shares_per_cash_e9` | the ceiling fills can push the reference to |
+
+**Layout change.** The hardening release appended the two bounds, so a
+`Plan` is now 296 bytes. A 280-byte plan written by the first release no
+longer decodes as `Plan`: `run_plan`, `close_plan` and `update_plan` refuse
+it (`AccountDidNotDeserialize`), a fill of one of its open orders still
+succeeds and simply leaves it alone, and its owner closes it with
+`close_legacy_plan`. `Basket` and `Order` are byte-for-byte unchanged.
 
 ---
 
@@ -86,18 +99,59 @@ created_at, mint_count, redeem_count, bump`.
 
 ### `create_basket(name, symbol, creator_fee_bps, components)`
 
-Unchanged. Signer `creator` pays. The client-created share mint must have 6
-decimals, zero supply, mint authority = the basket PDA and no freeze authority.
-`remaining_accounts` = each component mint, in order. Weights must sum to
-10,000 bps; components must be distinct and owned by `component_token_program`.
+Signer `creator` pays. `remaining_accounts` = each component mint, in order.
+Weights must sum to 10,000 bps, and components must be distinct.
+
+**Share mint.** It must be owned by SPL Token or Token-2022
+(`ShareMintProgram`) and decode as a real, initialised mint (`MalformedMint`,
+which rejects a token account that merely happens to be long enough). It must
+have 6 decimals, zero supply, mint authority = the basket PDA and no freeze
+authority. It may carry **only** `MetadataPointer` and `TokenMetadata`
+(`ShareMintExtension`). Every other extension, including any the program
+doesn't recognise, is refused, because each one gives somebody a lever over
+holders' shares:
+
+| Extension | What it would let its authority do |
+|---|---|
+| PermanentDelegate | transfer or burn anyone's shares, then redeem the vault |
+| Pausable | block burns, and so every redemption |
+| TransferHook | block secondary transfers |
+| MintCloseAuthority | close the mint at zero supply and re-create it under a new authority |
+| ScaledUiAmount, InterestBearing | change what wallets display |
+| NonTransferable, DefaultAccountState, ConfidentialTransfer | change what holders can do |
+
+**Components.** Each must be owned by `component_token_program` and decode as
+a real mint. It may carry what xStocks and PreStocks mirrors use:
+`MetadataPointer`, `TokenMetadata`, group pointer and member,
+`ScaledUiAmount`, `TransferFeeConfig`, and `DefaultAccountState` only when
+the default is *initialised*. Refused (`ComponentMintExtension`), along with
+anything unrecognised:
+
+- `PermanentDelegate`, which drains the vault.
+- `Pausable` or a frozen default state, which blocks every redemption, since
+  a redemption pays out all components.
+- `TransferHook`, which bricks the basket because hook accounts aren't forwarded.
+- `NonTransferable`.
+- Confidential-transfer configs.
+
+The `spl-token-2022` crate this program builds against predates
+`ScaledUiAmount` (25) and `Pausable` (26), so the program walks the
+Token-2022 TLV area by extension number (`for_each_mint_extension`) and
+fails closed on anything it doesn't know.
 
 ### `mint_shares(shares)`
 
-Unchanged behaviour, with one fix (see §8). The depositor transfers, per component,
+The depositor transfers, per component,
 `ceil(units_per_share × shares / 10^6)`, grossed up for any `TransferFeeConfig`
 so the vault nets exactly that. They receive `shares − fee`, and the creator
-receives `fee = floor(shares × creator_fee_bps / 10^4)`.
+receives `fee = floor(shares × creator_fee_bps / 10^4)`, into an account the
+basket creator owns.
 `remaining_accounts` = `[component_mint, depositor_token_account, basket_vault_ata]` per component.
+
+Every issuance (here and in `fill_order`) re-checks the share mint's
+extensions, and every deposit re-checks each component's. A basket created
+before those checks existed therefore can't take in new value it could lose.
+Redemption is never gated, so holders can always exit.
 
 ### `redeem_shares(shares)`
 
@@ -117,8 +171,14 @@ each component out of the vault.
 | `escrow` | `init_if_needed` ATA (mint = `cash_mint`, authority = `order`) |
 | `cash_token_program`, `associated_token_program`, `system_program` | |
 
-Checks: `cash_amount > 0`, `end_shares > 0`, `start_shares >= end_shares`,
-`start_ts < end_ts`, `end_ts > now`. It moves `cash_amount` into escrow and
+Checks:
+
+- `cash_amount > 0`, `end_shares > 0`, `start_shares >= end_shares`.
+- `start_ts < end_ts`, `end_ts > now`, and `end_ts <= now + 30 days`
+  (`MAX_ORDER_SECS`), so no one's cash or rent can be parked for a century.
+- The cash mint passes the cash policy (`CashMintExtension`, §8).
+
+It moves `cash_amount` into escrow and
 records the escrow's balance delta as `order.cash_amount`. Fills before
 `start_ts` are allowed, at `start_shares`, which is the best price the buyer
 offered. Emits `OrderPlaced`.
@@ -146,7 +206,11 @@ Permissionless.
 
 Steps:
 
-1. `require!(now <= end_ts)`, else `OrderExpired`.
+1. `require!(now <= end_ts)`, else `OrderExpired`. Then
+   `require!(escrow.amount >= order.cash_amount)`, else `EscrowShort`. The
+   filler is about to deliver stocks against `cash_amount`, so the cash must
+   really be there. For orders placed after this release the cash policy
+   already makes a short escrow impossible; the check guards anything older.
 2. `received = required_shares(now)` (§4).
 3. `gross = gross_shares_for_net(received, creator_fee_bps)` (§5), `fee = gross − received`.
 4. `deposit_components(gross)`: the same function `mint_shares` uses, so the
@@ -155,8 +219,18 @@ Steps:
 6. Only then is the cash released: the whole escrow balance goes to the filler,
    any withheld Token-2022 fee is harvested to the mint, the escrow is closed,
    and the order is closed. Both rents go to `rent_payer`.
-7. If the order came from a plan that still exists (and matches basket, owner
-   and cash mint), set `plan.ref_shares_per_cash_e9 = floor(received × 10^9 / order.cash_amount)`.
+   *Surplus:* the balance is at least `cash_amount`, and anything above it is
+   a third party's donation. The buyer funds exactly `cash_amount`, measured
+   by balance delta, and a pre-existing balance is never counted as theirs.
+   It goes to the filler with the rest, which closes the escrow without a
+   fourth token account. `OrderFilled.cash_paid` reports the total.
+7. If the order came from a plan that still exists, decodes under the current
+   layout, matches basket, owner and cash mint, and is the **same
+   incarnation** (`order.created_at >= plan.created_at`, so an order left
+   over from a plan that was closed and reopened under the same id can't
+   steer the new one), set
+   `plan.ref_shares_per_cash_e9 = clamp(floor(received × 10^9 / order.cash_amount), min, max)`.
+   The one blind spot is a close and reopen within the same second.
 8. Increment `basket.mint_count`. Emit `SharesMinted` (with depositor = filler,
    so supply can still be rebuilt from events alone) and `OrderFilled`.
 
@@ -181,7 +255,7 @@ The windows don't overlap: a fill is valid while `now <= end_ts`, and a
 stranger's cancel only when `now > end_ts`. The refund always goes to an account
 the buyer owns. Emits `OrderCancelled { expired }`.
 
-### `open_plan(plan_id, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs)`
+### `open_plan(plan_id, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9)`
 
 | Account | Constraint |
 |---|---|
@@ -192,15 +266,38 @@ the buyer owns. Emits `OrderCancelled { expired }`.
 | `owner_cash_account` | mint = cash mint, owner = `owner` |
 | `cash_token_program`, `system_program` | |
 
-Checks: `cash_per_run > 0`, `period_secs > 0`, `runs > 0`, `auction_secs > 0`,
-`ref > 0`, `band_bps <= 5000`, the first run's `end_shares > 0`, and
-`cash_per_run × runs` must not overflow. If the cash account already has a
+Checks (`validate_plan_terms`, shared with `update_plan`):
+
+- `cash_per_run > 0`, `period_secs > 0`, `runs > 0`, and
+  `0 < auction_secs <= 30 days` (`BadPlanSchedule`).
+- `ref > 0` (`BadReferenceRate`) and `0 < min <= ref <= max` (`BadReferenceBounds`).
+- `band_bps <= 5000` (`BandTooWide`).
+- The first run's `end_shares > 0`.
+- The cash mint passes the cash policy (`CashMintExtension`).
+- `cash_per_run × runs` doesn't overflow.
+
+If the cash account already has a
 different delegate with a non-zero allowance, the instruction fails with
 `DelegateInUse` instead of silently replacing it (the client may prepend a
 `revoke` if that is what the owner wants). Then the program CPIs
 `approve_checked(owner_cash_account → plan PDA, cash_per_run × runs)` under the
 owner's signature, so opening the plan and approving it is one instruction.
 `next_run_ts = now`, so the first run can happen immediately. Emits `PlanOpened`.
+
+### `update_plan(ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9)`
+
+| Account | Constraint |
+|---|---|
+| `owner` | signer, = `plan.owner` (`PlanAccountMismatch` otherwise) |
+| `plan` | mut, `has_one owner` |
+
+Owner only. It re-centres a plan under exactly `open_plan`'s rules: the
+reference, band, auction length and both bounds. This is how an owner
+un-sticks a plan the market has moved away from (no filler will touch an
+auction that is entirely out of the market, so its reference would never
+move on its own), or tightens a plan after a fill they didn't like. The
+schedule, remaining runs and allowance are untouched. Orders already
+placed keep their own terms. Emits `PlanUpdated`.
 
 ### `run_plan(nonce)`
 
@@ -210,7 +307,7 @@ Permissionless crank.
 |---|---|
 | `cranker` | signer, pays the order and escrow rent and gets it back when the order closes |
 | `plan` | mut, `has_one cash_mint` |
-| `order` | `init`, seeds `["order", plan.basket, plan.owner, nonce]` |
+| `order` | `init`, seeds `["plan_order", plan, nonce]`. This is a namespace of its own, so a cranker can't take a nonce the owner is about to use for `place_order` |
 | `cash_mint` | = `plan.cash_mint`, owned by `cash_token_program` |
 | `owner_cash_account` | = `plan.cash_account` |
 | `escrow` | `init_if_needed` ATA of the order |
@@ -222,8 +319,11 @@ from the owner's account as its SPL delegate, and the token program enforces
 and decrements the allowance. With `cash` = what escrow actually received:
 
 ```
-start_shares = floor(cash × ref × (10_000 + band) / (10^9 × 10_000))
-end_shares   = floor(cash × ref × (10_000 − band) / (10^9 × 10_000))
+band_start   = floor(cash × ref × (10_000 + band) / (10^9 × 10_000))
+band_end     = floor(cash × ref × (10_000 − band) / (10^9 × 10_000))
+floor        = floor(cash × min_ref / 10^9)
+end_shares   = max(band_end, floor)
+start_shares = max(band_start, end_shares)
 window       = [now, now + auction_secs]
 ```
 
@@ -247,6 +347,25 @@ names this plan as its delegate, the program CPIs `revoke` under the owner's
 signature. Otherwise it skips the revoke rather than fail, so a plan can always
 be closed. Orders the plan already placed stay open. They can still be filled
 (the closed plan is simply not updated) or cancelled. Emits `PlanClosed { revoked }`.
+
+### `close_legacy_plan()`
+
+| Account | Constraint |
+|---|---|
+| `owner` | signer, mut; must equal the owner recorded in the plan bytes |
+| `plan` | mut; owned by this program, exactly 280 bytes, `Plan` discriminator (`NotLegacyPlan` otherwise) |
+| `owner_cash_account` | must equal the plan's recorded cash account |
+| `cash_token_program` | must equal the plan's recorded cash token program |
+
+This closes a plan written by the first release, which today's `Plan`
+can't decode. The handler checks every byte it relies on, revokes the
+allowance the same way `close_plan` does, returns the rent to the owner,
+and hands the account back to the system program. Emits `PlanClosed`.
+Rehearsed locally: the old binary created a plan plus a plan order and a
+user order, the program was upgraded in place to this release, and then
+both orders filled under their original seeds, `run_plan` and `close_plan`
+refused the old plan, and `close_legacy_plan` closed it and revoked its
+allowance.
 
 ---
 
@@ -303,6 +422,15 @@ A plan with `cash_per_run = 100 USDC`, `ref = 4_000_000` (250 USDC a share) and
 - It fills at 401,234 shares, so the new `ref = floor(401_234 × 10^9 / 10^8) = 4_012_340`.
 - Run 2: `start = 413_271`, `end = 389_196`.
 
+With `band_bps = 3000` and an owner floor `min_ref = 3_600_000` ($277.78 a
+share), the band alone would end the auction at 280,000 shares. The floor
+lifts it to `floor(10^8 × 3.6×10^6 / 10^9) = 360_000`, so the worst a run
+can fill at is the owner's own limit. Before this release, n runs of
+uncontested end-of-auction fills walked the reference down as
+`ref × (1 − band)^n`. Now each step lands at or above the floor, and the
+unit test `plan_floor_bounds_the_auction` runs 50 such steps at a 50% band
+and ends exactly at the floor.
+
 ---
 
 ## 5. Creator-fee gross-up
@@ -328,9 +456,15 @@ shares. A unit test checks exactness and minimality for every `net` in
 | `OrderPlaced` | order, basket, buyer, plan?, cash_mint, nonce, cash_amount, start_shares, end_shares, start_ts, end_ts. Emitted by `place_order` and `run_plan` |
 | `OrderFilled` | order, basket, buyer, filler, plan?, **shares** (buyer received), creator_fee_shares, **cash** (escrowed), cash_paid (left escrow, including anything donated), **price** (raw cash per whole share, floored, saturating), filled_at (chain clock), plan_ref_shares_per_cash_e9? (new reference if a plan was updated) |
 | `OrderCancelled` | order, basket, buyer, plan?, by, cash_refunded, expired |
-| `PlanOpened` | plan, basket, owner, cash_mint, cash_account, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, allowance |
+| `PlanOpened` | plan, basket, owner, cash_mint, cash_account, cash_per_run, period_secs, runs, ref_shares_per_cash_e9, band_bps, auction_secs, allowance, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
+| `PlanUpdated` | plan, owner, ref_shares_per_cash_e9, band_bps, auction_secs, min_ref_shares_per_cash_e9, max_ref_shares_per_cash_e9 |
 | `PlanRun` | plan, order, run (1-based), cash, start_shares, end_shares, start_ts, end_ts, ref_shares_per_cash_e9, runs_left, next_run_ts |
-| `PlanClosed` | plan, owner, runs_done, runs_left, revoked |
+| `PlanClosed` | plan, owner, runs_done, runs_left, revoked. Emitted by `close_plan` and `close_legacy_plan` |
+
+Events are emitted with `emit!` (program logs). `emit_cpi!` would make them
+robust to log truncation and visible to CPI callers, but it adds two accounts
+to every instruction, so it is left for a release that can change every
+client at once.
 
 ---
 
@@ -358,7 +492,7 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6015 | AccountCountMismatch | remaining accounts ≠ 3 × components |
 | 6016 | VaultMismatch | vault isn't the basket PDA's canonical ATA |
 | 6017 | TokenAccountMintMismatch | token account for a different mint |
-| 6018 | MalformedMint | mint data can't be parsed |
+| 6018 | MalformedMint | not a real, initialised mint (e.g. a token account), or malformed extension data |
 | 6019 | MalformedTokenAccount | token account data can't be parsed |
 | 6020 | MissingCreatorShareAccount | fee shares owed but no creator account |
 | 6021 | ZeroShares | zero shares, or nothing left after the fee |
@@ -367,24 +501,32 @@ Codes 6000 to 6023 cover baskets, creation and redemption; the codes after them 
 | 6024 | CreatorShareAccountOwner | the creator fee account isn't owned by the basket creator |
 | 6025 | ZeroCash | zero cash, or escrow received nothing |
 | 6026 | BadAuctionShares | not `start_shares >= end_shares > 0` |
-| 6027 | BadAuctionWindow | not `start_ts < end_ts` and `end_ts > now` |
+| 6027 | BadAuctionWindow | not `start_ts < end_ts`, `end_ts > now` and `end_ts <= now + 30 days` |
 | 6028 | OrderExpired | fill after `end_ts` |
 | 6029 | OrderNotExpired | a non-buyer cancels before `end_ts` has passed |
 | 6030 | OrderAccountMismatch | a passed account ≠ the order's basket, buyer, rent payer or cash mint |
 | 6031 | MissingPlanAccount | plan order filled without its plan account |
 | 6032 | PlanMismatch | plan account ≠ `order.plan` |
 | 6033 | PlanAccountMismatch | wrong owner, cash mint or cash account for the plan |
-| 6034 | BadPlanSchedule | period, runs or auction length is zero or negative |
+| 6034 | BadPlanSchedule | period or runs is zero or negative, or the auction length isn't within 1 s to 30 days |
 | 6035 | BadReferenceRate | reference rate 0 |
 | 6036 | BandTooWide | band > 5000 bps |
 | 6037 | PlanAmountTooSmall | a run's `end_shares` would be 0 |
 | 6038 | PlanTooEarly | `now < next_run_ts` |
 | 6039 | PlanExhausted | `runs_left == 0` |
 | 6040 | DelegateInUse | the cash account already delegates a live allowance elsewhere |
+| 6041 | ShareMintProgram | share mint isn't owned by SPL Token or Token-2022 |
+| 6042 | ShareMintExtension | share mint carries an extension other than metadata |
+| 6043 | ComponentMintExtension | component carries an extension that could drain, pause or brick the vault |
+| 6044 | CashMintExtension | cash mint carries an extension that could seize, freeze or block escrowed cash |
+| 6045 | EscrowShort | escrow holds less than `order.cash_amount` at fill time |
+| 6046 | BadReferenceBounds | not `0 < min <= ref <= max` |
+| 6047 | NotLegacyPlan | `close_legacy_plan` on something that isn't a 280-byte first-release plan |
 
 Anchor's own constraint errors also apply: `ConstraintTokenOwner` (a refund to a
 non-buyer account), `ConstraintAssociated` (shares to a non-canonical account),
-and `AccountNotInitialized` (running a closed plan).
+`AccountNotInitialized` (running a closed plan) and `AccountDidNotDeserialize`
+(a current-layout instruction on a first-release plan).
 
 ---
 
@@ -398,12 +540,32 @@ nor plans can withdraw from a vault, so a fill can only ever **add** backing.
 A vault is accepted only at its canonical ATA address, so a deposit can't be
 diverted to an impostor account.
 
-**Share mint** (authority: basket PDA). Shares are minted only against a
+**Share mint** (authority: basket PDA). It carries metadata and nothing else,
+checked at creation and again at every issuance, so no permanent delegate,
+pause switch, hook, close authority or display multiplier can sit over
+holders' shares. Shares are minted only against a
 completed in-kind deposit: in `mint_shares`, and in `fill_order` after
 `deposit_components` succeeds in the same instruction. Fee shares go only to
 an account **owned by the basket creator**, not merely one of the right
 mint, so a depositor cannot pass their own share account and take the fee
 back.
+
+**Cash mint policy** (`place_order`, `open_plan`). Refused:
+
+- `PermanentDelegate`, which could pull the escrow back out after the filler
+  has priced off `order.cash_amount`, so the filler delivers stocks for nothing.
+- `Pausable`.
+- A frozen `DefaultAccountState`.
+- `NonTransferable`.
+- A `TransferHook` with a program set, whose accounts aren't forwarded.
+- Any extension number the program doesn't know.
+
+Transfer fees, metadata, confidential-transfer configs, interest or scaled
+display, and a close authority (a mint can't close while escrow holds
+supply) can't touch an escrow and are allowed. A plain freeze authority (USDC
+has one) is the issuer's power over every holder and is accepted as a stated
+trust assumption. `fill_order` independently requires
+`escrow.amount >= order.cash_amount`.
 
 **Order escrow** (authority: order PDA). It moves only by the order PDA's
 signature, in exactly two ways:
@@ -440,7 +602,11 @@ It is computed from `order.cash_amount` (recorded at placement), **not** the
 live escrow balance. Otherwise someone could donate to an escrow, fill the
 order themselves, and push the rate wherever they wanted. Each fill lands
 inside `[end, start]`, which lies within `ref × (1 ± band)`, so one fill
-moves the reference by at most `band`.
+moves the reference by at most `band`. On top of that, every recorded rate
+is clamped to the owner's `[min, max]`, and no auction ends below `min`, so
+no sequence of fills can walk a plan past the owner's limits. A stale order
+from a previous incarnation of the same plan id is ignored. The owner can
+re-centre at any time with `update_plan`.
 
 **Arithmetic**: all of it is checked or widened (u128/i128). Overflow fails
 the instruction. Values that exist only for the event log (`price`) saturate,
@@ -450,37 +616,54 @@ valid fill fail.
 ### Trust assumptions and known limits
 
 - **Thin fill competition.** The auction assumes competing fillers. A filler
-  with no competition can wait until `end_ts` every run: each plan run then
-  fills at the band's floor, and the reference ratchets down by up to `band`
-  per run. The owner's protection is the band they chose, watching
-  `OrderFilled.price`, cancelling, and `close_plan`. A per-plan floor rate
-  would bound this absolutely, but it isn't in this interface.
-- **Cash mint powers.** A cash mint's freeze authority, permanent delegate or
-  pause can freeze or seize escrowed cash, as with any holder of that token.
-  Cash or component mints with a `TransferHook` aren't supported: the CPI
-  doesn't forward hook accounts, so their transfers fail and revert safely.
-  `TransferFeeConfig` is supported for both cash and components.
+  with no competition can wait until `end_ts` every run, so each run fills at
+  the bottom of its auction. Since this release, that bottom is never below
+  the owner's `min_ref`: the worst case is the owner's own limit price, not a
+  geometric ratchet. The owner can also re-centre with `update_plan`.
+- **Issuer powers that remain.** A cash or component mint's plain freeze
+  authority can still freeze an escrow or a vault, as it can for any holder.
+  Mints with a permanent delegate, a pause switch or a live transfer hook are
+  refused outright. As a consequence, PYUSD (which has a permanent delegate)
+  isn't accepted as cash, and a real xStock that carries a permanent delegate
+  or pause would be refused as a component. On devnet, every mirror in use
+  passes. All five live devnet baskets and the devnet cash mint were audited
+  against the new policy before the upgrade.
+- **Creator-fee rounding.** The fee is floored, so a mint of fewer than
+  `10_000 / fee_bps` raw units (333 at 30 bps) pays no fee. Each such
+  instruction saves less than one raw share unit, about $0.00025 at $250 a
+  share, which is less than the transaction fee it costs. Rounding up would
+  forbid the 1-unit mints the backing property test relies on. Left as is.
+- **SBPF version.** The program is built as SBPFv0. Devnet still accepts v0
+  deployments, but SIMD-0500 (already active on recent local validators)
+  disables them. Once that reaches devnet or mainnet, a further upgrade must
+  be rebuilt for a newer SBPF target.
 - **One delegate per token account.** A cash account can back only one active
   plan at a time. `open_plan` refuses (`DelegateInUse`) rather than silently
   breaking an existing allowance. Use a separate cash account per plan.
 - **Predictable escrow address.** The escrow is `init_if_needed` and measured
   by balance delta, so someone creating the ATA first can't block an order.
-  A third party can create the *order* PDA's nonce slot only through this
-  program, and a collision just means choosing another nonce.
+  User orders and plan orders have separate PDA namespaces, so a cranker can't
+  squat a nonce the owner is about to use. Within a namespace, a collision
+  just means choosing another nonce.
 - **Transaction size.** `fill_order` takes 15 named accounts plus 3 per
   component. Baskets of more than about 5 components need an address lookup
   table to fit in one transaction.
 - **Clock.** Auctions use `Clock::unix_timestamp`, which is the cluster's
   stake-weighted time and can drift by a few seconds. Windows should be minutes.
-- **Compute.** A 3-component fill with a creator fee uses roughly 55k to 65k CU (measured in tests; the variation comes from PDA bump searches). The tests still request 400k.
+- **Compute.** A 3-component fill with a creator fee uses roughly 55k to 70k CU
+  (measured in tests; the variation comes from PDA bump searches, and the
+  extension re-checks add a few thousand). The tests still request 400k.
 
 ---
 
 ## 9. Tests
 
-`anchor test` runs 39 integration tests: the original 11 basket tests plus 28
-desk and plan tests. `cargo test -p sheaf --lib` runs the unit tests for the
-auction line, the gross-up and the plan bounds. The integration suite covers:
+`anchor test` runs 51 integration tests: 11 basket tests, 28 desk and plan
+tests, and 12 hardening tests. `cargo test -p sheaf --lib` runs 8 unit
+tests: the auction line, the gross-up, the plan bounds and floor, the three
+extension policies (built from synthetic TLV images, including malformed
+lengths and unknown types), and the size of the plan layout. The integration
+suite covers:
 
 - Placing an order: escrow and order fields, and the malformed auction cases
   (rising, zero floor, closed window, zero-length window, zero cash).
@@ -509,3 +692,29 @@ auction line, the gross-up and the plan bounds. The integration suite covers:
   order left by a closed plan; and Token-2022 cash with a fee, where closing
   revokes the remaining allowance, a run after close fails, and an open order
   is cancelled.
+- Hardening:
+  - A share mint with each of PermanentDelegate, Pausable,
+    MintCloseAuthority, TransferHook, ScaledUiAmount and NonTransferable is
+    refused. A token account or a system account posing as the share mint is
+    refused. A plain legacy SPL Token share mint is accepted.
+  - Components with PermanentDelegate, Pausable, frozen-by-default,
+    TransferHook or NonTransferable are refused, as is a token account posing
+    as a mint. An initialised-by-default component, a ScaledUiAmount
+    component and a metadata component are accepted together.
+  - Cash with PermanentDelegate, Pausable, frozen-by-default or a live
+    TransferHook is refused at `place_order`, and the first three at `open_plan`.
+  - An order and a plan auction closing more than 30 days out are refused.
+  - `0 < min <= ref <= max` is enforced.
+  - A run's auction ends exactly at the owner's floor (360,000, not the
+    band's 280,000), and a richer fill is clamped to the ceiling.
+  - `update_plan`: a stranger is refused, as are bad bounds and a bad band.
+    The owner's update is stored, and the next run uses it exactly
+    (550,000 to 450,000 over 60 s).
+  - The same nonce is used for a plan order and a user order, side by side.
+  - An order from a closed plan doesn't touch the plan reopened under the
+    same id.
+  - `close_legacy_plan` refuses a current-layout plan.
+
+`EscrowShort` has no integration test: once the cash policy refuses every
+mint that could drain an escrow, no order placed through this program can
+reach it. It protects orders placed before the policy existed.

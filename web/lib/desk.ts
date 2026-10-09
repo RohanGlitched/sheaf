@@ -72,6 +72,11 @@ export function orderAddress(basket: PublicKey, buyer: PublicKey, nonce: bigint)
   return PublicKey.findProgramAddressSync([Buffer.from("order"), basket.toBuffer(), buyer.toBuffer(), le64(nonce)], PROGRAM_ID)[0];
 }
 
+/** A plan's orders live under the plan, so a cranker can never take a nonce the owner is about to use. */
+export function planOrderAddress(plan: PublicKey, nonce: bigint): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("plan_order"), plan.toBuffer(), le64(nonce)], PROGRAM_ID)[0];
+}
+
 export function planAddress(basket: PublicKey, owner: PublicKey, planId: bigint): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("plan"), basket.toBuffer(), owner.toBuffer(), le64(planId)], PROGRAM_ID)[0];
 }
@@ -122,6 +127,11 @@ export type Plan = {
   fills: number;
   lastFillTs: number;
   createdAt: number;
+  /** Bounds the reference rate may never leave. Null on a plan from before they existed. */
+  minRef: bigint | null;
+  maxRef: bigint | null;
+  /** A plan opened before the hardening release: it can only be closed, with close_legacy_plan. */
+  legacy: boolean;
 };
 
 class Reader {
@@ -136,6 +146,9 @@ class Reader {
   optKey() {
     const some = this.d[this.o++] === 1;
     return some ? this.key() : null;
+  }
+  u8() {
+    return this.d[this.o++];
   }
   u16() {
     const x = this.v().getUint16(this.o, true);
@@ -208,6 +221,12 @@ export function decodePlan(address: PublicKey, data: Uint8Array): Plan | null {
     fills: r.u32(),
     lastFillTs: r.i64(),
     createdAt: r.i64(),
+    ...(data.length >= 296
+      ? (() => {
+          r.u8(); // bump
+          return { minRef: r.u64(), maxRef: r.u64(), legacy: false };
+        })()
+      : { minRef: null, maxRef: null, legacy: true }),
   };
 }
 
@@ -381,6 +400,9 @@ export function openPlanIx(p: {
   refSharesPerCashE9: bigint;
   bandBps: number;
   auctionSecs: number;
+  /** The reference rate may never drift below or above these. */
+  minRef: bigint;
+  maxRef: bigint;
 }) {
   const cashProgram = p.cashProgram ?? TOKEN_2022_PROGRAM_ID;
   const plan = planAddress(p.basket, p.owner, p.planId);
@@ -405,6 +427,8 @@ export function openPlanIx(p: {
         ref_shares_per_cash_e9: p.refSharesPerCashE9,
         band_bps: p.bandBps,
         auction_secs: p.auctionSecs,
+        min_ref_shares_per_cash_e9: p.minRef,
+        max_ref_shares_per_cash_e9: p.maxRef,
       },
     ),
   };
@@ -416,7 +440,7 @@ export function runPlanIx(p: { cranker: PublicKey; plan: Plan; nonce: bigint }) 
   const owner = new PublicKey(p.plan.owner);
   const cashMint = new PublicKey(p.plan.cashMint);
   const cashProgram = new PublicKey(p.plan.cashTokenProgram);
-  const order = orderAddress(basket, owner, p.nonce);
+  const order = planOrderAddress(plan, p.nonce);
   return {
     order,
     ix: instruction(
@@ -440,6 +464,34 @@ export function runPlanIx(p: { cranker: PublicKey; plan: Plan; nonce: bigint }) 
 export function closePlanIx(p: { owner: PublicKey; plan: Plan }) {
   return instruction(
     "close_plan",
+    {
+      owner: p.owner,
+      plan: new PublicKey(p.plan.address),
+      owner_cash_account: new PublicKey(p.plan.cashAccount),
+      cash_token_program: new PublicKey(p.plan.cashTokenProgram),
+    },
+    {},
+  );
+}
+
+export function updatePlanIx(p: { owner: PublicKey; plan: Plan; ref: bigint; bandBps: number; auctionSecs: number; minRef: bigint; maxRef: bigint }) {
+  return instruction(
+    "update_plan",
+    { owner: p.owner, plan: new PublicKey(p.plan.address) },
+    {
+      ref_shares_per_cash_e9: p.ref,
+      band_bps: p.bandBps,
+      auction_secs: p.auctionSecs,
+      min_ref_shares_per_cash_e9: p.minRef,
+      max_ref_shares_per_cash_e9: p.maxRef,
+    },
+  );
+}
+
+/** Closes a plan opened before the hardening release and revokes its allowance. */
+export function closeLegacyPlanIx(p: { owner: PublicKey; plan: Plan }) {
+  return instruction(
+    "close_legacy_plan",
     {
       owner: p.owner,
       plan: new PublicKey(p.plan.address),

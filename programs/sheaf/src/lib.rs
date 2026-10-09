@@ -72,6 +72,8 @@ pub const BPS: u64 = 10_000;
 pub const RATE_SCALE: u64 = 1_000_000_000;
 /// A plan's auction band is capped at ±50% of its reference rate.
 pub const MAX_BAND_BPS: u16 = 5_000;
+/// No order (or plan auction) may close more than 30 days out.
+pub const MAX_ORDER_SECS: i64 = 30 * 24 * 60 * 60;
 
 #[program]
 pub mod sheaf {
@@ -106,16 +108,26 @@ pub mod sheaf {
         let basket_key = ctx.accounts.basket.key();
         let token_program_key = ctx.accounts.component_token_program.key();
 
-        // The share mint must be a blank, basket-controlled, 6-decimal mint.
+        // The share mint must be a blank, basket-controlled, 6-decimal mint of
+        // a real token program, carrying nothing but metadata. Any other
+        // extension (a permanent delegate, a pause switch, a transfer hook, a
+        // close authority, a display multiplier...) would leave the creator a
+        // lever over holders' shares, so it is refused outright.
         let share_mint_info = ctx.accounts.share_mint.to_account_info();
-        let mint_state = MintFields::parse(&share_mint_info.try_borrow_data()?)?;
+        require!(
+            is_token_program(share_mint_info.owner),
+            SheafError::ShareMintProgram
+        );
+        let mint_state = load_mint(&share_mint_info)?;
+        check_share_mint_extensions(&share_mint_info.try_borrow_data()?)?;
         require!(
             mint_state.decimals == SHARE_DECIMALS,
             SheafError::ShareMintDecimals
         );
         require!(mint_state.supply == 0, SheafError::ShareMintNotEmpty);
+        let mint_authority: Option<Pubkey> = mint_state.mint_authority.into();
         require!(
-            mint_state.mint_authority == Some(basket_key),
+            mint_authority == Some(basket_key),
             SheafError::ShareMintAuthority
         );
         require!(
@@ -146,10 +158,14 @@ pub mod sheaf {
             let mint_info = &ctx.remaining_accounts[i];
             require!(mint_info.key() == arg.mint, SheafError::ComponentMintMismatch);
             require!(
-                mint_info.owner == &token_program_key,
+                mint_info.owner == &token_program_key && is_token_program(&token_program_key),
                 SheafError::WrongTokenProgram
             );
-            let decimals = MintFields::parse(&mint_info.try_borrow_data()?)?.decimals;
+            // A real, initialised mint (not, say, a token account that happens
+            // to be 82+ bytes), with no extension that lets its issuer drain,
+            // pause or brick the vault.
+            let decimals = load_mint(mint_info)?.decimals;
+            check_component_extensions(&mint_info.try_borrow_data()?)?;
 
             stored[i] = Component {
                 mint: arg.mint,
@@ -352,6 +368,9 @@ pub mod sheaf {
         require!(cash_amount > 0, SheafError::ZeroCash);
         let now = Clock::get()?.unix_timestamp;
         validate_auction(start_shares, end_shares, start_ts, end_ts, now)?;
+        // No cash a third party (or the buyer) could pull back out of escrow,
+        // freeze in place, or make untransferable before a filler is paid.
+        check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
 
         let escrowed = fund_escrow(
             ctx.accounts.buyer_cash_account.to_account_info(),
@@ -399,6 +418,14 @@ pub mod sheaf {
         let order_key = ctx.accounts.order.key();
         let order: Order = (**ctx.accounts.order).clone();
         require!(now <= order.end_ts, SheafError::OrderExpired);
+        // The filler is about to deliver stocks against `cash_amount`; make
+        // sure that cash is really still there (a seize power on the cash mint,
+        // on an order placed before mints like that were refused, could have
+        // emptied it).
+        require!(
+            ctx.accounts.escrow.amount >= order.cash_amount,
+            SheafError::EscrowShort
+        );
 
         let shares_out = required_shares(
             order.start_shares,
@@ -440,6 +467,7 @@ pub mod sheaf {
         // Only then does the cash leave escrow.
         let paid = drain_and_close_escrow(
             &order,
+            order_key,
             ctx.accounts.order.to_account_info(),
             &ctx.accounts.escrow,
             ctx.accounts.cash_mint.to_account_info(),
@@ -460,20 +488,32 @@ pub mod sheaf {
                 .ok_or(SheafError::MissingPlanAccount)?
                 .to_account_info();
             require!(plan_info.key() == plan_key, SheafError::PlanMismatch);
-            // A plan that has since been closed is simply not updated.
-            if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
-                let mut plan = {
-                    let data = plan_info.try_borrow_data()?;
-                    Plan::try_deserialize(&mut &data[..])?
-                };
+            // A plan that has since been closed, or that still has the
+            // pre-hardening layout, is simply not updated: the buyer's fill
+            // must never depend on it.
+            let decoded = if plan_info.owner == &crate::ID && plan_info.lamports() > 0 {
+                let data = plan_info.try_borrow_data()?;
+                Plan::try_deserialize(&mut &data[..]).ok()
+            } else {
+                None
+            };
+            if let Some(mut plan) = decoded {
+                // Same plan, and the same incarnation of it: an order left
+                // over from before the plan was closed and reopened under the
+                // same id must not steer the new plan.
                 if plan.basket == order.basket
                     && plan.owner == order.buyer
                     && plan.cash_mint == order.cash_mint
+                    && order.created_at >= plan.created_at
                 {
                     // A rate that does not fit (or rounds to zero) is not
-                    // recorded; it must never block the buyer's fill.
+                    // recorded, and a recorded rate stays inside the owner's
+                    // bounds, so no run of fills can walk it past them.
                     let rate = shares_per_cash_e9(shares_out, order.cash_amount).unwrap_or(0);
                     if rate > 0 {
+                        let rate = rate
+                            .max(plan.min_ref_shares_per_cash_e9)
+                            .min(plan.max_ref_shares_per_cash_e9);
                         plan.ref_shares_per_cash_e9 = rate;
                         plan.fills = plan.fills.saturating_add(1);
                         plan.last_fill_ts = now;
@@ -527,6 +567,7 @@ pub mod sheaf {
 
         let refunded = drain_and_close_escrow(
             &order,
+            ctx.accounts.order.key(),
             ctx.accounts.order.to_account_info(),
             &ctx.accounts.escrow,
             ctx.accounts.cash_mint.to_account_info(),
@@ -552,6 +593,12 @@ pub mod sheaf {
 
     /// Open a recurring buy and delegate `cash_per_run * runs` of the owner's
     /// cash account to the plan PDA, in one instruction.
+    ///
+    /// `min_ref_shares_per_cash_e9` is the worst rate the owner will ever
+    /// accept: no run's auction ends below it, and the reference rate can
+    /// never be walked under it. `max_ref_shares_per_cash_e9` caps how far up
+    /// fills can push the reference. `min <= ref <= max`.
+    #[allow(clippy::too_many_arguments)]
     pub fn open_plan(
         ctx: Context<OpenPlan>,
         plan_id: u64,
@@ -561,17 +608,20 @@ pub mod sheaf {
         ref_shares_per_cash_e9: u64,
         band_bps: u16,
         auction_secs: i64,
+        min_ref_shares_per_cash_e9: u64,
+        max_ref_shares_per_cash_e9: u64,
     ) -> Result<()> {
         require!(cash_per_run > 0, SheafError::ZeroCash);
-        require!(
-            period_secs > 0 && runs > 0 && auction_secs > 0,
-            SheafError::BadPlanSchedule
-        );
-        require!(ref_shares_per_cash_e9 > 0, SheafError::BadReferenceRate);
-        require!(band_bps <= MAX_BAND_BPS, SheafError::BandTooWide);
-        // The very first run must already be able to describe an auction.
-        let (_, end) = plan_bounds(cash_per_run, ref_shares_per_cash_e9, band_bps)?;
-        require!(end > 0, SheafError::PlanAmountTooSmall);
+        require!(period_secs > 0 && runs > 0, SheafError::BadPlanSchedule);
+        validate_plan_terms(
+            cash_per_run,
+            auction_secs,
+            ref_shares_per_cash_e9,
+            band_bps,
+            min_ref_shares_per_cash_e9,
+            max_ref_shares_per_cash_e9,
+        )?;
+        check_cash_mint_extensions(&ctx.accounts.cash_mint.to_account_info().try_borrow_data()?)?;
         let allowance = cash_per_run
             .checked_mul(runs as u64)
             .ok_or(SheafError::MathOverflow)?;
@@ -624,6 +674,8 @@ pub mod sheaf {
         plan.last_fill_ts = 0;
         plan.created_at = now;
         plan.bump = ctx.bumps.plan;
+        plan.min_ref_shares_per_cash_e9 = min_ref_shares_per_cash_e9;
+        plan.max_ref_shares_per_cash_e9 = max_ref_shares_per_cash_e9;
 
         emit!(PlanOpened {
             plan: plan_key,
@@ -638,6 +690,48 @@ pub mod sheaf {
             band_bps,
             auction_secs,
             allowance,
+            min_ref_shares_per_cash_e9,
+            max_ref_shares_per_cash_e9,
+        });
+        Ok(())
+    }
+
+    /// Owner-only: re-centre a plan. Resets the reference rate, the band, the
+    /// auction length and the owner's rate bounds, under the same rules as
+    /// `open_plan`. This is how an owner un-sticks a plan the market has moved
+    /// away from, or tightens it after seeing a fill they did not like. The
+    /// schedule and the remaining allowance are untouched.
+    pub fn update_plan(
+        ctx: Context<UpdatePlan>,
+        ref_shares_per_cash_e9: u64,
+        band_bps: u16,
+        auction_secs: i64,
+        min_ref_shares_per_cash_e9: u64,
+        max_ref_shares_per_cash_e9: u64,
+    ) -> Result<()> {
+        let plan = &mut ctx.accounts.plan;
+        validate_plan_terms(
+            plan.cash_per_run,
+            auction_secs,
+            ref_shares_per_cash_e9,
+            band_bps,
+            min_ref_shares_per_cash_e9,
+            max_ref_shares_per_cash_e9,
+        )?;
+        plan.ref_shares_per_cash_e9 = ref_shares_per_cash_e9;
+        plan.band_bps = band_bps;
+        plan.auction_secs = auction_secs;
+        plan.min_ref_shares_per_cash_e9 = min_ref_shares_per_cash_e9;
+        plan.max_ref_shares_per_cash_e9 = max_ref_shares_per_cash_e9;
+
+        emit!(PlanUpdated {
+            plan: plan.key(),
+            owner: plan.owner,
+            ref_shares_per_cash_e9,
+            band_bps,
+            auction_secs,
+            min_ref_shares_per_cash_e9,
+            max_ref_shares_per_cash_e9,
         });
         Ok(())
     }
@@ -673,8 +767,12 @@ pub mod sheaf {
         )?;
 
         let plan = &ctx.accounts.plan;
-        let (start_shares, end_shares) =
-            plan_bounds(escrowed, plan.ref_shares_per_cash_e9, plan.band_bps)?;
+        let (start_shares, end_shares) = plan_auction(
+            escrowed,
+            plan.ref_shares_per_cash_e9,
+            plan.band_bps,
+            plan.min_ref_shares_per_cash_e9,
+        )?;
         require!(end_shares > 0, SheafError::PlanAmountTooSmall);
         let end_ts = now
             .checked_add(plan.auction_secs)
@@ -737,34 +835,76 @@ pub mod sheaf {
     pub fn close_plan(ctx: Context<ClosePlan>) -> Result<()> {
         let plan = &ctx.accounts.plan;
         let plan_key = plan.key();
-        let cash_info = ctx.accounts.owner_cash_account.to_account_info();
-
-        let revocable = cash_info.owner == &plan.cash_token_program && {
-            let data = cash_info.try_borrow_data()?;
-            match StateWithExtensions::<SplAccount>::unpack(&data) {
-                Ok(state) => {
-                    let delegate: Option<Pubkey> = state.base.delegate.into();
-                    delegate == Some(plan_key) && state.base.owner == plan.owner
-                }
-                Err(_) => false,
-            }
-        };
-        if revocable {
-            token_interface::revoke(CpiContext::new(
-                ctx.accounts.cash_token_program.to_account_info(),
-                Revoke {
-                    source: cash_info,
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ))?;
-        }
+        let revoked = revoke_if_delegate(
+            ctx.accounts.owner_cash_account.to_account_info(),
+            ctx.accounts.cash_token_program.to_account_info(),
+            &plan_key,
+            ctx.accounts.owner.to_account_info(),
+        )?;
 
         emit!(PlanClosed {
             plan: plan_key,
             owner: plan.owner,
             runs_done: plan.runs_total - plan.runs_left,
             runs_left: plan.runs_left,
-            revoked: revocable,
+            revoked,
+        });
+        Ok(())
+    }
+
+    /// Close a plan written by the pre-hardening release, whose account is
+    /// 16 bytes shorter than today's `Plan` and so no longer decodes. Owner
+    /// only; revokes the allowance like `close_plan` and returns the rent.
+    pub fn close_legacy_plan(ctx: Context<CloseLegacyPlan>) -> Result<()> {
+        let plan_info = ctx.accounts.plan.to_account_info();
+        let owner_key = ctx.accounts.owner.key();
+        let (runs_total, runs_left) = {
+            let data = plan_info.try_borrow_data()?;
+            require!(
+                plan_info.owner == &crate::ID
+                    && data.len() == LEGACY_PLAN_LEN
+                    && data[..8] == *Plan::DISCRIMINATOR,
+                SheafError::NotLegacyPlan
+            );
+            let key_at = |o: usize| Pubkey::new_from_array(data[o..o + 32].try_into().unwrap());
+            require!(key_at(8) == owner_key, SheafError::PlanAccountMismatch);
+            require!(
+                key_at(104) == ctx.accounts.cash_token_program.key(),
+                SheafError::WrongTokenProgram
+            );
+            require!(
+                key_at(136) == ctx.accounts.owner_cash_account.key(),
+                SheafError::PlanAccountMismatch
+            );
+            // runs_total and runs_left sit after plan_id, cash_per_run and period.
+            let u32_at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+            (u32_at(192), u32_at(196))
+        };
+
+        let revoked = revoke_if_delegate(
+            ctx.accounts.owner_cash_account.to_account_info(),
+            ctx.accounts.cash_token_program.to_account_info(),
+            &plan_info.key(),
+            ctx.accounts.owner.to_account_info(),
+        )?;
+
+        // Hand the rent back and give the account to the system program.
+        let owner_info = ctx.accounts.owner.to_account_info();
+        let lamports = plan_info.lamports();
+        **owner_info.try_borrow_mut_lamports()? = owner_info
+            .lamports()
+            .checked_add(lamports)
+            .ok_or(SheafError::MathOverflow)?;
+        **plan_info.try_borrow_mut_lamports()? = 0;
+        plan_info.assign(&anchor_lang::solana_program::system_program::ID);
+        plan_info.resize(0)?;
+
+        emit!(PlanClosed {
+            plan: plan_info.key(),
+            owner: owner_key,
+            runs_done: runs_total.saturating_sub(runs_left),
+            runs_left,
+            revoked,
         });
         Ok(())
     }
@@ -1041,7 +1181,7 @@ pub struct RunPlan<'info> {
         init,
         payer = cranker,
         space = 8 + Order::INIT_SPACE,
-        seeds = [b"order", plan.basket.as_ref(), plan.owner.as_ref(), &nonce.to_le_bytes()],
+        seeds = [b"plan_order", plan.key().as_ref(), &nonce.to_le_bytes()],
         bump,
     )]
     pub order: Box<Account<'info, Order>>,
@@ -1080,6 +1220,32 @@ pub struct ClosePlan<'info> {
     pub owner_cash_account: UncheckedAccount<'info>,
 
     #[account(address = plan.cash_token_program @ SheafError::WrongTokenProgram)]
+    pub cash_token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct UpdatePlan<'info> {
+    pub owner: Signer<'info>,
+
+    #[account(mut, has_one = owner @ SheafError::PlanAccountMismatch)]
+    pub plan: Box<Account<'info, Plan>>,
+}
+
+#[derive(Accounts)]
+pub struct CloseLegacyPlan<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(mut)]
+    /// CHECK: a pre-hardening plan; owner, length, discriminator and every
+    /// field used are checked byte by byte in the handler.
+    pub plan: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    /// CHECK: must equal the legacy plan's recorded cash account (checked in
+    /// the handler); decoded leniently, as it may have been closed.
+    pub owner_cash_account: UncheckedAccount<'info>,
+
     pub cash_token_program: Interface<'info, TokenInterface>,
 }
 
@@ -1131,7 +1297,9 @@ impl Basket {
         + 64; // headroom
 }
 
-/// A cash order on the desk. PDA: `["order", basket, buyer, nonce_le]`.
+/// A cash order on the desk. PDA: `["order", basket, buyer, nonce_le]` for
+/// `place_order`, `["plan_order", plan, nonce_le]` for `run_plan` (orders a
+/// plan placed before the hardening release used the first form).
 /// Its escrow is the order PDA's associated token account for `cash_mint`.
 #[account]
 #[derive(InitSpace)]
@@ -1184,7 +1352,15 @@ pub struct Plan {
     pub last_fill_ts: i64,
     pub created_at: i64,
     pub bump: u8,
+    /// The worst rate the owner accepts: no run's auction ends below
+    /// `cash × min / 10^9` shares, and fills never move the reference under it.
+    pub min_ref_shares_per_cash_e9: u64,
+    /// Fills never move the reference above this.
+    pub max_ref_shares_per_cash_e9: u64,
 }
+
+/// Size of a `Plan` account written before `min_ref`/`max_ref` existed.
+pub const LEGACY_PLAN_LEN: usize = 280;
 
 // ------------------------------------------------------------------ events
 
@@ -1277,6 +1453,19 @@ pub struct PlanOpened {
     pub band_bps: u16,
     pub auction_secs: i64,
     pub allowance: u64,
+    pub min_ref_shares_per_cash_e9: u64,
+    pub max_ref_shares_per_cash_e9: u64,
+}
+
+#[event]
+pub struct PlanUpdated {
+    pub plan: Pubkey,
+    pub owner: Pubkey,
+    pub ref_shares_per_cash_e9: u64,
+    pub band_bps: u16,
+    pub auction_secs: i64,
+    pub min_ref_shares_per_cash_e9: u64,
+    pub max_ref_shares_per_cash_e9: u64,
 }
 
 #[event]
@@ -1306,43 +1495,165 @@ pub struct PlanClosed {
 
 // ------------------------------------------------------------------ helpers
 
-/// The handful of base-layout mint fields we care about. The layout is byte
-/// identical for SPL Token and Token-2022; Token-2022 simply appends
-/// extensions after it, which we deliberately ignore here.
-struct MintFields {
-    mint_authority: Option<Pubkey>,
-    supply: u64,
-    decimals: u8,
-    freeze_authority: Option<Pubkey>,
+fn is_token_program(key: &Pubkey) -> bool {
+    key == &spl_token_2022::ID || key == &anchor_spl::token::ID
 }
 
-impl MintFields {
-    fn parse(data: &[u8]) -> Result<Self> {
-        require!(data.len() >= 82, SheafError::MalformedMint);
-        let read_key = |o: usize| -> Pubkey {
-            let mut k = [0u8; 32];
-            k.copy_from_slice(&data[o..o + 32]);
-            Pubkey::new_from_array(k)
-        };
-        let mint_authority = if u32::from_le_bytes(data[0..4].try_into().unwrap()) == 1 {
-            Some(read_key(4))
-        } else {
-            None
-        };
-        let supply = u64::from_le_bytes(data[36..44].try_into().unwrap());
-        let decimals = data[44];
-        let freeze_authority = if u32::from_le_bytes(data[46..50].try_into().unwrap()) == 1 {
-            Some(read_key(50))
-        } else {
-            None
-        };
-        Ok(Self {
-            mint_authority,
-            supply,
-            decimals,
-            freeze_authority,
-        })
+/// Decode a real, initialised mint (SPL Token or Token-2022). Rejects
+/// anything else that merely happens to be long enough, such as a token
+/// account, an uninitialised buffer or a multisig.
+fn load_mint(info: &AccountInfo) -> Result<SplMint> {
+    let data = info.try_borrow_data()?;
+    let state =
+        StateWithExtensions::<SplMint>::unpack(&data).map_err(|_| SheafError::MalformedMint)?;
+    Ok(state.base)
+}
+
+/// Token-2022 extension type ids, as numbered on chain. The `spl-token-2022`
+/// crate this program builds against predates the last few (ScaledUiAmount,
+/// Pausable), so the TLV area is walked by number rather than through it,
+/// and anything unrecognised is refused rather than ignored.
+mod ext {
+    pub const TRANSFER_FEE_CONFIG: u16 = 1;
+    pub const DEFAULT_ACCOUNT_STATE: u16 = 6;
+    pub const NON_TRANSFERABLE: u16 = 9;
+    pub const PERMANENT_DELEGATE: u16 = 12;
+    pub const TRANSFER_HOOK: u16 = 14;
+    pub const METADATA_POINTER: u16 = 18;
+    pub const TOKEN_METADATA: u16 = 19;
+    pub const GROUP_POINTER: u16 = 20;
+    pub const TOKEN_GROUP: u16 = 21;
+    pub const GROUP_MEMBER_POINTER: u16 = 22;
+    pub const TOKEN_GROUP_MEMBER: u16 = 23;
+    pub const SCALED_UI_AMOUNT: u16 = 25;
+    pub const PAUSABLE: u16 = 26;
+    /// `AccountState::Initialized` / `Frozen`, the value of DefaultAccountState.
+    pub const STATE_INITIALIZED: u8 = 1;
+    pub const STATE_FROZEN: u8 = 2;
+}
+
+/// Call `f(type, value)` for every extension on a mint. A base-only mint
+/// (82 bytes, which every legacy SPL Token mint is) has none.
+fn for_each_mint_extension(data: &[u8], mut f: impl FnMut(u16, &[u8]) -> Result<()>) -> Result<()> {
+    // Token-2022 pads a mint to the token-account length, then stores the
+    // account type (1 = Mint) and the TLV entries.
+    const BASE_LEN: usize = 82;
+    const ACCOUNT_TYPE_AT: usize = 165;
+    if data.len() == BASE_LEN {
+        return Ok(());
     }
+    require!(
+        data.len() > ACCOUNT_TYPE_AT && data[ACCOUNT_TYPE_AT] == 1,
+        SheafError::MalformedMint
+    );
+    let mut at = ACCOUNT_TYPE_AT + 1;
+    while at + 4 <= data.len() {
+        let ty = u16::from_le_bytes([data[at], data[at + 1]]);
+        if ty == 0 {
+            break; // Uninitialized: the rest is padding.
+        }
+        let len = u16::from_le_bytes([data[at + 2], data[at + 3]]) as usize;
+        let start = at + 4;
+        let end = start.checked_add(len).ok_or(SheafError::MalformedMint)?;
+        require!(end <= data.len(), SheafError::MalformedMint);
+        f(ty, &data[start..end])?;
+        at = end;
+    }
+    Ok(())
+}
+
+/// A share mint may carry metadata and nothing else. Every other extension
+/// gives somebody a lever over holders' shares: a permanent delegate moves or
+/// burns them, a pause switch blocks redemption, a transfer hook can block
+/// transfers, a close authority can re-create the mint, and interest or
+/// scaled-amount configs let an authority change what wallets display.
+fn check_share_mint_extensions(data: &[u8]) -> Result<()> {
+    for_each_mint_extension(data, |ty, _| {
+        require!(
+            matches!(ty, ext::METADATA_POINTER | ext::TOKEN_METADATA),
+            SheafError::ShareMintExtension
+        );
+        Ok(())
+    })
+}
+
+/// A component may carry what xStocks and PreStocks use (metadata, group
+/// membership, the ScaledUiAmount dividend multiplier, a transfer fee, and an
+/// account default of "initialised"). Refused, along with anything unknown:
+/// a permanent delegate (drains the vault), a pause switch or a frozen
+/// default state (blocks every redemption), a transfer hook (bricks the
+/// basket, since its accounts are not forwarded), non-transferability, and
+/// confidential-transfer configs.
+fn check_component_extensions(data: &[u8]) -> Result<()> {
+    for_each_mint_extension(data, |ty, value| {
+        let ok = match ty {
+            ext::TRANSFER_FEE_CONFIG
+            | ext::METADATA_POINTER
+            | ext::TOKEN_METADATA
+            | ext::GROUP_POINTER
+            | ext::TOKEN_GROUP
+            | ext::GROUP_MEMBER_POINTER
+            | ext::TOKEN_GROUP_MEMBER
+            | ext::SCALED_UI_AMOUNT => true,
+            ext::DEFAULT_ACCOUNT_STATE => value.first() == Some(&ext::STATE_INITIALIZED),
+            _ => false,
+        };
+        require!(ok, SheafError::ComponentMintExtension);
+        Ok(())
+    })
+}
+
+/// A cash mint must not let anyone take escrowed cash back out, freeze it in
+/// place, or make it untransferable before the filler is paid. Refused: a
+/// permanent delegate, a pause switch, a frozen default account state,
+/// non-transferability, a transfer hook with a program set (its accounts are
+/// not forwarded, so it would only brick the order), and any extension this
+/// program does not recognise. Everything else (transfer fees, metadata,
+/// confidential-transfer configs, a close authority, interest or scaled
+/// display) cannot touch an escrow and is allowed.
+fn check_cash_mint_extensions(data: &[u8]) -> Result<()> {
+    for_each_mint_extension(data, |ty, value| {
+        let ok = match ty {
+            ext::PERMANENT_DELEGATE | ext::PAUSABLE | ext::NON_TRANSFERABLE => false,
+            ext::DEFAULT_ACCOUNT_STATE => value.first() != Some(&ext::STATE_FROZEN),
+            // TransferHook = { authority, program_id }; a zero program id means none.
+            ext::TRANSFER_HOOK => value.len() >= 64 && value[32..64].iter().all(|b| *b == 0),
+            t => t < ext::PAUSABLE,
+        };
+        require!(ok, SheafError::CashMintExtension);
+        Ok(())
+    })
+}
+
+/// Revoke `plan`'s delegation on the owner's cash account, if it is still
+/// the delegate there and the account still belongs to the signing owner.
+/// Never fails just because the account has since changed or been closed.
+fn revoke_if_delegate<'info>(
+    cash_info: AccountInfo<'info>,
+    cash_token_program: AccountInfo<'info>,
+    plan: &Pubkey,
+    owner: AccountInfo<'info>,
+) -> Result<bool> {
+    let revocable = cash_info.owner == cash_token_program.key && {
+        let data = cash_info.try_borrow_data()?;
+        match StateWithExtensions::<SplAccount>::unpack(&data) {
+            Ok(state) => {
+                let delegate: Option<Pubkey> = state.base.delegate.into();
+                delegate == Some(*plan) && state.base.owner == *owner.key
+            }
+            Err(_) => false,
+        }
+    };
+    if revocable {
+        token_interface::revoke(CpiContext::new(
+            cash_token_program,
+            Revoke {
+                source: cash_info,
+                authority: owner,
+            },
+        ))?;
+    }
+    Ok(revocable)
 }
 
 /// Take the recipe for `shares` in kind from `depositor` into the basket's
@@ -1383,6 +1694,9 @@ fn deposit_components<'info>(
             mint_info.key() == component.mint,
             SheafError::ComponentMintMismatch
         );
+        // Re-checked on every deposit, so a basket created before component
+        // extensions were vetted cannot take in more value it could lose.
+        check_component_extensions(&mint_info.try_borrow_data()?)?;
         // Deposits round up, so rounding dust accrues to the vault.
         let target = mul_div_ceil(component.units_per_share, shares, ONE_SHARE)?;
         require!(target > 0, SheafError::DustMint);
@@ -1423,6 +1737,9 @@ fn issue_shares<'info>(
     net_shares: u64,
     fee_shares: u64,
 ) -> Result<()> {
+    // Re-checked at every issuance, so a basket whose share mint predates the
+    // extension check cannot sell anyone new shares a creator could seize.
+    check_share_mint_extensions(&share_mint.try_borrow_data()?)?;
     let signer_seeds: &[&[&[u8]]] = &[&[
         b"basket",
         basket.creator.as_ref(),
@@ -1505,6 +1822,7 @@ fn fund_escrow<'info>(
 #[allow(clippy::too_many_arguments)]
 fn drain_and_close_escrow<'info>(
     order: &Order,
+    order_key: Pubkey,
     order_info: AccountInfo<'info>,
     escrow: &InterfaceAccount<'info, TokenAccount>,
     cash_mint: AccountInfo<'info>,
@@ -1515,13 +1833,23 @@ fn drain_and_close_escrow<'info>(
 ) -> Result<u64> {
     let nonce_bytes = order.nonce.to_le_bytes();
     let bump = [order.bump];
-    let seeds: &[&[u8]] = &[
+    let plan_key = order.plan.unwrap_or_default();
+    // Plan orders live under their plan (`["plan_order", plan, nonce]`); user
+    // orders, and plan orders placed before that namespace existed, under
+    // `["order", basket, buyer, nonce]`. Sign with whichever derives this order.
+    let plan_seeds: &[&[u8]] = &[b"plan_order", plan_key.as_ref(), &nonce_bytes, &bump];
+    let user_seeds: &[&[u8]] = &[
         b"order",
         order.basket.as_ref(),
         order.buyer.as_ref(),
         &nonce_bytes,
         &bump,
     ];
+    let is_plan_namespace = order.plan.is_some()
+        && Pubkey::create_program_address(plan_seeds, &crate::ID)
+            .map(|k| k == order_key)
+            .unwrap_or(false);
+    let seeds = if is_plan_namespace { plan_seeds } else { user_seeds };
     let signer_seeds: &[&[&[u8]]] = &[seeds];
     let escrow_info = escrow.to_account_info();
 
@@ -1595,7 +1923,8 @@ fn emit_order_placed(order: &Order, order_key: Pubkey) {
 }
 
 /// An auction must decay (or hold) towards a positive floor, over a real
-/// window that has not already closed.
+/// window that has not already closed and closes within `MAX_ORDER_SECS`,
+/// so nobody's rent or cash can be parked behind an order for a century.
 fn validate_auction(
     start_shares: u64,
     end_shares: u64,
@@ -1607,8 +1936,45 @@ fn validate_auction(
         end_shares > 0 && start_shares >= end_shares,
         SheafError::BadAuctionShares
     );
-    require!(start_ts < end_ts && end_ts > now, SheafError::BadAuctionWindow);
+    require!(
+        start_ts < end_ts && end_ts > now && (end_ts as i128 - now as i128) <= MAX_ORDER_SECS as i128,
+        SheafError::BadAuctionWindow
+    );
     Ok(())
+}
+
+/// The owner-settable terms of a plan, as `open_plan` and `update_plan` accept them.
+fn validate_plan_terms(
+    cash_per_run: u64,
+    auction_secs: i64,
+    ref_e9: u64,
+    band_bps: u16,
+    min_ref_e9: u64,
+    max_ref_e9: u64,
+) -> Result<()> {
+    require!(
+        auction_secs > 0 && auction_secs <= MAX_ORDER_SECS,
+        SheafError::BadPlanSchedule
+    );
+    require!(ref_e9 > 0, SheafError::BadReferenceRate);
+    require!(
+        min_ref_e9 > 0 && min_ref_e9 <= ref_e9 && ref_e9 <= max_ref_e9,
+        SheafError::BadReferenceBounds
+    );
+    require!(band_bps <= MAX_BAND_BPS, SheafError::BandTooWide);
+    // A run at these terms must already be able to describe an auction.
+    let (_, end) = plan_auction(cash_per_run, ref_e9, band_bps, min_ref_e9)?;
+    require!(end > 0, SheafError::PlanAmountTooSmall);
+    Ok(())
+}
+
+/// A plan run's auction: `plan_bounds`, with the end raised to the owner's
+/// floor `cash × min_ref / 10^9` (and the start to at least the end).
+pub fn plan_auction(cash: u64, ref_e9: u64, band_bps: u16, min_ref_e9: u64) -> Result<(u64, u64)> {
+    let (start, end) = plan_bounds(cash, ref_e9, band_bps)?;
+    let floor = mul_div_floor(cash, min_ref_e9, RATE_SCALE)?;
+    let end = end.max(floor);
+    Ok((start.max(end), end))
 }
 
 /// Shares the buyer must receive at `now`: `start_shares` up to `start_ts`,
@@ -1867,6 +2233,20 @@ pub enum SheafError {
     PlanExhausted,
     #[msg("Cash account already delegates a live allowance to someone else")]
     DelegateInUse,
+    #[msg("Share mint must be owned by the SPL Token or Token-2022 program")]
+    ShareMintProgram,
+    #[msg("Share mint may carry metadata and no other extension")]
+    ShareMintExtension,
+    #[msg("Component mint carries an extension that could drain, pause or brick the vault")]
+    ComponentMintExtension,
+    #[msg("Cash mint carries an extension that could seize, freeze or block escrowed cash")]
+    CashMintExtension,
+    #[msg("Escrow holds less than the order's cash")]
+    EscrowShort,
+    #[msg("Plan rate bounds must satisfy 0 < min <= reference <= max")]
+    BadReferenceBounds,
+    #[msg("Not a pre-hardening plan account")]
+    NotLegacyPlan,
 }
 
 #[cfg(test)]
@@ -1927,5 +2307,84 @@ mod tests {
         assert_eq!(s, e);
         assert_eq!(shares_per_cash_e9(400_000, 100_000_000).unwrap(), 4_000_000);
         assert!(plan_bounds(u64::MAX, u64::MAX, 300).is_err());
+    }
+
+    #[test]
+    fn plan_floor_bounds_the_auction() {
+        // ±30% around 0.004 would end at 280,000; a 0.0036 floor lifts it.
+        assert_eq!(
+            plan_auction(100_000_000, 4_000_000, 3_000, 3_600_000).unwrap(),
+            (520_000, 360_000)
+        );
+        // A floor below the band changes nothing.
+        assert_eq!(
+            plan_auction(100_000_000, 4_000_000, 300, 1).unwrap(),
+            (412_000, 388_000)
+        );
+        // Every ratchet step lands on or above the floor, so n runs of
+        // end-of-auction fills cannot walk the rate under it.
+        let (mut r, floor) = (4_000_000u64, 3_000_000u64);
+        for _ in 0..50 {
+            let (_, e) = plan_auction(100_000_000, r, 5_000, floor).unwrap();
+            r = shares_per_cash_e9(e, 100_000_000).unwrap().max(floor);
+            assert!(r >= floor);
+        }
+        assert_eq!(r, floor);
+    }
+
+    /// Build a Token-2022 mint image carrying the given TLV entries.
+    fn mint_with(exts: &[(u16, Vec<u8>)]) -> Vec<u8> {
+        let mut d = vec![0u8; 166];
+        d[45] = 1; // is_initialized
+        d[165] = 1; // AccountType::Mint
+        for (ty, v) in exts {
+            d.extend_from_slice(&ty.to_le_bytes());
+            d.extend_from_slice(&(v.len() as u16).to_le_bytes());
+            d.extend_from_slice(v);
+        }
+        d
+    }
+
+    #[test]
+    fn extension_policies() {
+        let meta = (ext::METADATA_POINTER, vec![0u8; 64]);
+        let scaled = (ext::SCALED_UI_AMOUNT, vec![0u8; 56]);
+        let fee = (ext::TRANSFER_FEE_CONFIG, vec![0u8; 108]);
+        let delegate = (ext::PERMANENT_DELEGATE, vec![0u8; 32]);
+        let pausable = (ext::PAUSABLE, vec![0u8; 33]);
+        let frozen = (ext::DEFAULT_ACCOUNT_STATE, vec![ext::STATE_FROZEN]);
+        let open = (ext::DEFAULT_ACCOUNT_STATE, vec![ext::STATE_INITIALIZED]);
+        let null_hook = (ext::TRANSFER_HOOK, vec![0u8; 64]);
+        let mut live_hook = vec![0u8; 64];
+        live_hook[40] = 7;
+        let live_hook = (ext::TRANSFER_HOOK, live_hook);
+        let unknown = (99u16, vec![]);
+
+        assert!(check_share_mint_extensions(&vec![0u8; 82]).is_ok());
+        assert!(check_share_mint_extensions(&mint_with(&[meta.clone()])).is_ok());
+        for bad in [&scaled, &fee, &delegate, &pausable, &null_hook, &unknown] {
+            assert!(check_share_mint_extensions(&mint_with(&[meta.clone(), bad.clone()])).is_err());
+        }
+
+        assert!(check_component_extensions(&mint_with(&[meta.clone(), scaled.clone(), fee.clone(), open.clone()])).is_ok());
+        for bad in [&delegate, &pausable, &frozen, &null_hook, &unknown] {
+            assert!(check_component_extensions(&mint_with(&[bad.clone()])).is_err());
+        }
+
+        assert!(check_cash_mint_extensions(&mint_with(&[meta.clone(), fee.clone(), null_hook.clone(), open.clone()])).is_ok());
+        for bad in [&delegate, &pausable, &frozen, &live_hook, &unknown] {
+            assert!(check_cash_mint_extensions(&mint_with(&[bad.clone()])).is_err());
+        }
+
+        // Malformed TLV (length running past the end) is refused, not skipped.
+        let mut broken = mint_with(&[meta]);
+        broken.extend_from_slice(&ext::TOKEN_METADATA.to_le_bytes());
+        broken.extend_from_slice(&500u16.to_le_bytes());
+        assert!(check_share_mint_extensions(&broken).is_err());
+    }
+
+    #[test]
+    fn plan_layout_grew_by_exactly_the_two_bounds() {
+        assert_eq!(8 + Plan::INIT_SPACE, LEGACY_PLAN_LEN + 16);
     }
 }

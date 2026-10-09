@@ -79,6 +79,10 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
         periodSecs: c.secs,
         runs,
         refSharesPerCashE9: refE9,
+        // The reference may follow the market down to half or up to one and a half
+        // times today's rate, never further, however thin the competition.
+        minRef: refE9 / 2n,
+        maxRef: (refE9 * 3n) / 2n,
         bandBps: 200,
         // Half an hour, so a scheduled keeper always gets a turn before it ends.
         auctionSecs: 1800,

@@ -124,6 +124,49 @@
       "args": []
     },
     {
+      "name": "close_legacy_plan",
+      "docs": [
+        "Close a plan written by the pre-hardening release, whose account is",
+        "16 bytes shorter than today's `Plan` and so no longer decodes. Owner",
+        "only; revokes the allowance like `close_plan` and returns the rent."
+      ],
+      "discriminator": [
+        48,
+        85,
+        130,
+        99,
+        100,
+        182,
+        79,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "plan",
+          "docs": [
+            "field used are checked byte by byte in the handler."
+          ],
+          "writable": true
+        },
+        {
+          "name": "owner_cash_account",
+          "docs": [
+            "the handler); decoded leniently, as it may have been closed."
+          ],
+          "writable": true
+        },
+        {
+          "name": "cash_token_program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "close_plan",
       "docs": [
         "Close a plan. Revokes the plan's allowance on the owner's cash account",
@@ -531,7 +574,12 @@
       "name": "open_plan",
       "docs": [
         "Open a recurring buy and delegate `cash_per_run * runs` of the owner's",
-        "cash account to the plan PDA, in one instruction."
+        "cash account to the plan PDA, in one instruction.",
+        "",
+        "`min_ref_shares_per_cash_e9` is the worst rate the owner will ever",
+        "accept: no run's auction ends below it, and the reference rate can",
+        "never be walked under it. `max_ref_shares_per_cash_e9` caps how far up",
+        "fills can push the reference. `min <= ref <= max`."
       ],
       "discriminator": [
         61,
@@ -624,6 +672,14 @@
         {
           "name": "auction_secs",
           "type": "i64"
+        },
+        {
+          "name": "min_ref_shares_per_cash_e9",
+          "type": "u64"
+        },
+        {
+          "name": "max_ref_shares_per_cash_e9",
+          "type": "u64"
         }
       ]
     },
@@ -876,6 +932,11 @@
               {
                 "kind": "const",
                 "value": [
+                  112,
+                  108,
+                  97,
+                  110,
+                  95,
                   111,
                   114,
                   100,
@@ -885,13 +946,7 @@
               },
               {
                 "kind": "account",
-                "path": "plan.basket",
-                "account": "Plan"
-              },
-              {
-                "kind": "account",
-                "path": "plan.owner",
-                "account": "Plan"
+                "path": "plan"
               },
               {
                 "kind": "arg",
@@ -982,6 +1037,61 @@
       "args": [
         {
           "name": "nonce",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_plan",
+      "docs": [
+        "Owner-only: re-centre a plan. Resets the reference rate, the band, the",
+        "auction length and the owner's rate bounds, under the same rules as",
+        "`open_plan`. This is how an owner un-sticks a plan the market has moved",
+        "away from, or tightens it after seeing a fill they did not like. The",
+        "schedule and the remaining allowance are untouched."
+      ],
+      "discriminator": [
+        119,
+        112,
+        58,
+        60,
+        76,
+        205,
+        1,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "plan"
+          ]
+        },
+        {
+          "name": "plan",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "ref_shares_per_cash_e9",
+          "type": "u64"
+        },
+        {
+          "name": "band_bps",
+          "type": "u16"
+        },
+        {
+          "name": "auction_secs",
+          "type": "i64"
+        },
+        {
+          "name": "min_ref_shares_per_cash_e9",
+          "type": "u64"
+        },
+        {
+          "name": "max_ref_shares_per_cash_e9",
           "type": "u64"
         }
       ]
@@ -1118,6 +1228,19 @@
         151,
         245,
         139
+      ]
+    },
+    {
+      "name": "PlanUpdated",
+      "discriminator": [
+        49,
+        51,
+        198,
+        31,
+        170,
+        70,
+        253,
+        195
       ]
     },
     {
@@ -1352,6 +1475,41 @@
       "code": 6040,
       "name": "DelegateInUse",
       "msg": "Cash account already delegates a live allowance to someone else"
+    },
+    {
+      "code": 6041,
+      "name": "ShareMintProgram",
+      "msg": "Share mint must be owned by the SPL Token or Token-2022 program"
+    },
+    {
+      "code": 6042,
+      "name": "ShareMintExtension",
+      "msg": "Share mint may carry metadata and no other extension"
+    },
+    {
+      "code": 6043,
+      "name": "ComponentMintExtension",
+      "msg": "Component mint carries an extension that could drain, pause or brick the vault"
+    },
+    {
+      "code": 6044,
+      "name": "CashMintExtension",
+      "msg": "Cash mint carries an extension that could seize, freeze or block escrowed cash"
+    },
+    {
+      "code": 6045,
+      "name": "EscrowShort",
+      "msg": "Escrow holds less than the order's cash"
+    },
+    {
+      "code": 6046,
+      "name": "BadReferenceBounds",
+      "msg": "Plan rate bounds must satisfy 0 < min <= reference <= max"
+    },
+    {
+      "code": 6047,
+      "name": "NotLegacyPlan",
+      "msg": "Not a pre-hardening plan account"
     }
   ],
   "types": [
@@ -1514,7 +1672,9 @@
     {
       "name": "Order",
       "docs": [
-        "A cash order on the desk. PDA: `[\"order\", basket, buyer, nonce_le]`.",
+        "A cash order on the desk. PDA: `[\"order\", basket, buyer, nonce_le]` for",
+        "`place_order`, `[\"plan_order\", plan, nonce_le]` for `run_plan` (orders a",
+        "plan placed before the hardening release used the first form).",
         "Its escrow is the order PDA's associated token account for `cash_mint`."
       ],
       "type": {
@@ -1859,6 +2019,21 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "min_ref_shares_per_cash_e9",
+            "docs": [
+              "The worst rate the owner accepts: no run's auction ends below",
+              "`cash × min / 10^9` shares, and fills never move the reference under it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_ref_shares_per_cash_e9",
+            "docs": [
+              "Fills never move the reference above this."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1943,6 +2118,14 @@
           {
             "name": "allowance",
             "type": "u64"
+          },
+          {
+            "name": "min_ref_shares_per_cash_e9",
+            "type": "u64"
+          },
+          {
+            "name": "max_ref_shares_per_cash_e9",
+            "type": "u64"
           }
         ]
       }
@@ -1998,6 +2181,42 @@
           {
             "name": "next_run_ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlanUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "plan",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "ref_shares_per_cash_e9",
+            "type": "u64"
+          },
+          {
+            "name": "band_bps",
+            "type": "u16"
+          },
+          {
+            "name": "auction_secs",
+            "type": "i64"
+          },
+          {
+            "name": "min_ref_shares_per_cash_e9",
+            "type": "u64"
+          },
+          {
+            "name": "max_ref_shares_per_cash_e9",
+            "type": "u64"
           }
         ]
       }
