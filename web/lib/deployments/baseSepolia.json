@@ -351,10 +351,96 @@
     },
     "verified": {
       "via": "Blockscout https://base-sepolia.blockscout.com",
-      "at": "2026-10-09T12:15:46.244Z",
+      "at": "2026-10-09T15:31:19.040Z",
       "contracts": {
         "CreationDeskV2": true,
         "PlanDesk": true
+      }
+    }
+  },
+  "v3": {
+    "desk": "0x9526c52DE4ff94f9dF5eA4b2B5a0742e71EfB30D",
+    "planDesk": "0x663c70243e15F3B47eDCc6f769B6C8Eac6e24e48",
+    "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+    "protocolFeeBps": 10,
+    "cash": "0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7",
+    "factory": "0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0",
+    "txs": {
+      "desk": "0x76409b81b76992dae3b6b44516505c185ff3dc0b0b31451a37d28179ba85fb95",
+      "planDesk": "0x5976b2a601f29679087cba88a98d01ed8e8d636431a9ea6ad456777ca55fea70"
+    },
+    "gasUsed": {
+      "desk": 1538245,
+      "planDesk": 1554986
+    },
+    "startBlock": 47895230,
+    "nativeSpent": "0.000037118772007519",
+    "deployedAt": "2026-10-09T15:12:31.870Z",
+    "smoke": {
+      "passedAt": "2026-10-09T15:28:00.318Z",
+      "basket": "MAG8",
+      "auctionOrderId": 4,
+      "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+      "planId": 2,
+      "planOrderIds": [
+        5,
+        6
+      ],
+      "auction": {
+        "sharesToBuyer": "1.019733333333333336",
+        "protocolFeeShares": "0.001023314935607961"
+      },
+      "plan": [
+        {
+          "run": 1,
+          "fair": "1.0",
+          "sharesToBuyer": "1.019733333333333336",
+          "protocolFeeShares": "0.001023314935607961"
+        },
+        {
+          "run": 2,
+          "fair": "1.070720000000000002",
+          "recenteredOn": "1.019733333333333336",
+          "sharesToBuyer": "1.09184887466666667",
+          "protocolFeeShares": "0.001095683767854156"
+        }
+      ],
+      "gasUsed": 3318976,
+      "txs": {
+        "faucet_TSLA": "0x7c843a1f7f469662fb415a585a42ff9e83383ba84a0940ab03a25257798a3283",
+        "faucet_NVDA": "0xf87430abfeb00736a1eea33dacac32bb0c0639f354a71599791db5d00ea6fab5",
+        "faucet_AAPL": "0x134a8ba3b18b8b6fa13b8f94a56fb3a6676551b068a1f5c7c0aa88436945e3d0",
+        "faucet_MSFT": "0xe9efc2be4f8e6f09f42523e9b1f8c7b17b028edc11c729a730322581662d9374",
+        "faucet_AMZN": "0x27f56cd03068c9a5ecc1d472df8426a87d76f3596ff8655111e5c522662b60be",
+        "faucet_GOOGL": "0xbb9ecafcdfc10eb9f31fb82e70065f296569e4727567d3bae56aea377aea7183",
+        "faucet_META": "0x01427be63103d7c68e14a44449e8aa69d80d4e5d78ecb611fb183df8ab57305a",
+        "faucet_PLTR": "0x15fd96b665ce0b7595c8319494dfc49d9a462d4f7043125e775ba9c91af04e02",
+        "faucet_dollar": "0x52a43089953ab6d844e953b3c7ba8559a9bba580353df22cf240f880064b4833",
+        "approve_desk_0": "0x7021e25664d370457c85238813e6df3ef26158cadc5a683d49044f0d7339fcab",
+        "approve_desk_1": "0x98f09ca54f4bf2f635ef37c7cc0eae2cf5a36d1773788f7c73af4dc43df957bb",
+        "approve_desk_2": "0x60d53c6517d0a0f1090ea964c3e4d216f8006713680f6e6b5c366e6a73ee5dd1",
+        "approve_desk_3": "0x458604edd44199405d349e90bd710193c36b42457961b83c766a120d638d8337",
+        "approve_desk_4": "0xbe58533af04825e3e751ee5563a99c088015c3fc84f32fc3b4242ffbd03a8ce5",
+        "approve_desk_5": "0x0fe06f852f499412f1b748a9fbe442b9255d700e860e3c25af707099c73bac28",
+        "approve_desk_6": "0xb2bbb7a3470b14d1f53cffbd41c1bfb23beec384e91f2c4245efd58b6d310d7a",
+        "approve_desk_7": "0x785d38a06467c0b2553f1a09946ea68bd954df5364021acf3779db67a0b148d9",
+        "approve_cash_desk": "0x08ae93dc70965a3ca85ea4376edb312db879f4b129985b9d3acd0f2dde25f835",
+        "approve_cash_plans": "0xfcf4be08dde6b54f6f62ddd834c222a5c8e51272a169ff2e5e923d5e627ce828",
+        "placeAuction": "0x1246052b44e5ffc62f4bcdd2c2627c2244a4c9ed4d25eecdf481f08b744cd3ac",
+        "auction_fill": "0x7dd2c0e7f59d701cf2eace972f61987c0ee5b81abb31f6975fe65bb6259e0ab1",
+        "openPlan": "0x9bf3623a01a1f279db5a8b6bfad3cc5ff49fb9f0daf472625897b1a4d1dac528",
+        "instalment": "0x2aba57002961ed563279a43144bb9676996ed82765360a1d3785858c11db69eb",
+        "plan run 1_fill": "0x480758529cec398f6186e26021b476ffdfbb87c33dc369f07b5b4685298b701f",
+        "instalment_2": "0x3302d4a69b1e32fa88b24e82beb879c863df58e2fb4c0886d4724995489ebcc9",
+        "plan run 2_fill": "0x1228cfc39470c6c489e8bd398ffca67dc10e035ba2df2b5347f8c88749598876"
+      }
+    },
+    "verified": {
+      "via": "Blockscout https://base-sepolia.blockscout.com",
+      "at": "2026-10-09T15:30:38.608Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDeskV3": true
       }
     }
   }

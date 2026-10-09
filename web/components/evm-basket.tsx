@@ -15,6 +15,8 @@ import {
   navFrom,
   publicClientFor,
   v2Of,
+  deskAddress,
+  auctionDeskVersion,
 } from "@/lib/evm";
 import { readHyperCorePrices, type PerpPrice } from "@/lib/hypercore";
 import { count, money, percent, plural, quantity, shortAddress } from "@/lib/format";
@@ -90,8 +92,8 @@ export function useBasketReads(d: Deployment, basket: ChainBasket, address: Addr
             basket.components.map((c) => client.readContract({ address: c.token as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, b] })),
           ),
           client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
-          // Dollar orders go to the v2 desk (the auction) where it is deployed.
-          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, (v2Of(d)?.desk ?? d.desk) as Address] }),
+          // Dollar orders go to the newest auction desk where it is deployed.
+          client.readContract({ address: d.stable.address as Address, abi: ERC20_ABI, functionName: "allowance", args: [address, (deskAddress(d, auctionDeskVersion(d) ?? 1) ?? d.desk) as Address] }),
           // Tempo has no gas token. Its getBalance is a placeholder; the real fee balance is pathUSD.
           isTempo(d)
             ? client.readContract({ address: TEMPO_PATH_USD, abi: ERC20_ABI, functionName: "balanceOf", args: [address] })

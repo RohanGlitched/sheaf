@@ -487,12 +487,14 @@ export type DeploymentV3 = Omit<DeploymentV2, "sip" | "smoke"> & {
     authorizeTx: string;
     instalmentTxs: string[];
     fillTxs: string[];
-    recenterTx?: string;
     orderIds: number[];
     cashPerRun: string;
     hardMinShares: string;
     hardMaxShares: string;
     stepPct: number;
+    intervalSeconds: number;
+    run2Fair: string;
+    recenteredOn: string;
     sharesToInvestor: string[];
     limitPerPeriod: string;
     periodSeconds: number;

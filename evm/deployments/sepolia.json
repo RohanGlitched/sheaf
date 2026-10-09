@@ -356,5 +356,91 @@
         "PlanDesk": true
       }
     }
+  },
+  "v3": {
+    "desk": "0x5dDd10C17ed83bb926A75AcF787A5d11297F2D5A",
+    "planDesk": "0x59EaDb2f720654A58fC18C712C74288De0cC62a9",
+    "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+    "protocolFeeBps": 10,
+    "cash": "0x3A9b55976D4f385AD00acdCdb29Fe3DD43aB09A0",
+    "factory": "0x08Ec8CD0db8c09b27b349e0F1e495083961cD9E0",
+    "txs": {
+      "desk": "0x0dec70eabe60dd5f2b860646fa81bffb42c22db545ea784dc6368ce193ec6c2a",
+      "planDesk": "0x3ab583105bea66a3aa39d12313fb22358f9b18a78ddb7bb325364f18186fde7a"
+    },
+    "gasUsed": {
+      "desk": 10762191,
+      "planDesk": 10884420
+    },
+    "startBlock": 11878179,
+    "nativeSpent": "0.0000259759332",
+    "deployedAt": "2026-10-09T15:15:15.821Z",
+    "smoke": {
+      "passedAt": "2026-10-09T15:21:38.129Z",
+      "basket": "MAG8",
+      "auctionOrderId": 0,
+      "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+      "planId": 0,
+      "planOrderIds": [
+        1,
+        2
+      ],
+      "auction": {
+        "sharesToBuyer": "1.019200000000000002",
+        "protocolFeeShares": "0.00102277972905168"
+      },
+      "plan": [
+        {
+          "run": 1,
+          "fair": "1.0",
+          "sharesToBuyer": "1.019200000000000002",
+          "protocolFeeShares": "0.00102277972905168"
+        },
+        {
+          "run": 2,
+          "fair": "1.070160000000000002",
+          "recenteredOn": "1.019200000000000002",
+          "sharesToBuyer": "1.090707072000000003",
+          "protocolFeeShares": "0.001094537954841946"
+        }
+      ],
+      "gasUsed": 6928326,
+      "txs": {
+        "faucet_TSLA": "0x4e9fc88994ef047a9a0b47cd2b2e26cd47f4d12c27453c186fa69409405666b8",
+        "faucet_NVDA": "0x7a7c8d3bbcc9e716f756513e4bf4893767cfcd32dc4c748dd9c52ccc31462414",
+        "faucet_AAPL": "0x69f46ab6bb14382219664b841388d83daf8da1430210212493ff0f5039b5bc15",
+        "faucet_MSFT": "0xed68aae13119808ad04d220ce9a02b5314c9dd8a8afb3ee75a44017c8a7495c2",
+        "faucet_AMZN": "0x64addbaace9586834ad6178117325ec5bf3ea14b93bc769d8763678167d6ce1d",
+        "faucet_GOOGL": "0x5635c369f80722021b3d5a06d2998ae4d379940ff966dc975403c98121de6058",
+        "faucet_META": "0x9f4a8355a7feefd6c5c15e4d95c79161cd6161ffa765da1c068f2dafec96920f",
+        "faucet_PLTR": "0x84e087b9ec270662ea25e31c65e5b27b312aee1f54da7006b0db13b9f96299be",
+        "faucet_dollar": "0x2bc8d776a9364f2f5f0e23e03a5c25061901ab8b2b5ac5bb21a0a0aec2780b54",
+        "approve_desk_0": "0xf65b554ca49565ccab2211c891e9d22944a3d0841eb5ba7a806a048054b63bf2",
+        "approve_desk_1": "0x77e7cdb64bd303c34d00fe7e8310af4e6ede2cd5a7fea5d8507885c9e8143821",
+        "approve_desk_2": "0xf74c87fa74e09b17fad54e9a51e246a0f5110f4503dfd791834834490b6d0a79",
+        "approve_desk_3": "0x7c2335669103d9ccfa09ba6fbf15bdc515e0e8d50ddcdad33b24477e686846d5",
+        "approve_desk_4": "0xc9343ecb57f11e1187a562a5c1e5efc630ab7ad7d5baaaacc2ac57b4c634210a",
+        "approve_desk_5": "0xecf3f01733185f66cf2f1d14f3919d9e640eaf4297148a803b6a441866fdb4a4",
+        "approve_desk_6": "0x0876022b0913e932a7586afbc550d24414daff1bf909b990f44cb00ae752aa5c",
+        "approve_desk_7": "0x4d81d6ee8e83f39f0533ade83d7a9456e32a66feb42e032aceab78b342ba45a5",
+        "approve_cash_desk": "0x4cc5238856fdd56e852c67865629a0c6ff3422021a11efbdaa325c171b0119f7",
+        "approve_cash_plans": "0x561bc81f19edf6485d17ee044129d317949afa439d299e1b6e75f991a8d4e27d",
+        "placeAuction": "0x9c79c316f3ebc3818f97add0ab98c66e69a4538aece3db342c6f8395fd80ff6f",
+        "auction_fill": "0x439749980f8324ce8971c52ac6b0a16a29e6af56a1ead6b9c947d73192739a6a",
+        "openPlan": "0xd76d4e0068511cef775844e3a4db595c01b8ad3f3f65cc602aa78a0615afe977",
+        "instalment": "0x6a48c12cdf3b080378bcc6f3b44836bdcfea88f988dec0fffffc3b4fbf51f364",
+        "plan run 1_fill": "0x3e2648a1e70af3adfa120147e45160fd18b4619be93150ec70a635a691b4d36b",
+        "instalment_2": "0x8aed4e228bf1dcf5c33f334086f4920d6be6c59502399e9dd70f2da1fe0ed151",
+        "plan run 2_fill": "0x95dfe284b91aa398eb7b7548efbc504f3eab124388b7b1cfa6db54a8c4827395"
+      }
+    },
+    "verified": {
+      "via": "Blockscout https://eth-sepolia.blockscout.com",
+      "at": "2026-10-09T15:31:12.007Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDeskV3": true
+      }
+    }
   }
 }

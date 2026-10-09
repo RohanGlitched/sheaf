@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * GET or POST /api/evm-keeper[?network=…&order=…&version=2]
+ * GET or POST /api/evm-keeper[?network=…&order=…&version=1|2|3]
  *
  * The house filler on the EVM creation desks. Open to anyone, because filling an
  * open order is permissionless on chain: the buyer gets shares minted in kind and
@@ -57,7 +57,7 @@ const perIpAuto = rateLimiter(60_000, 40);
 const lastSweep = new Map<string, number>();
 const sweeping = new Set<string>();
 
-const fail = (err: unknown) => ((err as Error).message ?? "error").split("\n")[0].slice(0, 200);
+const fail = (err: unknown) => ((err as Error).message ?? "error").split("\n")[0].slice(0, 400);
 const noStore = { headers: { "cache-control": "no-store" } };
 
 async function handle(request: Request) {
@@ -88,8 +88,8 @@ async function handle(request: Request) {
   }
   const orderId = orderParam != null && orderParam !== "" && Number.isInteger(Number(orderParam)) ? Number(orderParam) : undefined;
   if (orderParam != null && orderParam !== "" && orderId == null) return Response.json({ error: "order must be an order id." }, { status: 400 });
-  if (versionParam != null && versionParam !== "1" && versionParam !== "2") return Response.json({ error: "version must be 1 or 2." }, { status: 400 });
-  const version = versionParam === "2" ? 2 : versionParam === "1" ? 1 : undefined;
+  if (versionParam != null && !["1", "2", "3"].includes(versionParam)) return Response.json({ error: "version must be 1, 2 or 3." }, { status: 400 });
+  const version = versionParam ? (Number(versionParam) as 1 | 2 | 3) : undefined;
   const auto = !sip && orderId == null;
 
   const ip = clientIp(request);

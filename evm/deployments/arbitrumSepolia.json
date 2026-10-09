@@ -357,5 +357,91 @@
         "PlanDesk": true
       }
     }
+  },
+  "v3": {
+    "desk": "0x316B48D22e4344cDda7Af29555e92F72B314da0F",
+    "planDesk": "0x6bDc853Ef6488d8e5941767A2f1fcd2fF65405EA",
+    "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+    "protocolFeeBps": 10,
+    "cash": "0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7",
+    "factory": "0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0",
+    "txs": {
+      "desk": "0xad03a40e17c9e944268cb2c6b8d0c024b879ba53f01b0b779500d5bcee45b314",
+      "planDesk": "0xbf00cf1f7aaa36e1856df0808df9bf134bbffe2ef8026ddb48d974bcddfc286e"
+    },
+    "gasUsed": {
+      "desk": 1538245,
+      "planDesk": 1554986
+    },
+    "startBlock": 317433854,
+    "nativeSpent": "0.000191161678893231",
+    "deployedAt": "2026-10-09T15:09:36.794Z",
+    "smoke": {
+      "passedAt": "2026-10-09T15:12:18.708Z",
+      "basket": "MAG8",
+      "auctionOrderId": 0,
+      "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+      "planId": 0,
+      "planOrderIds": [
+        1,
+        2
+      ],
+      "auction": {
+        "sharesToBuyer": "1.019600000000000001",
+        "protocolFeeShares": "0.001023181133968891"
+      },
+      "plan": [
+        {
+          "run": 1,
+          "fair": "1.0",
+          "sharesToBuyer": "1.019666666666666668",
+          "protocolFeeShares": "0.001023248034788426"
+        },
+        {
+          "run": 2,
+          "fair": "1.070650000000000001",
+          "recenteredOn": "1.019666666666666668",
+          "sharesToBuyer": "1.091706116666666669",
+          "protocolFeeShares": "0.001095540508446228"
+        }
+      ],
+      "gasUsed": 3540346,
+      "txs": {
+        "faucet_TSLA": "0x2ab6a12e7803dcf82d03f0e1179871fe0f81861353465bcb3887a97becd19c65",
+        "faucet_NVDA": "0xc6c10121ff28cea8f512d9a291e365d614e7382151702bcd2ad340bdd1c899ec",
+        "faucet_AAPL": "0x88a99e2066346765a69a2110f49cd5789b1ba2e70d64a240fbaa19103885edf4",
+        "faucet_MSFT": "0x3d2703b9a7b9c209c1676c8cfa366bbc22a2b208c5c00bd7bdc49bc81f190aef",
+        "faucet_AMZN": "0x074370af6f07a3461fa2e26ec804baea08b9eb8604467594d692830d08ab2336",
+        "faucet_GOOGL": "0xb92440bf2d3a46aa5872ebace0c3133e0f98426d4a7dd8f0936052461271e18c",
+        "faucet_META": "0x60282ba5cd7f02888ec23298577fead28debcbde9cc94e360d12f53089490a67",
+        "faucet_PLTR": "0xe960761799289917f41aa6fa87e6a384d19c6e2d6af85181f407ed889f3c0045",
+        "faucet_dollar": "0xbee65be8207f7147cf586bd65b6702f2f696735206e23bcc4399f1f0788a5fc2",
+        "approve_desk_0": "0xed635c7d06911a7aec83498d5d6f36d80f721bf3f7c54f45e3a5f36f06a40e50",
+        "approve_desk_1": "0x94c3ffda133b636138fb9fae1a38615897d4dc3e3e142d7237ee0e8a47e38d25",
+        "approve_desk_2": "0xe567a5fef6925b6bd97b96cdcf7dcc2877e243274ae4416ac759dcb31a5ce388",
+        "approve_desk_3": "0x07d5037b7cb1f30e03cb282bcf7da924e9c8edbc77d85a87dba3d42399205008",
+        "approve_desk_4": "0xa8252687d72d40136f0a7712ae7ad379c4bc8f48ab1691ef9367132e7bbeaa90",
+        "approve_desk_5": "0xb67529d1623f5d096344703f245bf2c32493bb8511f2edd88d675fddb0ae2dea",
+        "approve_desk_6": "0xe125924ce7505a5499523f565a6a8a2bebb7490c475536976995a37efdd979f5",
+        "approve_desk_7": "0xa24c3c0e1bf0684549b9760477978e8ec94ad38d9a9873f2eca120e2fc0bfa46",
+        "approve_cash_desk": "0x2e8abf4540cbd2a29fc3727127499f85ba7a527bf49d66f92d970ac40e82d7dd",
+        "approve_cash_plans": "0x12d6840784dbc95e252260353ceef950d5c83ce9402bac7509cc6c1b19fb1e48",
+        "placeAuction": "0xaf0432bd9ba246c3311868853f546d1f657582c9ad8635bc9d1afd6a8bc5fed4",
+        "auction_fill": "0x961a2100afd4dbd4b72974cd98da7007366291b8e942f3a07b858b7e0fe1540d",
+        "openPlan": "0xfc4d30cf42d90d054c41fa4a5454d583466797ff8fb82185257694d6351680a8",
+        "instalment": "0xb59d6d4f796a5ea0b70ce51c15bf62a5e2c94f11a3e239184123f4b8211c1c45",
+        "plan run 1_fill": "0xbd08ef98205956edc1419b5a10f26372231014a29051f7ff6941a2d43ce3d001",
+        "instalment_2": "0x7fdf8a63a13e861debedf251f07343ab35bd191684548d5065be5fd36a1c05d7",
+        "plan run 2_fill": "0x9bab24148deb026dc927bf43f09028d190e2bdd1351c7ceb57764d3c666ca4c7"
+      }
+    },
+    "verified": {
+      "via": "Sourcify https://sourcify.dev/server",
+      "at": "2026-10-09T15:28:18.716Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDeskV3": true
+      }
+    }
   }
 }

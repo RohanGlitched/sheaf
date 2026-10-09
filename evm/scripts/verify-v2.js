@@ -4,6 +4,7 @@
 // native v2 API everywhere else. Records the result under v2.verified.
 //
 //   npx hardhat run scripts/verify-v2.js --network <network>
+//   V=3 npx hardhat run scripts/verify-v2.js --network <network>   # the v3 pair
 const fs = require("fs");
 const path = require("path");
 const hre = require("hardhat");
@@ -89,10 +90,14 @@ async function blockscout(api, label, address, fqn) {
 async function main() {
   const file = path.join(__dirname, "..", "deployments", `${hre.network.name}.json`);
   const d = JSON.parse(fs.readFileSync(file, "utf8"));
-  if (!d.v2?.desk) throw new Error("no v2 deployment recorded");
+  const key = process.env.V === "3" ? "v3" : "v2";
+  const rec = d[key];
+  if (!rec?.desk) throw new Error(`no ${key} deployment recorded`);
   const items = [
-    ["CreationDeskV2", d.v2.desk, "contracts/CreationDeskV2.sol:CreationDeskV2"],
-    ["PlanDesk", d.v2.planDesk, "contracts/PlanDesk.sol:PlanDesk"],
+    ["CreationDeskV2", rec.desk, "contracts/CreationDeskV2.sol:CreationDeskV2"],
+    key === "v3"
+      ? ["PlanDeskV3", rec.planDesk, "contracts/PlanDeskV3.sol:PlanDeskV3"]
+      : ["PlanDesk", rec.planDesk, "contracts/PlanDesk.sol:PlanDesk"],
   ];
   const server = SOURCIFY[hre.network.name];
   const api = process.env.BLOCKSCOUT || d.explorer;
@@ -101,7 +106,7 @@ async function main() {
     ok[label] = server ? await sourcify(server, d.chainId, label, address, fqn) : await blockscout(api, label, address, fqn);
   }
   const fresh = JSON.parse(fs.readFileSync(file, "utf8"));
-  fresh.v2.verified = { via: server ? `Sourcify ${server}` : `Blockscout ${api}`, at: new Date().toISOString(), contracts: ok };
+  fresh[key].verified = { via: server ? `Sourcify ${server}` : `Blockscout ${api}`, at: new Date().toISOString(), contracts: ok };
   fs.writeFileSync(file, `${JSON.stringify(fresh, null, 2)}\n`);
   console.log(`${Object.values(ok).filter(Boolean).length}/${items.length} verified`);
 }

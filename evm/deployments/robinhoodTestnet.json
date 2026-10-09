@@ -251,5 +251,79 @@
         "PlanDesk": true
       }
     }
+  },
+  "v3": {
+    "desk": "0x00F3A2f7e7Fc3038767feC055F8c37f814FA7c69",
+    "planDesk": "0x8C681091820d187cE77F670a8b9A4f66020a5045",
+    "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+    "protocolFeeBps": 10,
+    "cash": "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+    "factory": "0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1",
+    "txs": {
+      "desk": "0x9db25f5fcbc1cea6af4da0e9c5b2343fa96c566a253d31a6601e81af32fc9232",
+      "planDesk": "0x255117918835e9445b8aaf199dad3ca880491ec9db1aa49adf8231ab8f6d7de8"
+    },
+    "gasUsed": {
+      "desk": 1538245,
+      "planDesk": 1554974
+    },
+    "startBlock": 131709824,
+    "nativeSpent": "0.00003093219",
+    "deployedAt": "2026-10-09T15:07:15.554Z",
+    "smoke": {
+      "passedAt": "2026-10-09T15:09:14.670Z",
+      "basket": "HOOD5",
+      "auctionOrderId": 0,
+      "treasury": "0xEcb68aa1ec3749173B49F84eCA45659DF4E67355",
+      "planId": 0,
+      "planOrderIds": [
+        1,
+        2
+      ],
+      "auction": {
+        "sharesToBuyer": "1.019733333333333336",
+        "protocolFeeShares": "0.001023314935607961"
+      },
+      "plan": [
+        {
+          "run": 1,
+          "fair": "1.0",
+          "sharesToBuyer": "1.019733333333333336",
+          "protocolFeeShares": "0.001023314935607961"
+        },
+        {
+          "run": 2,
+          "fair": "1.070720000000000002",
+          "recenteredOn": "1.019733333333333336",
+          "sharesToBuyer": "1.09184887466666667",
+          "protocolFeeShares": "0.001095683767854156"
+        }
+      ],
+      "gasUsed": 3128631,
+      "txs": {
+        "approve_desk_0": "0xe6f3b62d62867d07c7d07b73604f1158d2ff1b066faa0989aa1176f694f865e5",
+        "approve_desk_1": "0x617726c9135a8a6452cab304e7e11c9fe3617af780d59fa2d045c90eb74be9c0",
+        "approve_desk_2": "0xef5a9915a54ab7283bf7c369a00e0aa1f370e1d4cf51b99577a3abebb2465142",
+        "approve_desk_3": "0x4dcc39e1f3242f4daeed504fc06f84388d06455e6c59b4f76dc5dd1b76a0ca2b",
+        "approve_desk_4": "0x787f367ca090c3441a46a1111f35b65c563eb98c72a202b90c72e7ab0a225475",
+        "approve_cash_desk": "0xd7fc68fcc13d1bb3749c999f0a394e050f20cbfa2c95dca25dc515fdbeb5fa08",
+        "approve_cash_plans": "0x27d31484e81ab1af73c4b009d2c9da40c4299fc145699f3ef393eda3f4e9d26f",
+        "placeAuction": "0x80ba660b8e0d015996ce381161fcdf68ec50788914a32be3ae31197d6a88eecd",
+        "auction_fill": "0xbf8fc556463ffc3ff96641c6377cd535cf1c8abf1da0992efee831b10b4c77c5",
+        "openPlan": "0x10183618212fe6f8b0c2a396856b1ac79f974f2e1e89c86dad66cea2d30bb758",
+        "instalment": "0x58ccc92307b7f750ed09a01d170f80f8ec15d1dcfbcb1972505c8b2e3d499341",
+        "plan run 1_fill": "0x9399e2667cb2e224693c1d49f3e6cb73e4d05efdf4f8e090a34da2bc79d37a44",
+        "instalment_2": "0x2b8d8254909fa7ce03278c9c68aea9757a5d322c1c0193120cbbcd32a7a5f0f8",
+        "plan run 2_fill": "0x45716f303fa0c7306553384ade85dfb3217c266954eb18b0196dbae5f9499815"
+      }
+    },
+    "verified": {
+      "via": "Blockscout https://explorer.testnet.chain.robinhood.com",
+      "at": "2026-10-09T15:21:24.329Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDeskV3": true
+      }
+    }
   }
 }
