@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Wordmark } from "./mark";
 import { MarketClock } from "./market-clock";
 import { ConnectButton } from "./connect-button";
+import { EvmHeaderConnect } from "./evm-wallet";
 
 const NAV = [
   { href: "/compose", label: "Create", long: "Create a basket" },
@@ -90,7 +91,8 @@ export function SiteHeader() {
           <div className="hidden md:block">
             <MarketClock compact />
           </div>
-          <ConnectButton />
+          {/* The chain pages run on EVM testnets, so they get an EVM wallet; everywhere else is Solana. */}
+          {pathname === "/chains" || pathname.startsWith("/chains/") ? <EvmHeaderConnect /> : <ConnectButton />}
         </div>
       </div>
 

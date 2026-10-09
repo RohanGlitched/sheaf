@@ -42,6 +42,13 @@ const IP_WINDOW_MS = 10 * 60_000;
 const IP_MAX_CLAIMS = 6;
 const claimsByIp = new Map<string, number[]>();
 
+/**
+ * The faucet key is also the keeper's, which stops spending rent at 0.5 SOL. New
+ * token accounts are only opened while the key holds well above that, so a run of
+ * fresh wallets can never starve the keeper.
+ */
+const ATA_FLOOR_LAMPORTS = 1.5e9;
+
 
 function recentClaims(ip: string): number[] {
   const now = Date.now();
@@ -99,7 +106,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const requested = (body.symbols ?? []).slice(0, MAX_TICKERS_PER_REQUEST);
+  // One entry per distinct mint asked for, so a claim never opens more accounts than that.
+  const asked = [...new Set(Array.isArray(body.symbols) ? body.symbols.filter((s) => typeof s === "string") : [])];
+  const requested = asked.filter((s) => s !== "USDC").slice(0, MAX_TICKERS_PER_REQUEST);
   const entries: { symbol: string; mint: string; decimals: number }[] = requested
     .map((symbol) => {
       const mint = writeMint(symbol);
@@ -108,7 +117,7 @@ export async function POST(request: Request) {
     })
     .filter((e): e is { symbol: string; mint: string; decimals: number } => e != null);
   // Test dollars for cash orders and monthly plans ride the same claim.
-  if (requested.includes("USDC")) entries.push({ symbol: "USDC", mint: CASH_MINT, decimals: CASH_DECIMALS });
+  if (asked.includes("USDC")) entries.push({ symbol: "USDC", mint: CASH_MINT, decimals: CASH_DECIMALS });
 
   if (!entries.length) {
     return Response.json(
@@ -119,25 +128,58 @@ export async function POST(request: Request) {
 
   const connection = new Connection(WRITE_RPC, "confirmed");
 
+  // Only accounts that do not exist yet cost the house rent, and only those are
+  // created. When the house is low, it still tops up accounts that already exist.
+  const atas = entries.map((e) =>
+    getAssociatedTokenAddressSync(new PublicKey(e.mint), owner, true, TOKEN_2022_PROGRAM_ID),
+  );
+  let existing: boolean[];
+  let houseLamports: number;
+  try {
+    const [infos, lamports] = await Promise.all([
+      connection.getMultipleAccountsInfo(atas),
+      connection.getBalance(keypair.publicKey),
+    ]);
+    existing = infos.map((info) => info != null);
+    houseLamports = lamports;
+  } catch {
+    return Response.json(
+      { error: "The faucet could not reach the cluster. Try again in a moment." },
+      { status: 502 },
+    );
+  }
+  const canOpenAccounts = houseLamports >= ATA_FLOOR_LAMPORTS;
+  const claimable = entries
+    .map((entry, n) => ({ entry, ata: atas[n], exists: existing[n] }))
+    .filter((x) => x.exists || canOpenAccounts);
+  if (!claimable.length) {
+    return Response.json(
+      {
+        error:
+          "The faucet is low on SOL and cannot open new token accounts right now. Try again later.",
+      },
+      { status: 503 },
+    );
+  }
+  const skipped = entries.filter((_, n) => !existing[n] && !canOpenAccounts).map((e) => e.symbol);
+
   const tx = new Transaction();
-  for (const entry of entries) {
+  for (const { entry, ata, exists } of claimable) {
     const mint = new PublicKey(entry.mint);
     const amount =
       (entry.symbol === "USDC" ? BigInt(CASH_PER_CLAIM) : BigInt(FAUCET_TOKENS_PER_CLAIM)) * 10n ** BigInt(entry.decimals);
-    const ata = getAssociatedTokenAddressSync(
-      mint,
-      owner,
-      true,
-      TOKEN_2022_PROGRAM_ID,
-    );
+    if (!exists) {
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          keypair.publicKey,
+          ata,
+          owner,
+          mint,
+          TOKEN_2022_PROGRAM_ID,
+        ),
+      );
+    }
     tx.add(
-      createAssociatedTokenAccountIdempotentInstruction(
-        keypair.publicKey,
-        ata,
-        owner,
-        mint,
-        TOKEN_2022_PROGRAM_ID,
-      ),
       createMintToInstruction(
         mint,
         ata,
@@ -159,7 +201,8 @@ export async function POST(request: Request) {
       signature,
       cluster: WRITE_CLUSTER,
       tokensEach: FAUCET_TOKENS_PER_CLAIM,
-      symbols: entries.map((e) => e.symbol),
+      symbols: claimable.map((x) => x.entry.symbol),
+      ...(skipped.length ? { skipped } : {}),
     });
   } catch (err) {
     // Never echo the error verbatim: a failed send can quote instruction data.

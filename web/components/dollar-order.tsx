@@ -24,14 +24,15 @@ type Stage =
   | { kind: "open"; order: Order; signature: string }
   | { kind: "filled"; shares: number; cash: number; signature: string }
   | { kind: "expired"; order: Order; signature: string }
-  | { kind: "refunded"; cash: number; signature: string };
+  /** Signature null when the keeper returned it and its transaction could not be read. */
+  | { kind: "refunded"; cash: number; signature: string | null };
 
 /**
  * Buy shares with dollars.
  *
  * The dollars go into an escrow the program controls, and the number of shares
- * they buy falls over three minutes, from a little above the fair count to a
- * little below. The first filler to deliver the stocks at the current count gets
+ * they buy falls over ninety seconds (AUCTION_SECS), from 2% above the fair
+ * count to 2% below. The first filler to deliver the stocks at the current count gets
  * the dollars; the vault still receives the real stocks. Nobody's price is
  * trusted: competition between fillers sets it.
  */
@@ -43,6 +44,7 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [refunding, setRefunding] = useState(false);
 
   const amount = Number(dollars);
   const valid = Number.isFinite(amount) && amount >= 1;
@@ -72,17 +74,9 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         const key = new PublicKey(order.address);
         const info = await connection.getAccountInfo(key).catch(() => undefined);
         if (info === null) {
-          // The order closed: read what closed it, a fill or a refund, from its last transaction.
-          const sigs = await connection.getSignaturesForAddress(key, { limit: 3 }).catch(() => []);
-          const last = sigs[0]?.signature;
-          const tx = last ? await connection.getTransaction(last, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }).catch(() => null) : null;
-          const events = eventsInLogs(tx?.meta?.logMessages);
+          const next = await whatClosed(order, stage.signature);
           if (!live) return;
-          const filled = events.find((e) => e.kind === "filled");
-          const returned = events.find((e) => e.kind === "returned");
-          if (filled) setStage({ kind: "filled", shares: filled.shares ?? 0, cash: filled.cash ?? fromCashRaw(order.cashAmount), signature: last! });
-          else if (returned) setStage({ kind: "refunded", cash: returned.cash ?? fromCashRaw(order.cashAmount), signature: last! });
-          else setStage({ kind: "filled", shares: Number(requiredShares(order, Math.floor(Date.now() / 1000))) / 1e6, cash: fromCashRaw(order.cashAmount), signature: last ?? stage.signature });
+          setStage(next ?? { kind: "filled", shares: Number(requiredShares(order, Math.floor(Date.now() / 1000))) / 1e6, cash: fromCashRaw(order.cashAmount), signature: stage.signature });
           cash.reload();
           onDone();
           return;
@@ -101,6 +95,55 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage.kind]);
+
+  // An expired order is still worth watching: the keeper returns the dollars on
+  // its next pass, and the page should say so the moment it does.
+  useEffect(() => {
+    if (stage.kind !== "expired") return;
+    const order = stage.order;
+    let live = true;
+    const watch = async () => {
+      fetch("/api/keeper", { method: "POST" }).catch(() => {});
+      for (let i = 0; i < 240 && live; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        if (!live) return;
+        const info = await connection.getAccountInfo(new PublicKey(order.address)).catch(() => undefined);
+        if (info === null) {
+          const next = await whatClosed(order, stage.signature);
+          if (!live) return;
+          setStage(next ?? { kind: "refunded", cash: fromCashRaw(order.cashAmount), signature: null });
+          setError(null);
+          cash.reload();
+          onDone();
+          return;
+        }
+        if (i % 12 === 11) fetch("/api/keeper", { method: "POST" }).catch(() => {});
+      }
+    };
+    watch();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage.kind]);
+
+  /**
+   * An order account is gone: read what closed it, a fill or a refund, from its
+   * last transaction. Null when that transaction cannot be read or says neither.
+   */
+  async function whatClosed(order: Order, placedWith: string): Promise<Stage | null> {
+    const key = new PublicKey(order.address);
+    const sigs = await connection.getSignaturesForAddress(key, { limit: 3 }).catch(() => []);
+    const last = sigs.find((s) => s.signature !== placedWith && !s.err)?.signature;
+    if (!last) return null;
+    const tx = await connection.getTransaction(last, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }).catch(() => null);
+    const events = eventsInLogs(tx?.meta?.logMessages);
+    const filled = events.find((e) => e.kind === "filled");
+    const returned = events.find((e) => e.kind === "returned");
+    if (filled) return { kind: "filled", shares: filled.shares ?? 0, cash: filled.cash ?? fromCashRaw(order.cashAmount), signature: last };
+    if (returned) return { kind: "refunded", cash: returned.cash ?? fromCashRaw(order.cashAmount), signature: last };
+    return null;
+  }
 
   async function place() {
     if (!publicKey || !bounds || !valid) return;
@@ -144,17 +187,31 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
     }
   }
 
-  async function refund(order: Order) {
-    if (!publicKey) return;
+  async function refund(order: Order, placedWith: string) {
+    if (!publicKey || refunding) return;
     setError(null);
+    setRefunding(true);
+    // The keeper may have returned it already; never ask for a signature that can only fail.
+    const gone = async () => (await connection.getAccountInfo(new PublicKey(order.address)).catch(() => undefined)) === null;
+    const settled = async () => {
+      const next = await whatClosed(order, placedWith);
+      setStage(next ?? { kind: "refunded", cash: fromCashRaw(order.cashAmount), signature: null });
+      cash.reload();
+      onDone();
+    };
     try {
+      if (await gone()) return await settled();
       const signature = await sendTransaction(new Transaction().add(cancelOrderIx({ caller: publicKey, order })), connection);
       await confirmSignature(connection, signature);
       setStage({ kind: "refunded", cash: fromCashRaw(order.cashAmount), signature });
       cash.reload();
       onDone();
     } catch (err) {
-      setError(explainError(err));
+      // Lost a race with the keeper: the dollars are back either way.
+      if (await gone().catch(() => false)) await settled().catch(() => setError(explainError(err, { action: "cancel" })));
+      else setError(explainError(err, { action: "cancel" }));
+    } finally {
+      setRefunding(false);
     }
   }
 
@@ -248,10 +305,16 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         <div className="mt-5 rounded-[var(--radius-control)] bg-raised p-4" aria-live="polite">
           <p className="text-sm text-ink">Nobody filled this one before the auction ended.</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-3">
-            The dollars are still in the order&apos;s escrow. Anyone may return them now; the keeper does on its next run.
+            The dollars are still in the order&apos;s escrow. Anyone may return them now; the keeper does on its next pass,
+            and this page will say so when it has.
           </p>
-          <button type="button" onClick={() => refund(stage.order)} className="mt-3 rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white hover:bg-bind-deep">
-            Return my {money(fromCashRaw(stage.order.cashAmount))}
+          <button
+            type="button"
+            onClick={() => refund(stage.order, stage.signature)}
+            disabled={refunding}
+            className="mt-3 rounded-[var(--radius-control)] bg-bind px-4 py-2.5 text-sm font-medium text-white hover:bg-bind-deep disabled:opacity-60"
+          >
+            {refunding ? "Returning…" : `Return my ${money(fromCashRaw(stage.order.cashAmount))}`}
           </button>
         </div>
       )}
@@ -260,7 +323,9 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         <div className="mt-5 rounded-[var(--radius-control)] bg-raised p-4" aria-live="polite">
           <p className="text-sm text-ink">Returned. {money(stage.cash)} is back in your wallet.</p>
           <div className="mt-3 flex gap-4 text-xs">
-            <a href={explorerTx(stage.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4">The refund on Explorer</a>
+            {stage.signature && (
+              <a href={explorerTx(stage.signature)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4">The refund on Explorer</a>
+            )}
             <button type="button" onClick={() => setStage({ kind: "idle" })} className="text-bind underline decoration-bind/40 underline-offset-4">Place another</button>
           </div>
         </div>

@@ -19,7 +19,7 @@ const SHARE_FEES = [
 
 /** The launch markets pay too, but they sit beside the backed share, not inside it. */
 const LAUNCH_FEES = [
-  { share: "½", title: "of every launch curve's trading fees", body: "From the 4% opening fee down to the settled 1%. The basket's creator earns the other half." },
+  { share: "½", title: "of every launch curve's trading fees", body: "The fee opens at 25% to make sniping expensive and falls to 1% over the first ten minutes (launches on the first curve opened at 4%). The basket's creator earns the other half." },
   { share: "1%", title: "of the SOL raised at graduation", body: "Taken as the migration fee when the curve becomes a permanent Meteora pool." },
   { share: "½", title: "of the graduated pool's fees", body: "Half the migrated liquidity is locked in a position the treasury owns, so it keeps paying." },
 ];
@@ -98,16 +98,10 @@ const KEYS: { what: string; who: string; can: string; cannot: string }[] = [
     cannot: "Own anything afterwards; the launch token is immutable and the migrated liquidity is locked.",
   },
   {
-    what: "The faucet key",
+    what: "The house key (B8dL…U1L)",
     who: "Sheaf's server",
-    can: "Mint the devnet mirror tokens for a visitor.",
-    cannot: "Touch a basket, a vault or anything on mainnet.",
-  },
-  {
-    what: "The house filler",
-    who: "Sheaf's server",
-    can: "Fill dollar orders and plan runs by delivering the stocks, like any other filler.",
-    cannot: "Fill outside an order's auction, or take anything out of a vault.",
+    can: "Mint devnet mirror tokens for a visitor, fill dollar orders and plan runs like any other filler, and create shares in the baskets it seeded, which earns those baskets' creator fee.",
+    cannot: "Edit a recipe, fill outside an order's auction, take anything out of a vault, or touch anything on mainnet.",
   },
   {
     what: "The treasury key",

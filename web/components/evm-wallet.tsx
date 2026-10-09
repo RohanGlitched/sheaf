@@ -308,3 +308,81 @@ export function StepList({ steps, d }: { steps: StepState[]; d: Deployment }) {
     </ol>
   );
 }
+
+/**
+ * The header's wallet button on the EVM chain pages, where a Solana wallet has
+ * nothing to do. It only asks the injected wallet for an account; each basket's
+ * own panel still switches to its chain. A wallet announces the new account to
+ * every listener, so the panel below picks the connection up without a reload.
+ */
+export function EvmHeaderConnect() {
+  const [provider, setProvider] = useState<EIP1193Provider | null | undefined>(undefined);
+  const [address, setAddress] = useState<Address | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    const p = injected();
+    let live = true;
+    void Promise.resolve().then(() => live && setProvider(p));
+    if (!p) return;
+    void p
+      .request({ method: "eth_accounts" })
+      .then((a) => live && setAddress(((a as Address[])[0] ?? null) as Address | null))
+      .catch(() => undefined);
+    const onAccounts = (a: unknown) => setAddress(((a as Address[])[0] ?? null) as Address | null);
+    p.on?.("accountsChanged", onAccounts as never);
+    return () => {
+      live = false;
+      p.removeListener?.("accountsChanged", onAccounts as never);
+    };
+  }, []);
+
+  const base =
+    "flex items-center gap-2 whitespace-nowrap rounded-[var(--radius-control)] border border-line-strong bg-surface px-3.5 py-2 text-sm text-ink transition-colors hover:border-ink-3 disabled:opacity-60";
+
+  if (provider === undefined) return <div className="h-9 w-36" aria-hidden />;
+
+  if (address) {
+    return (
+      <span className={base} title={`${address}: connected EVM wallet`}>
+        <span aria-hidden className="size-1.5 rounded-full bg-gain" />
+        <span className="text-xs text-ink-3">EVM</span>
+        <span className="tnum">{shortAddress(address, 6, 4)}</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={busy}
+        className={base}
+        onClick={async () => {
+          setNote(null);
+          if (!provider) {
+            setNote("No EVM wallet in this browser. Install MetaMask or Rabby, then reload.");
+            return;
+          }
+          setBusy(true);
+          try {
+            const accounts = (await provider.request({ method: "eth_requestAccounts" })) as Address[];
+            setAddress(accounts[0] ?? null);
+          } catch (err) {
+            setNote(explainEvmError(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Connecting…" : "Connect EVM wallet"}
+      </button>
+      {note && (
+        <p className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-[var(--radius-control)] border border-line bg-raised px-3 py-2.5 text-xs leading-relaxed text-ink-2 shadow-[0_24px_48px_-24px_rgb(20_37_28/0.35)]">
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}

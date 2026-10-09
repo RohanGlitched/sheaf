@@ -602,7 +602,8 @@ export function BasketPredict({ basket, name, symbol, creator }: { basket: strin
             <p className="text-xs text-ink-3">Creator fees</p>
             <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-ink-2">
               Whoever opens a Panta market earns its creator fees once it graduates. For a basket&apos;s
-              creator that is a third income beside Sheaf&apos;s creation fee and the launch pool&apos;s fees.
+              creator that is a third income, beside the creator fee on every share creation (up to 1%, paid in
+              new shares) and half of the launch curve&apos;s trading fees.
               {isCreator ? " This is your basket." : ` This basket's creator is ${short(creator, 4, 4)}.`}
               {mode === "sandbox" && !isCreator && " The sandbox lets any wallet try the build; live, Panta checks the wallet is the market's creator."}
             </p>

@@ -15,7 +15,8 @@ import { fetchBasketAt, type Basket } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
 import { slotColor } from "@/lib/palette";
 import { quantity, shortAddress } from "@/lib/format";
-import { FeaturedLaunch } from "@/components/launch-market";
+import { BasketLaunch } from "@/components/launch-market";
+import preset from "@/lib/meteora-preset.json";
 
 export const metadata: Metadata = {
   title: "How it works",
@@ -25,7 +26,22 @@ export const metadata: Metadata = {
 
 export const revalidate = 300;
 
-const [EXAMPLE, DBC] = FEATURED_DBC;
+const [EXAMPLE] = FEATURED_DBC;
+/** The launch this page shows: Bitcoin, by proxy, opened on the current curve. */
+const LAUNCH_EXAMPLE = {
+  address: "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+  name: "Bitcoin, by proxy",
+  symbol: "PROXY",
+  creator: "B8dLfY9rokrZwq7ae1CuVfi8deSoeywgJGiS3W2U9U1L",
+};
+const LAUNCH_EXAMPLE_POOL = "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV";
+const GRADUATION = preset.graduationMultipleOfNav;
+const FIRST_GRADUATION = preset.previous.graduationMultipleOfNav;
+const OPEN_FEE = preset.fees.antiSnipe.startingFeeBps / 100;
+const SETTLED_FEE = preset.fees.antiSnipe.endingFeeBps / 100;
+const FEE_MINUTES = preset.fees.antiSnipe.totalDurationSeconds / 60;
+const FIRST_OPEN_FEE = preset.previous.antiSnipe.startingFeeBps / 100;
+
 const EXAMPLE_MINT_TX =
   "4ej9mpPfVwzWeSDg5Ftf8pDxbmMWhPsYBv7CjhpYGX3WRMm6kWRF9Mxt9WptgW23qzH7rfMsiKNLr4Wyz92DHHeA";
 
@@ -42,7 +58,7 @@ const STAGES = [
 const RISKS = [
   {
     title: "The issuers keep their own powers",
-    body: "xStocks and PreStocks are Token-2022 mints, and their issuers keep controls over their own tokens: pausing transfers, freezing an account, or a permanent delegate that can move tokens, depending on the mint. Sheaf cannot override them. If an issuer froze or took tokens held in a vault, the shares backed by them would be short. The devnet mirrors copy these extensions on purpose, so the program is tested against them.",
+    body: "Real xStocks give their issuer power to pause transfers and to move tokens (a permanent delegate), as any regulated tokenized stock does. Sheaf accepts those powers only when they belong to a known issuer, and refuses them from anyone else, so a basket creator can never add a backdoor. If an issuer paused or took tokens held in a vault, the shares backed by them would be short. The devnet mirrors carry a subset of these extensions; the program's tests run against real xStock mints cloned from mainnet.",
   },
   {
     title: "Not everyone may hold xStocks",
@@ -114,6 +130,78 @@ const GUARANTEES = [
   {
     title: "Verify it yourself",
     body: "Under every backing table are the two RPC calls that reproduce it: the share supply and each vault's balance. If the inequality holds, every share is backed.",
+  },
+];
+
+/**
+ * Sheaf beside the nearest products, from each one's own docs (checked 9 October 2026).
+ * "Not stated" means we could not find it published, not that it is missing.
+ */
+const COMPARE_COLUMNS = [
+  "Backing",
+  "Who can publish a basket",
+  "Redeem in kind",
+  "Buy with dollars, no oracle",
+  "Recurring plans",
+  "Chains",
+];
+
+const COMPARE: { name: string; note?: string; href?: string; cells: string[] }[] = [
+  {
+    name: "Sheaf",
+    note: "devnet and testnets",
+    cells: [
+      "In kind: the exact stocks, in the basket's onchain vault",
+      "Anyone",
+      "Yes, by anyone, at any time",
+      "Yes: fillers bid in an auction on share count",
+      "Yes, monthly plans",
+      "Solana, plus five EVM testnets",
+    ],
+  },
+  {
+    name: "Cesto",
+    note: "Colosseum Frontier winner",
+    href: "https://docs.cesto.co/cesto/faq.md",
+    cells: [
+      "No basket token: you hold each asset in your own wallet",
+      "Anyone can publish an idea; managed baskets go through a creator program",
+      "Not needed: you already hold the assets",
+      "One swap per asset at quoted prices, not atomic",
+      "Not stated",
+      "Solana",
+    ],
+  },
+  {
+    name: "Peaks",
+    note: "Colosseum Frontier winner",
+    href: "https://colosseum.com/arena/projects/explore/peaks",
+    cells: ["Not stated", "Anyone, as agent-run portfolios", "Not stated", "Not stated", "Not stated", "Not stated"],
+  },
+  {
+    name: "Symmetry",
+    href: "https://docs.symmetry.fi/concepts/vaults",
+    cells: [
+      "In kind: a vault token over the tokens it holds",
+      "Anyone; a creator and up to ten managers, who can rebalance",
+      "Yes, burn for the underlying tokens",
+      "No: vault value and keeper auctions start from oracle prices",
+      "Not stated",
+      "Solana",
+    ],
+  },
+  {
+    name: "Issuer ETF tokens",
+    note: "e.g. xStocks SPYx, QQQx",
+    href: "https://docs.xstocks.fi/docs/issuance-and-redemption",
+    cells: [
+      "One token per ETF, backed 1:1 by the ETF share in offchain custody",
+      "The issuer only",
+      "Through the issuer, after KYC, to a whitelisted wallet",
+      "Issued at the underlying's market price; otherwise traded on DEXs",
+      "Not stated",
+      "Ethereum, Solana, BNB Chain, Arbitrum and others",
+    ],
   },
 ];
 
@@ -354,6 +442,17 @@ export default async function MethodPage() {
           </Link>
           , a basket of pre-IPO companies.
         </p>
+        <p className="display mt-8 border-l-2 border-bind pl-5 text-xl leading-snug text-ink sm:text-2xl">
+          The one thing Sheaf does differently: every share is backed by the exact stocks its recipe
+          names, held in the basket&rsquo;s own onchain vault, and anyone can redeem it for them at any
+          time. The program reads no price oracle, whether a share is created, redeemed or bought with
+          dollars.
+        </p>
+        <p className="mt-3 text-sm text-ink-3">
+          <a href="#compare" className="underline decoration-line-strong underline-offset-4 hover:text-ink-2">
+            How that compares with other basket products
+          </a>
+        </p>
       </header>
 
       <nav aria-label="Steps" className="mt-10 grid gap-px overflow-hidden rounded-[var(--radius-panel)] border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
@@ -490,8 +589,8 @@ export default async function MethodPage() {
           id="market"
           title="Open a launch market"
           on="Launch market"
-          proof={{ label: "The pool on Explorer", href: explorerAddress(DBC.pool) }}
-          visual={<FeaturedLaunch />}
+          proof={{ label: "The pool on Explorer", href: explorerAddress(LAUNCH_EXAMPLE_POOL) }}
+          visual={<BasketLaunch basket={LAUNCH_EXAMPLE} navUsd={null} />}
         >
           <p>
             A new basket has no holders yet, and nobody wants to be first to
@@ -502,11 +601,19 @@ export default async function MethodPage() {
           </p>
           <p>
             The curve is set from the basket&rsquo;s own value per share (its
-            NAV) rather than round numbers. It opens at half of it and, at five
-            times it, moves into a permanent Meteora pool with every liquidity
-            position locked. A quarter of the supply goes into that pool, so it
-            starts deep enough to trade. The fee is 25% in the first seconds, to
-            make sniping expensive, and falls to 1% over ten minutes.
+            NAV) rather than round numbers. It opens at half of it and, at{" "}
+            {GRADUATION} times it, moves into a permanent Meteora pool with every
+            liquidity position locked. A quarter of the supply goes into that
+            pool, so it starts deep enough to trade. The fee is {OPEN_FEE}% in the
+            first seconds, to make sniping expensive, and falls to {SETTLED_FEE}%
+            over {FEE_MINUTES} minutes.
+          </p>
+          <p className="text-sm text-ink-3">
+            The market shown is {LAUNCH_EXAMPLE.name}&rsquo;s, on this curve.
+            The first launches, {basket?.name ?? "Frontier Labs"}&rsquo; among
+            them, opened on an earlier curve that graduates at{" "}
+            {FIRST_GRADUATION} times NAV with a {FIRST_OPEN_FEE}% opening fee, and
+            keep it.
           </p>
           <p>
             The shape is ours. Four segments, weighted so the curve opens on a
@@ -543,6 +650,74 @@ export default async function MethodPage() {
         </ul>
       </section>
 
+      <section id="compare" className="scroll-mt-24 border-t border-line py-16">
+        <div className="max-w-[60ch]">
+          <h2 className="display text-title text-ink">Beside the other basket products</h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
+            Others already let you hold many assets in one place, and several are live on mainnet
+            where Sheaf is not yet. None of the ones below, as far as their own docs say, pairs a
+            token backed in kind with baskets anyone can publish, redemption by anyone, and dollar
+            buying with no oracle.
+          </p>
+        </div>
+        {/* A phone gets one card per product; six columns of sentences will not fit. */}
+        <ul className="mt-10 divide-y divide-line overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface lg:hidden">
+          {COMPARE.map((row) => (
+            <li key={row.name} className="px-4 py-4 text-sm leading-relaxed">
+              <p className="text-ink">
+                <span className={row.name === "Sheaf" ? "font-medium text-bind" : "font-medium"}>{row.name}</span>
+                {row.note && <span className="ml-2 text-xs text-ink-3">{row.note}</span>}
+              </p>
+              <dl className="mt-2 space-y-1">
+                {COMPARE_COLUMNS.map((col, i) => (
+                  <div key={col} className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
+                    <dt className="text-xs text-ink-3">{col}</dt>
+                    <dd className="text-ink-2">{row.cells[i]}</dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-10 hidden overflow-hidden rounded-[var(--radius-panel)] border border-line lg:block">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-surface text-left text-xs text-ink-3">
+                <th className="px-4 py-3 font-normal">Product</th>
+                {COMPARE_COLUMNS.map((col) => (
+                  <th key={col} className="px-4 py-3 font-normal">{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {COMPARE.map((row) => (
+                <tr key={row.name} className={`border-t border-line align-top ${row.name === "Sheaf" ? "bg-raised" : ""}`}>
+                  <th scope="row" className="px-4 py-3 text-left font-normal">
+                    <span className={row.name === "Sheaf" ? "text-bind" : "text-ink"}>{row.name}</span>
+                    {row.note && <span className="mt-0.5 block text-xs text-ink-3">{row.note}</span>}
+                  </th>
+                  {row.cells.map((cell, i) => (
+                    <td key={i} className={`px-4 py-3 ${cell === "Not stated" ? "text-ink-3" : "text-ink-2"}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-4 max-w-[80ch] text-xs leading-relaxed text-ink-3">
+          From each product&rsquo;s own documentation, checked 9 October 2026:{" "}
+          {COMPARE.filter((r) => r.href).map((r, i, list) => (
+            <span key={r.name}>
+              <a href={r.href} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
+                {r.name}
+              </a>
+              {i < list.length - 1 ? ", " : "."}
+            </span>
+          ))}{" "}
+          &ldquo;Not stated&rdquo; means we could not find it published, not that it is missing. Corrections are welcome.
+        </p>
+      </section>
+
       <section id="risks" className="scroll-mt-24 border-t border-line py-16">
         <div className="max-w-[56ch]">
           <h2 className="display text-title text-ink">What could still go wrong</h2>
@@ -573,7 +748,8 @@ export default async function MethodPage() {
           <p>
             Creation and redemption settle on {WRITE_CLUSTER} against mirrors of
             the same mints, with the same decimals, metadata, multipliers and
-            transfer fees. You can try the whole thing without spending money.
+            transfer fees, though not every issuer extension the real mints carry
+            (see the risks above). You can try the whole thing without spending money.
           </p>
           <p>
             Solana is what makes it worth doing: issuing the instrument, taking

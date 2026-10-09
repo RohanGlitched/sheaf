@@ -129,7 +129,7 @@ npm install
 npx hardhat test          # 100 tests
 ```
 
-All 100 tests pass (12 s). That is the 94 tests ported from the original suite plus 6 for the
+All 100 tests pass. That is the 94 tests ported from the original suite plus 6 for the
 mirror tokens. The suite covers rounding, the creator fee, CREATE2 addresses, recipe
 validation, reentrancy, paused and blocklisted components, fee-on-transfer refusal, events,
 gas, the absence of admin functions and selfdestruct, and seeded random-walk invariants (full

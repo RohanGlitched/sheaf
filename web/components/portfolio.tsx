@@ -9,7 +9,9 @@ import { PantaPositions } from "./panta-positions";
 import { useBalances } from "@/lib/use-balances";
 import { valueBasket } from "@/lib/basket-view";
 import { useMarket } from "./market-provider";
-import { BasketMosaic } from "./basket-mosaic";
+import type { BasketTile } from "./basket-mosaic";
+import { SheafMark } from "./sheaf-mark";
+import { isTestBasket } from "@/lib/hidden";
 import { Figure } from "./figure";
 import { FaucetButton } from "./faucet-button";
 import { ConnectButton } from "./connect-button";
@@ -30,6 +32,55 @@ import { money, percent, quantity, signedPercent, count } from "@/lib/format";
 
 const TOKEN_PROGRAM = TOKEN_2022_PROGRAM_ID.toBase58();
 const TOP_SLOTS = 7;
+
+/**
+ * The look-through as bars, in value order with the folded-in tail last, the same
+ * order as the list under it. (The shared mosaic sorts by weight, which put a large
+ * "N more" row first and pushed a named holding out of view.)
+ */
+function LookThroughBars({ tiles }: { tiles: BasketTile[] }) {
+  const total = tiles.reduce((s, t) => s + t.weightBps, 0) || 1;
+  const named = tiles.filter((t) => t.key !== "rest").sort((a, b) => b.weightBps - a.weightBps);
+  const rest = tiles.find((t) => t.key === "rest");
+  const rows = rest ? [...named, rest] : named;
+  const max = Math.max(...rows.map((t) => t.weightBps), 1);
+  return (
+    <div className="flex items-center gap-4 sm:gap-6">
+      <div className="aspect-square shrink-0" style={{ width: "min(234px, 38%)" }}>
+        <SheafMark
+          stalks={tiles.map((t) => ({ key: t.key, weight: t.weightBps / total, color: slotColor(t.slot) }))}
+          className="h-full w-full"
+          title={`${tiles.length} holdings bound into one view`}
+        />
+      </div>
+      <ul className="min-w-0 flex-1 space-y-2.5">
+        {rows.map((t) => {
+          const share = t.weightBps / total;
+          const isRest = t.key === "rest";
+          return (
+            <li key={t.key} className={isRest ? "border-t border-line pt-2.5" : undefined}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="truncate text-sm text-ink">
+                  <span className="font-medium">{t.label}</span>
+                  {t.sub && <span className="ml-2 text-ink-3">{t.sub}</span>}
+                </span>
+                <span className="tnum shrink-0 text-sm text-ink-2">
+                  {(share * 100).toFixed(share < 0.1 ? 1 : 0)}%
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-sunk">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${(t.weightBps / max) * 100}%`, background: slotColor(t.slot) }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 export function Portfolio() {
   const { connected } = useWallet();
@@ -175,7 +226,7 @@ export function Portfolio() {
       string,
       { base: string; company: string; total: number }
     >();
-    for (const basket of baskets ?? []) {
+    for (const basket of (baskets ?? []).filter((b) => !isTestBasket(b))) {
       for (const component of valueBasket(basket, snapshot).components) {
         const row =
           byCompany.get(component.base) ?? {
@@ -240,13 +291,15 @@ export function Portfolio() {
             </h2>
             <p className="mt-3 max-w-[64ch] text-sm leading-relaxed text-ink-2">
               One share of{" "}
-              {baskets ? `each of the ${count(baskets.length)} baskets` : "every basket"} on
-              this program, unwrapped to the companies underneath and added up.
+              {baskets
+                ? `each of the ${count(baskets.filter((b) => !isTestBasket(b)).length)} baskets`
+                : "every basket"}{" "}
+              on this program (our own test baskets left out), unwrapped to the companies underneath and added up.
               Your own version of this reads your balances instead.
             </p>
             <div className="mt-7">
               {demo.rows.length > 0 ? (
-                <BasketMosaic tiles={demoTiles} height={260} />
+                <LookThroughBars tiles={demoTiles} />
               ) : (
                 <MosaicSkeleton height={260} label="Reading the baskets" />
               )}
@@ -423,7 +476,7 @@ export function Portfolio() {
               show up here as one position, which is what it is.
             </p>
             <div className="mt-7">
-              <BasketMosaic tiles={tiles} height={300} />
+              <LookThroughBars tiles={tiles} />
             </div>
 
             {/* The split between basket and wallet is the interesting part of this

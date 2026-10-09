@@ -14,18 +14,22 @@ import { count, money } from "@/lib/format";
 import { useHistory } from "@/lib/use-history";
 import { trackRecord } from "@/lib/track";
 import { CardSkeletons } from "./skeletons";
+import { isTestBasket } from "@/lib/hidden";
+import { useLedger, walletCounts } from "./ledger";
 
 /**
  * Every basket, in an order the visitor chooses.
  *
  * There is no curation and no ranking algorithm here on purpose: the list is
- * literally what `getProgramAccounts` returns, and the only editorial act is the
- * sort key, which the visitor picks.
+ * what `getProgramAccounts` returns, sorted by a key the visitor picks. The one
+ * editorial act is that baskets our own QA runs made start hidden, behind a
+ * switch that shows them (lib/hidden.ts).
  */
 
-type SortKey = "newest" | "value" | "activity" | "components" | "year";
+type SortKey = "held" | "newest" | "value" | "activity" | "components" | "year";
 
 const SORTS: { key: SortKey; label: string }[] = [
+  { key: "held", label: "Most held" },
   { key: "activity", label: "Most traded" },
   { key: "year", label: "Best past year" },
   { key: "newest", label: "Newest" },
@@ -73,20 +77,26 @@ export function Explorer() {
   const launched = useOpenLaunches(baskets);
   const { snapshot } = useMarket();
   const { history } = useHistory();
-  const [sort, setSort] = useState<SortKey>("activity");
+  const [sort, setSort] = useState<SortKey>("held");
   const [query, setQuery] = useState("");
+  const [showTests, setShowTests] = useState(false);
+  const { ledger, decoding } = useLedger();
+  const traction = useMemo(() => (ledger ? walletCounts(ledger.entries) : null), [ledger]);
+  const testCount = useMemo(() => (baskets ?? []).filter(isTestBasket).length, [baskets]);
 
   const rows = useMemo(() => {
     if (!baskets) return [];
     const needle = query.trim().toLowerCase();
+    const visible = showTests ? baskets : baskets.filter((b) => !isTestBasket(b));
     const filtered = needle
-      ? baskets.filter(
+      ? visible.filter(
           (b) =>
             b.name.toLowerCase().includes(needle) ||
             b.symbol.toLowerCase().includes(needle) ||
             b.creator.toLowerCase().startsWith(needle),
         )
-      : baskets.slice();
+      : visible.slice();
+    const heldOf = (shareMint: string) => supplies?.get(shareMint) ?? 0;
 
     const navOf = (address: string) =>
       valueBasket(
@@ -105,6 +115,9 @@ export function Explorer() {
     };
 
     switch (sort) {
+      case "held":
+        // Shares outstanding, most first; newest breaks a tie (and orders the list until supplies arrive).
+        return filtered.sort((a, b) => heldOf(b.shareMint) - heldOf(a.shareMint) || b.createdAt - a.createdAt);
       case "value":
         return filtered.sort((a, b) => navOf(b.address) - navOf(a.address));
       case "year":
@@ -122,7 +135,7 @@ export function Explorer() {
       default:
         return filtered.sort((a, b) => b.createdAt - a.createdAt);
     }
-  }, [baskets, snapshot, history, sort, query]);
+  }, [baskets, snapshot, history, sort, query, showTests, supplies]);
 
   // What every vault holds, at live prices: each share's value times the shares
   // outstanding. Adding up one share of each would be a number with no meaning.
@@ -143,11 +156,12 @@ export function Explorer() {
           </h1>
           <p className="mt-4 max-w-[54ch] text-base leading-relaxed text-ink-2">
             Read straight from the program. Nothing here is listed,
-            approved, or promoted. If somebody created it, it is on this page.
+            approved, or promoted. If somebody created it, it is on this page;
+            the few our own QA runs made are behind the switch below.
           </p>
         </div>
         {baskets && baskets.length > 0 && (
-          <dl className="tnum flex gap-8 text-sm">
+          <dl className="tnum flex flex-wrap gap-x-8 gap-y-4 text-sm">
             <div>
               <dt className="text-xs text-ink-3">Baskets</dt>
               <dd className="display mt-1 text-xl text-ink">
@@ -160,6 +174,25 @@ export function Explorer() {
                 {heldInVaults == null ? "…" : money(heldInVaults)}
               </dd>
             </div>
+            <div>
+              <dt className="text-xs text-ink-3">Actions</dt>
+              <dd className="display mt-1 text-xl text-ink">
+                {traction ? count(traction.actions) : "…"}
+              </dd>
+            </div>
+            {/* The ledger states the count either way; here it shows once someone outside the team has acted. */}
+            {traction && traction.outside > 0 && (
+            <div>
+              <dt className="text-xs text-ink-3">
+                <Link href="/ledger" className="underline decoration-line-strong underline-offset-4 hover:text-ink-2">
+                  Wallets that aren&rsquo;t ours
+                </Link>
+              </dt>
+              <dd className="display mt-1 text-xl text-ink">
+                {decoding ? "…" : count(traction.outside)}
+              </dd>
+            </div>
+            )}
           </dl>
         )}
       </div>
@@ -177,6 +210,17 @@ export function Explorer() {
             />
           </label>
           <div className="flex flex-wrap gap-2">
+            {testCount > 0 && (
+              <label className="flex cursor-pointer items-center gap-2 border border-line px-3 py-2 text-xs text-ink-2 rounded-[var(--radius-control)]">
+                <input
+                  type="checkbox"
+                  checked={showTests}
+                  onChange={(event) => setShowTests(event.target.checked)}
+                  className="accent-[var(--color-bind)]"
+                />
+                Show test baskets ({count(testCount)})
+              </label>
+            )}
             {SORTS.map((option) => (
               <button
                 key={option.key}

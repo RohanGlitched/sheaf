@@ -57,7 +57,7 @@ The UI tags every fixture value as "sandbox fixture" (Panta marks these answers 
 - **The market.** The sandbox has one fixture market, "Sandbox test market". It is labelled as standing in for the basket's market, never shown as if it were the basket's own.
 - **Signing.** Sandbox builds return an empty transaction, no instructions, and a placeholder blockhash. Sheaf then compiles a memo-only stand-in on a fresh devnet blockhash, asks the wallet to sign it, and says so. The signed transaction is never sent anywhere. If a wallet declines, the sandbox flow can continue with a clearly labelled placeholder signature.
 
-`POST /api/panta` has two throttles: 20 requests a minute per IP, and per-kind caps below Panta's own account limits (24 quotes, 16 builds and 30 reports a minute). Identical create quotes are reused for 60 s. In the sandbox, a buy or claim must name a market in Panta's catalog.
+`POST /api/panta` has two throttles: 20 requests a minute per IP, and per-kind caps below Panta's own account limits (24 quotes, 16 builds, 30 reports and 90 reads a minute). Identical create quotes are reused for 60 s. In the sandbox, a buy or claim must name a market in Panta's catalog.
 
 ### What changes for live
 

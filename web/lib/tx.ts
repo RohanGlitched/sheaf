@@ -476,8 +476,16 @@ export const SHEAF_ERRORS: Record<number, string> = {
   6023: "The arithmetic overflowed.",
 };
 
-/** A readable sentence for whatever a wallet or the chain threw back. */
-export function explainError(error: unknown): string {
+/** Anchor's own account errors, which a stale page meets when someone else got there first. */
+const ACCOUNT_NOT_INITIALIZED = 3012; // 0xbc4
+
+/**
+ * A readable sentence for whatever a wallet or the chain threw back.
+ *
+ * Pass `action: "cancel"` when the transaction was returning an order's dollars:
+ * then an order account that no longer exists means the dollars are already back.
+ */
+export function explainError(error: unknown, context?: { action?: "cancel" }): string {
   const raw =
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
 
@@ -485,16 +493,28 @@ export function explainError(error: unknown): string {
     return "You cancelled the transaction.";
   }
 
+  // The RPC itself refused or rate-limited a call, e.g. `403 : {"jsonrpc":"2.0",…}`.
+  if (/\b(403|429)\b\s*:?\s*\{|"code"\s*:\s*(403|429)\b|Method not allowed|Too many requests|rate limit/i.test(raw)) {
+    return "The site's connection refused a call. Try again in a moment.";
+  }
+
   const custom = /custom program error: 0x([0-9a-f]+)/i.exec(raw);
-  if (custom) {
-    const code = parseInt(custom[1], 16);
+  // confirmSignature reports a landed failure as `{"InstructionError":[0,{"Custom":3012}]}`.
+  const anchorCode = /Error Number: (\d+)/.exec(raw) ?? /"Custom"\s*:\s*(\d+)/.exec(raw);
+  const code = custom ? parseInt(custom[1], 16) : anchorCode ? Number(anchorCode[1]) : null;
+  if (code === ACCOUNT_NOT_INITIALIZED || /AccountNotInitialized/.test(raw)) {
+    return context?.action === "cancel"
+      ? "Already returned."
+      : "That account no longer exists. Someone may have closed it already; reload to see where things stand.";
+  }
+  if (code != null) {
     if (SHEAF_ERRORS[code]) return SHEAF_ERRORS[code];
     // Every other program error carries its own message in the IDL.
     const fromIdl = (sheafIdl.errors as { code: number; msg?: string }[]).find((e) => e.code === code)?.msg;
     if (fromIdl) return `${fromIdl}.`;
   }
   for (const [code, message] of Object.entries(SHEAF_ERRORS)) {
-    if (raw.includes(code)) return message;
+    if (new RegExp(`\\b${code}\\b`).test(raw)) return message;
   }
 
   if (/no record of a prior credit|blockhash not found/i.test(raw)) {
@@ -509,5 +529,14 @@ export function explainError(error: unknown): string {
   if (/block height exceeded/i.test(raw)) {
     return "The transaction expired before it was signed. Try again.";
   }
-  return raw.split("\n")[0] || "The transaction failed.";
+  if (/failed to fetch|fetch failed|network ?error|ECONNRESET|timed? ?out/i.test(raw)) {
+    return "The connection dropped before the network answered. Try again in a moment.";
+  }
+  if (/\b5\d\d\b\s*:?\s*\{|Internal error|Service unavailable/i.test(raw)) {
+    return "The site's connection had a hiccup. Try again in a moment.";
+  }
+  // Never show a raw RPC body: keep only the sentence in front of any JSON.
+  const first = raw.split("\n")[0].replace(/\s*[:\-]?\s*[{[].*$/s, "").trim();
+  if (!first || /^\d+$/.test(first) || first.length > 200) return "The transaction failed. Try again in a moment.";
+  return /[.!?]$/.test(first) ? first : `${first}.`;
 }

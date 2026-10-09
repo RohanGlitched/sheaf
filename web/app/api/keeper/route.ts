@@ -14,8 +14,9 @@ let lastRun = 0;
 let running: Promise<unknown> | null = null;
 
 async function handle() {
-  if (running) return Response.json({ busy: true });
-  if (Date.now() - lastRun < 4_000) return Response.json({ throttled: true });
+  // A repeat is answered with a 200, not an error, so a scheduler never sees a failure.
+  if (running) return Response.json({ busy: true }, { headers: { "cache-control": "no-store" } });
+  if (Date.now() - lastRun < 4_000) return Response.json({ throttled: true }, { headers: { "cache-control": "no-store" } });
   lastRun = Date.now();
   running = runKeeper();
   try {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMarket } from "./market-provider";
 import { money } from "@/lib/format";
 
+type Side = "buy" | "sell" | "arb";
 type Print = {
   signature: string;
   slot: number;
@@ -12,12 +13,20 @@ type Print = {
   symbol: string;
   base: string;
   raw: number;
-  side: "buy" | "sell" | "arb" | "move";
+  side: Side;
   wallet: string;
   usd: number | null;
   quote: "USDC" | "USDT" | "SOL" | null;
   venue: string | null;
+  /** Landed after the server last read its mint: block-to-screen time is meaningful. */
+  live?: boolean;
 };
+/** A row from web/public/tape.seed.json: captured earlier, with the price of its own moment. */
+type SeedPrint = Print & { multiplier: number; refPrice: number | null };
+type Seed = { capturedAt: number; source: string; note: string; prints: SeedPrint[] };
+
+type RaceSide = { medianMs: number | null; slot: number | null; answered: number; rateLimited: number };
+type Upstream = { calls: number; ok: number; rateLimited: number; failed: number };
 type Tape = {
   slot: number;
   via: "solami" | "public";
@@ -26,26 +35,77 @@ type Tape = {
   prints: Print[];
   polledAt: number;
   watching: string[];
+  backlog: number;
   proof: {
     rpcMs: number | null;
-    race: { solamiMs: number | null; publicMs: number | null; at: number } | null;
+    compare: {
+      slot: { samples: number; solami: RaceSide; public: RaceSide; slotLead: number | null; at: number } | null;
+      freshTx: { tried: number; solami: number; public: number };
+      upstreams: { solami: Upstream; public: Upstream };
+    };
     calls: number;
     pollMs: number;
   };
 };
 
 const KEEP = 40;
+/** Earlier trades fill the list until this many live rows have arrived. */
+const SEED_UNTIL = 8;
 
 const ago = (p: Print, now: number) => {
   const s = Math.max(0, Math.round(now / 1000 - p.time));
-  const text = s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+  const text =
+    s < 60
+      ? `${s}s ago`
+      : s < 3600
+        ? `${Math.floor(s / 60)}m ago`
+        : s < 86_400
+          ? `${Math.floor(s / 3600)}h ago`
+          : new Date(p.time * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   // Placed by slot distance rather than read from the block: say so.
   return p.timeSource === "slot" ? `~${text}` : text;
 };
 
-const SIDE = { buy: "Bought", sell: "Sold", arb: "Arb", move: "Moved" } as const;
+const SIDE: Record<Side, string> = { buy: "Bought", sell: "Sold", arb: "Arb" };
 
 const seconds = (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`);
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length ? (s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null;
+};
+const stamp = (unix: number) =>
+  new Date(unix * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+/** One plain sentence on how the two RPCs compared, whichever way it went. */
+function verdict(c: Tape["proof"]["compare"]): string | null {
+  const r = c.slot;
+  if (!r || r.solami.medianMs == null || r.public.medianMs == null) return null;
+  const s = r.solami.medianMs;
+  const p = r.public.medianMs;
+  const speed =
+    s === p
+      ? `Solami and the public RPC answered getSlot equally fast (${s} ms median over ${r.samples} paired calls)`
+      : s < p
+        ? `Solami answered getSlot faster (${s} vs ${p} ms median over ${r.samples} paired calls)`
+        : `The public RPC answered getSlot faster from this server (${p} vs ${s} ms median over ${r.samples} paired calls)`;
+  const g = r.slotLead;
+  const ahead = (who: string, n: number) => `${who} slot was ${n} ahead`;
+  const lead =
+    g == null
+      ? ""
+      : g === 0
+        ? ", and both reported the same slot"
+        : // Who was ahead on the chain tip, joined to who was faster.
+          (g > 0) === (s < p) && s !== p
+          ? `, and ${ahead("its", Math.abs(g))} too`
+          : `${s === p ? ";" : ", but"} ${ahead(g > 0 ? "Solami's" : "the public RPC's", Math.abs(g))}`;
+  const u = c.upstreams;
+  const limits = `Solami has rate-limited ${u.solami.rateLimited} of ${u.solami.calls} calls from this server, the public RPC ${u.public.rateLimited} of ${u.public.calls}`;
+  const tx = c.freshTx.tried
+    ? `; of ${c.freshTx.tried} transaction${c.freshTx.tried === 1 ? "" : "s"} asked for seconds after landing, Solami served ${c.freshTx.solami} and the public RPC ${c.freshTx.public}`
+    : "";
+  return `${speed}${lead}. ${limits}${tx}.`;
+}
 
 /**
  * Tokenized stocks changing hands on Solana mainnet, polled every few seconds
@@ -54,20 +114,31 @@ const seconds = (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `
  * seen less) cannot thin the list, and a failed poll leaves the last good tape
  * in place. New rows arrive highlighted and settle, so the motion on this
  * section is the market's, not ours.
+ *
+ * Until enough rows have come from the server, trades captured earlier
+ * (public/tape.seed.json, written by scripts/tape-seed.mjs) fill the list
+ * under an "Earlier trades" divider, with their real block times. They are
+ * never highlighted, never counted as live, and never feed the latency figures.
  */
 export function LiveTape() {
   const { bySymbol } = useMarket();
   const [tape, setTape] = useState<Tape | null>(null);
   const [rows, setRows] = useState<Print[]>([]);
+  const [seed, setSeed] = useState<Seed | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [lastOk, setLastOk] = useState<number | null>(null);
   const known = useRef<Map<string, Print>>(new Map());
-  const arrivedAt = useRef<Map<string, number>>(new Map());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
-  const [screenLag, setScreenLag] = useState<number | null>(null);
+  const lags = useRef<number[]>([]);
+  const [screenLag, setScreenLag] = useState<{ ms: number; n: number } | null>(null);
 
   useEffect(() => {
     let live = true;
+    fetch("/tape.seed.json")
+      .then((r) => (r.ok ? (r.json() as Promise<Seed>) : null))
+      .then((s) => live && s?.prints?.length && setSeed(s))
+      .catch(() => {});
+
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       try {
@@ -79,17 +150,13 @@ export function LiveTape() {
           const at = Date.now();
           const arrived = new Set<string>();
           for (const p of t.prints) {
-            if (known.current.has(p.signature)) continue;
+            if (known.current.has(p.signature) || !(p.side in SIDE)) continue;
             known.current.set(p.signature, p);
-            arrivedAt.current.set(p.signature, at);
             arrived.add(p.signature);
           }
           // Newest first by slot, then block time; keep a rolling window.
           const merged = [...known.current.values()].sort((a, b) => b.slot - a.slot || b.time - a.time);
-          for (const p of merged.slice(KEEP)) {
-            known.current.delete(p.signature);
-            arrivedAt.current.delete(p.signature);
-          }
+          for (const p of merged.slice(KEEP)) known.current.delete(p.signature);
           setRows(merged.slice(0, KEEP));
           // Only a newer server tape replaces the header line, so an older cached
           // answer cannot move the slot backwards.
@@ -97,8 +164,13 @@ export function LiveTape() {
           setLastOk(at);
           if (!first && arrived.size) {
             setFresh(arrived);
-            const newest = merged.find((p) => arrived.has(p.signature) && p.timeSource === "chain");
-            if (newest) setScreenLag(at - newest.time * 1000);
+            // Block to screen counts only trades that landed while the server was
+            // watching their mint, with a block time read from the chain.
+            const timed = merged.filter((p) => arrived.has(p.signature) && p.live && p.timeSource === "chain");
+            if (timed.length) {
+              lags.current = [...lags.current, ...timed.map((p) => at - p.time * 1000)].slice(-15);
+              setScreenLag({ ms: median(lags.current)!, n: lags.current.length });
+            }
           }
         }
       } catch {
@@ -115,23 +187,101 @@ export function LiveTape() {
     };
   }, []);
 
-  const view = rows
-    .map((p) => {
-      const q = bySymbol(p.symbol);
-      const ui = q ? p.raw * q.multiplier : p.raw;
-      const value = p.usd ?? (q ? ui * q.price : null);
-      const fill = p.usd != null && ui > 0 ? p.usd / ui : null;
-      const vsJup = fill != null && q ? (fill / q.price - 1) * 100 : null;
-      // A fill more than 15% off the market is a decode we do not trust (a
-      // multi-leg route, a mint-and-swap): show the trade, not a price.
-      const trusted = vsJup != null && Math.abs(vsJup) < 15;
-      return { p, ui, value, fill: trusted ? fill : null, vsJup: trusted ? vsJup : null };
-    })
-    // Dust: under a dollar is a route's rounding, not a trade.
-    .filter((r) => r.value == null || r.value >= 1);
+  const price = (p: Print, seeded: boolean) => {
+    const q = bySymbol(p.symbol);
+    const s = seeded ? (p as SeedPrint) : null;
+    const multiplier = s ? s.multiplier : (q?.multiplier ?? 1);
+    // An earlier trade is set against Jupiter's price when it was captured.
+    const ref = s ? s.refPrice : (q?.price ?? null);
+    const ui = p.raw * multiplier;
+    const value = p.usd ?? (ref != null ? ui * ref : null);
+    const fill = p.usd != null && ui > 0 ? p.usd / ui : null;
+    const vsJup = fill != null && ref ? (fill / ref - 1) * 100 : null;
+    // A fill more than 15% off the market is a decode we do not trust (a
+    // multi-leg route, a mint-and-swap): show the trade, not a price.
+    const trusted = vsJup != null && Math.abs(vsJup) < 15;
+    return { p, ui, value, fill: trusted ? fill : null, vsJup: trusted ? vsJup : null, seeded };
+  };
+  // Dust: under a dollar is a route's rounding, not a trade.
+  const worth = (r: ReturnType<typeof price>) => r.value == null || r.value >= 1;
+
+  const view = rows.map((p) => price(p, false)).filter(worth);
+  const onScreen = new Set(view.map((r) => r.p.signature));
+  const oldestLive = view.length ? Math.min(...view.map((r) => r.p.slot)) : Infinity;
+  const earlier =
+    seed && view.length < SEED_UNTIL
+      ? seed.prints
+          .filter((p) => p.side in SIDE && !onScreen.has(p.signature) && p.slot < oldestLive)
+          .map((p) => price(p, true))
+          .filter(worth)
+          .slice(0, KEEP - view.length)
+      : [];
 
   const reconnecting = lastOk != null && now - lastOk > 20_000;
-  const race = tape?.proof.race;
+  const compare = tape?.proof.compare;
+  const race = compare?.slot ?? null;
+  const said = compare ? verdict(compare) : null;
+  const lead = race?.slotLead;
+
+  const cell = (label: string, value: string, note?: string) => (
+    <div className="bg-page px-4 py-3">
+      <dt className="text-xs text-ink-3">{label}</dt>
+      <dd className="tnum mt-1 text-ink">{value}</dd>
+      {note && <dd className="mt-0.5 text-[11px] leading-snug text-ink-3">{note}</dd>}
+    </div>
+  );
+
+  const grid =
+    "grid grid-cols-[3.75rem_minmax(0,1fr)_4.5rem] gap-3 px-4 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5rem_5.5rem] sm:px-5";
+
+  const row = ({ p, ui, value, fill, vsJup, seeded }: ReturnType<typeof price>) => (
+    <li
+      key={p.signature}
+      className={`${grid} items-baseline border-b border-line/70 py-2.5 text-sm transition-colors duration-[1600ms] last:border-0 ${
+        !seeded && fresh.has(p.signature) ? "bg-bind-wash" : "bg-transparent"
+      } ${seeded ? "opacity-75" : ""}`}
+    >
+      <span
+        className="tnum text-xs text-ink-3"
+        title={`${stamp(p.time)}, slot ${p.slot.toLocaleString("en-US")}${p.timeSource === "slot" ? ", time estimated from slot" : ""}`}
+      >
+        {ago(p, now)}
+      </span>
+      <span className="min-w-0 truncate text-ink">
+        <span className={p.side === "buy" ? "text-gain" : p.side === "sell" ? "text-loss" : "text-ink-2"}>
+          {SIDE[p.side]}
+        </span>{" "}
+        <span className="tnum">{ui < 0.01 ? ui.toFixed(4) : ui < 100 ? ui.toFixed(3) : ui.toFixed(1)}</span>{" "}
+        <span className="font-medium">{p.base}</span>
+        {p.venue && <span className="ml-1.5 hidden text-xs text-ink-3 md:inline">{p.venue}</span>}
+      </span>
+      <span className="tnum hidden truncate text-right text-ink-2 sm:block">
+        {fill != null ? (
+          <>
+            {money(fill)}{" "}
+            <span
+              className={`text-xs ${Math.abs(vsJup!) < 0.05 ? "text-ink-3" : vsJup! > 0 ? "text-gain" : "text-loss"}`}
+            >
+              {vsJup! >= 0 ? "+" : "−"}
+              {Math.abs(vsJup!).toFixed(2)}%
+            </span>
+          </>
+        ) : (
+          <span className="text-ink-3">—</span>
+        )}
+      </span>
+      <span className="tnum text-right text-ink-2">{value != null ? money(value) : "—"}</span>
+      <a
+        href={`https://solscan.io/tx/${p.signature}`}
+        target="_blank"
+        rel="noreferrer"
+        className="tnum hidden truncate text-right text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink sm:block"
+        title="Open the transaction on Solscan"
+      >
+        {p.wallet.slice(0, 4)}…{p.wallet.slice(-4)}
+      </a>
+    </li>
+  );
 
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-14">
@@ -139,9 +289,10 @@ export function LiveTape() {
         <h2 className="display text-title max-w-[16ch] text-ink">Stocks trading on Solana, right now.</h2>
         <p className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-2">
           Real trades in tokenized stocks on Solana mainnet, read from the chain seconds after they land:
-          the newest few on two of ten stock mints each poll, so a sample, not every fill. The fill price
-          is decoded from what the pool was paid, set against Jupiter&apos;s price for the same token.
-          These are the tokens a Sheaf basket holds, and the market that keeps its share price honest.
+          the newest few on two of ten stock mints each poll, so a sample, not every fill. Plain transfers
+          are left out. The fill price is decoded from what the pool was paid, set against Jupiter&apos;s
+          price for the same token. These are the tokens a Sheaf basket holds, and the market that keeps
+          its share price honest.
         </p>
         <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-3">
           <span
@@ -160,41 +311,55 @@ export function LiveTape() {
         </p>
         {tape?.fallback && <p className="mt-2 max-w-[48ch] text-xs leading-relaxed text-ink-3">{tape.fallback}.</p>}
 
-        {tape && (
+        {tape && compare && (
           <dl className="mt-7 grid max-w-[30rem] grid-cols-2 gap-px border border-line bg-line text-sm">
-            <div className="bg-page px-4 py-3">
-              <dt className="text-xs text-ink-3">{tape.via === "solami" ? "Solami" : "RPC"} round trip</dt>
-              <dd className="tnum mt-1 text-ink">{tape.proof.rpcMs != null ? `${tape.proof.rpcMs} ms` : "—"}</dd>
-            </div>
-            <div className="bg-page px-4 py-3">
-              <dt className="text-xs text-ink-3">Block to this screen</dt>
-              <dd className="tnum mt-1 text-ink">{screenLag != null ? seconds(screenLag) : "next new print"}</dd>
-            </div>
-            <div className="bg-page px-4 py-3">
-              <dt className="text-xs text-ink-3">getSlot, Solami vs public</dt>
-              <dd className="tnum mt-1 text-ink">
-                {race ? `${race.solamiMs ?? "—"} ms / ${race.publicMs ?? "—"} ms` : "—"}
-              </dd>
-            </div>
-            <div className="bg-page px-4 py-3">
-              <dt className="text-xs text-ink-3">Last poll</dt>
-              <dd className="tnum mt-1 text-ink">
-                {tape.proof.calls} calls in {seconds(tape.proof.pollMs)}
-              </dd>
-            </div>
+            {cell(
+              `${tape.via === "solami" ? "Solami" : "RPC"} round trip`,
+              tape.proof.rpcMs != null ? `${tape.proof.rpcMs} ms` : "—",
+              "this poll's getSlot",
+            )}
+            {cell(
+              "Block to this screen",
+              screenLag ? seconds(screenLag.ms) : "next live trade",
+              screenLag ? `median of ${screenLag.n} live trade${screenLag.n === 1 ? "" : "s"}` : undefined,
+            )}
+            {cell(
+              "getSlot median, Solami / public",
+              race ? `${race.solami.medianMs ?? "—"} / ${race.public.medianMs ?? "—"} ms` : "measuring",
+              race ? `${race.samples} paired calls, warm connections` : "runs once a minute",
+            )}
+            {cell(
+              "Chain tip",
+              lead == null ? "—" : lead > 0 ? `Solami +${lead} slot${lead === 1 ? "" : "s"}` : lead < 0 ? `Public +${-lead} slot${lead === -1 ? "" : "s"}` : "Same slot",
+              "median slot gap, same instant",
+            )}
+            {cell(
+              "Just-landed tx served",
+              compare.freshTx.tried
+                ? `${compare.freshTx.solami}/${compare.freshTx.tried} · ${compare.freshTx.public}/${compare.freshTx.tried}`
+                : "—",
+              "Solami · public, getTransaction",
+            )}
+            {cell(
+              "Rate-limited (429)",
+              `${compare.upstreams.solami.rateLimited}/${compare.upstreams.solami.calls} · ${compare.upstreams.public.rateLimited}/${compare.upstreams.public.calls}`,
+              "Solami · public, calls from this server",
+            )}
           </dl>
         )}
+        {said && <p className="mt-3 max-w-[48ch] text-xs leading-relaxed text-ink-2">{said}</p>}
         {tape && (
           <p className="mt-3 max-w-[48ch] text-xs leading-relaxed text-ink-3">
             Calls are sent one at a time, about 240 ms apart, so a poll stays under the free tier&apos;s five
-            requests a second. &ldquo;~&rdquo; marks a time placed by slot distance when the node had not yet
-            reported the block&apos;s time.
+            requests a second; the last one was {tape.proof.calls} calls in {seconds(tape.proof.pollMs)}.
+            &ldquo;~&rdquo; marks a time placed by slot distance when the node had not yet reported the
+            block&apos;s time.
           </p>
         )}
       </div>
 
       <div className="rounded-[var(--radius-panel)] border border-line bg-surface">
-        <div className="grid grid-cols-[3.75rem_minmax(0,1fr)_4.5rem] gap-3 border-b border-line px-4 py-3 text-xs text-ink-3 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5rem_5.5rem] sm:px-5">
+        <div className={`${grid} border-b border-line py-3 text-xs text-ink-3`}>
           <span>When</span>
           <span>Trade</span>
           <span className="hidden text-right sm:block">Fill vs Jupiter</span>
@@ -204,62 +369,29 @@ export function LiveTape() {
         <ol className="max-h-[440px] overflow-y-auto" aria-live="polite" aria-label="Recent trades">
           {view.length === 0 &&
             (tape ? (
-              <li className="px-5 py-10 text-center text-sm text-ink-3">
-                Watching {tape.watching.length} stock mints. No trade over a dollar has landed since this
-                server started reading; the next one appears here.
+              <li className="px-5 py-8 text-center text-sm leading-relaxed text-ink-3">
+                Waiting for the next xStock trade on mainnet. Trades usually land every few seconds during US
+                market hours.
+                {tape.backlog > 0 && " Reading the last few minutes of trades first."}
               </li>
             ) : (
+              !earlier.length &&
               Array.from({ length: 6 }, (_, i) => <li key={i} className="mx-5 my-3 h-6 rounded skeleton" />)
             ))}
-          {view.map(({ p, ui, value, fill, vsJup }) => (
-            <li
-              key={p.signature}
-              className={`grid grid-cols-[3.75rem_minmax(0,1fr)_4.5rem] items-baseline gap-3 border-b border-line/70 px-4 py-2.5 text-sm transition-colors duration-[1600ms] last:border-0 sm:grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)_5rem_5.5rem] sm:px-5 ${
-                fresh.has(p.signature) ? "bg-bind-wash" : "bg-transparent"
-              }`}
-            >
-              <span
-                className="tnum text-xs text-ink-3"
-                title={`Slot ${p.slot.toLocaleString("en-US")}${p.timeSource === "slot" ? ", time estimated from slot" : ""}`}
-              >
-                {ago(p, now)}
-              </span>
-              <span className="min-w-0 truncate text-ink">
-                <span className={p.side === "buy" ? "text-gain" : p.side === "sell" ? "text-loss" : "text-ink-2"}>
-                  {SIDE[p.side]}
-                </span>{" "}
-                <span className="tnum">{ui < 0.01 ? ui.toFixed(4) : ui < 100 ? ui.toFixed(3) : ui.toFixed(1)}</span>{" "}
-                <span className="font-medium">{p.base}</span>
-                {p.venue && <span className="ml-1.5 hidden text-xs text-ink-3 md:inline">{p.venue}</span>}
-              </span>
-              <span className="tnum hidden truncate text-right text-ink-2 sm:block">
-                {fill != null ? (
-                  <>
-                    {money(fill)}{" "}
-                    <span
-                      className={`text-xs ${Math.abs(vsJup!) < 0.05 ? "text-ink-3" : vsJup! > 0 ? "text-gain" : "text-loss"}`}
-                    >
-                      {vsJup! >= 0 ? "+" : "−"}
-                      {Math.abs(vsJup!).toFixed(2)}%
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-ink-3">—</span>
-                )}
-              </span>
-              <span className="tnum text-right text-ink-2">{value != null ? money(value) : "—"}</span>
-              <a
-                href={`https://solscan.io/tx/${p.signature}`}
-                target="_blank"
-                rel="noreferrer"
-                className="tnum hidden truncate text-right text-xs text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink sm:block"
-                title="Open the transaction on Solscan"
-              >
-                {p.wallet.slice(0, 4)}…{p.wallet.slice(-4)}
-              </a>
-            </li>
-          ))}
+          {view.map(row)}
         </ol>
+        {earlier.length > 0 && seed && (
+          <div className="border-t border-line" aria-label="Earlier trades, not live">
+            <p
+              className="flex flex-wrap items-baseline justify-between gap-x-3 bg-page/60 px-4 py-2 text-xs text-ink-3 sm:px-5"
+              title={seed.source}
+            >
+              <span className="text-ink-2">Earlier trades, not live</span>
+              <span className="tnum">captured {stamp(seed.capturedAt)}, fills against Jupiter then</span>
+            </p>
+            <ol className="max-h-[300px] overflow-y-auto">{earlier.map(row)}</ol>
+          </div>
+        )}
       </div>
     </div>
   );

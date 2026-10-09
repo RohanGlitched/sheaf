@@ -15,11 +15,37 @@ import { money } from "@/lib/format";
 import { ConnectButton } from "./connect-button";
 import { PlanSheaf } from "./plan-sheaf";
 
+/**
+ * Each run's auction: half an hour, so a scheduled keeper always gets a turn
+ * before it ends; four minutes at demo speed, so one run's order has closed
+ * before the next run is due and two never overlap.
+ */
 const CADENCE = [
-  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month" },
-  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week" },
-  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", hint: "demo speed, to watch runs land today" },
+  { key: "month", label: "Every month", secs: 30 * 24 * 3600, unit: "month", auctionSecs: 1800 },
+  { key: "week", label: "Every week", secs: 7 * 24 * 3600, unit: "week", auctionSecs: 1800 },
+  { key: "demo", label: "Every 5 minutes", secs: 300, unit: "5 minutes", auctionSecs: 240, hint: "demo speed, to watch runs land today" },
 ] as const;
+
+/** Each run's auction opens this far either side of the reference. */
+export const PLAN_BAND_BPS = 200;
+/** The reference may follow the market this far, three bands, either way and never further. */
+export const PLAN_BOUND_BPS = 3 * PLAN_BAND_BPS;
+
+// The bounds are on shares per dollar, so as prices they are 1 / (1 ∓ 6%): 6.4% above, 5.7% below.
+const BOUND_ABOVE = Math.round((10_000 / (10_000 - PLAN_BOUND_BPS) - 1) * 1000) / 10;
+const BOUND_BELOW = Math.round((1 - 10_000 / (10_000 + PLAN_BOUND_BPS)) * 1000) / 10;
+
+/** A plan's reference rate and the bounds it may never leave, from a share's fair price in dollars. */
+export function planTerms(navPerShare: number) {
+  // Raw share units per raw cash unit, times 1e9: (1e6 / nav) shares per 1e6 cash.
+  const ref = BigInt(Math.floor(1e9 / navPerShare));
+  return {
+    ref,
+    minRef: (ref * BigInt(10_000 - PLAN_BOUND_BPS)) / 10_000n,
+    maxRef: (ref * BigInt(10_000 + PLAN_BOUND_BPS)) / 10_000n,
+    bandBps: PLAN_BAND_BPS,
+  };
+}
 
 /**
  * A monthly plan: a fixed amount, on a schedule, for as many runs as you choose.
@@ -67,8 +93,7 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
     setBusy(true);
     setError(null);
     try {
-      // Raw share units per raw cash unit, times 1e9: (1e6 / nav) shares per 1e6 cash.
-      const refE9 = BigInt(Math.floor(1e9 / navPerShare));
+      const terms = planTerms(navPerShare);
       const { plan, ix } = openPlanIx({
         owner: publicKey,
         basket: new PublicKey(basket.address),
@@ -78,14 +103,13 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
         cashPerRun: toCashRaw(amount),
         periodSecs: c.secs,
         runs,
-        refSharesPerCashE9: refE9,
-        // The reference may follow the market down to half or up to one and a half
-        // times today's rate, never further, however thin the competition.
-        minRef: refE9 / 2n,
-        maxRef: (refE9 * 3n) / 2n,
-        bandBps: 200,
-        // Half an hour, so a scheduled keeper always gets a turn before it ends.
-        auctionSecs: 1800,
+        refSharesPerCashE9: terms.ref,
+        // The reference may follow the market three bands either side of today's
+        // rate and never further, however thin the competition.
+        minRef: terms.minRef,
+        maxRef: terms.maxRef,
+        bandBps: terms.bandBps,
+        auctionSecs: c.auctionSecs,
       });
       // The share account the fill will pay into, created by the buyer, idempotently.
       const shareMint = new PublicKey(basket.shareMint);
@@ -175,6 +199,13 @@ export function PlanForm({ basket, navPerShare, onDone }: { basket: Basket; navP
       {valid && (
         <p className="tnum mt-4 text-sm text-ink-2">
           {money(total)} over {runs} runs{inr ? ` (about ₹${Math.round(amount * inr).toLocaleString("en-IN")} a run)` : ""}. About {(amount / navPerShare!).toFixed(4)} {basket.symbol} a run at today&apos;s price.
+        </p>
+      )}
+      {navPerShare != null && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">
+          This plan never pays more than {BOUND_ABOVE}% above or {BOUND_BELOW}% below today&apos;s fair price of{" "}
+          {money(navPerShare)} a share, however the market moves. If the price leaves that range, re-centre the plan from your
+          plans page.
         </p>
       )}
 

@@ -7,9 +7,11 @@ import {
   rateLimiter,
   runEvmKeeper,
   runTempoSip,
+  SipRefused,
   type FillResult,
   type SipAction,
 } from "@/lib/evm-server";
+import { originAllowed } from "@/lib/server-origin";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,6 +36,8 @@ export const maxDuration = 60;
  */
 
 const perIp = rateLimiter(60_000, 12);
+let lastSweep = 0;
+let sweeping = false;
 
 async function handle(request: Request) {
   if (!houseAccount()) {
@@ -59,8 +63,10 @@ async function handle(request: Request) {
     }
   }
 
-  // Tempo SIP: act as the access key a visitor's account authorized. The chain enforces the budget and scope.
+  // Tempo SIP: act as the access key a visitor's account authorized. The chain enforces the budget and scope;
+  // the keeper adds the schedule (one instalment per period) and only takes the request from this site's pages.
   if (sip) {
+    if (!originAllowed(request, { required: true })) return Response.json({ error: "SIP runs are started from this site." }, { status: 403 });
     if (network !== "tempoTestnet") return Response.json({ error: "SIPs run on Tempo." }, { status: 400 });
     if (!sip.account || !isAddress(sip.account)) return Response.json({ error: "sip.account must be an address." }, { status: 400 });
     const action = sip.action as SipAction;
@@ -68,7 +74,8 @@ async function handle(request: Request) {
     try {
       return Response.json(await runTempoSip(sip.account as Address, action), { headers: { "cache-control": "no-store" } });
     } catch (err) {
-      return Response.json({ error: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200) }, { status: 500 });
+      const status = err instanceof SipRefused ? 429 : 500;
+      return Response.json({ error: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200) }, { status });
     }
   }
   const orderId = orderParam != null && orderParam !== "" && Number.isInteger(Number(orderParam)) ? Number(orderParam) : undefined;
@@ -78,17 +85,31 @@ async function handle(request: Request) {
     : DEPLOYED.map((c) => c.deployment!).filter((d) => d.network !== "sepolia");
   if (network && targets.length === 0) return Response.json({ error: "Unknown network." }, { status: 400 });
 
+  // A full sweep (the cron's call) runs one at a time and at most every few seconds;
+  // a repeat is answered, not failed, so schedulers see a 200.
+  const sweep = !network && orderId == null;
+  if (sweep) {
+    if (sweeping) return Response.json({ busy: true }, { headers: { "cache-control": "no-store" } });
+    if (Date.now() - lastSweep < 4_000) return Response.json({ throttled: true }, { headers: { "cache-control": "no-store" } });
+    lastSweep = Date.now();
+    sweeping = true;
+  }
+
   const results: FillResult[] = [];
   const errors: { network: string; error: string }[] = [];
-  await Promise.all(
-    targets.map(async (d) => {
-      try {
-        results.push(...(await runEvmKeeper(d, { orderId, max: orderId != null ? 1 : 3 })));
-      } catch (err) {
-        errors.push({ network: d.network, error: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200) });
-      }
-    }),
-  );
+  try {
+    await Promise.all(
+      targets.map(async (d) => {
+        try {
+          results.push(...(await runEvmKeeper(d, { orderId, max: orderId != null ? 1 : 3 })));
+        } catch (err) {
+          errors.push({ network: d.network, error: ((err as Error).message ?? "error").split("\n")[0].slice(0, 200) });
+        }
+      }),
+    );
+  } finally {
+    if (sweep) sweeping = false;
+  }
   return Response.json({ results, errors }, { headers: { "cache-control": "no-store" } });
 }
 

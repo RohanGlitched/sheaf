@@ -13,6 +13,10 @@ import { MAINNET_RPC } from "./config";
  * cool-down and the call is answered by the public RPC instead, and the caller
  * is told so. Nothing here ever reports "solami" for an answer Solami did not give.
  *
+ * raceSlot and raceTransaction put the same call to Solami and the public RPC
+ * at the same instant, over warm sockets, for the comparison the tape shows;
+ * upstreamStats counts every call and every 429 per upstream.
+ *
  * The key travels in the query string because that is how Solami's RPC takes it.
  * It stays on the server, and no error message built here includes the URL.
  */
@@ -64,8 +68,20 @@ export class RpcError extends Error {
   }
 }
 
+/** Every request this instance sent to an upstream, and how it ended. */
+export type UpstreamStats = { calls: number; ok: number; rateLimited: number; failed: number };
+const stats: Record<Via, UpstreamStats> = {
+  solami: { calls: 0, ok: 0, rateLimited: 0, failed: 0 },
+  public: { calls: 0, ok: 0, rateLimited: 0, failed: 0 },
+};
+export function upstreamStats(): Record<Via, UpstreamStats> {
+  return { solami: { ...stats.solami }, public: { ...stats.public } };
+}
+
 async function send<T>(via: Via, method: string, params: unknown[], timeoutMs: number): Promise<{ result: T; ms: number }> {
   await pace(via);
+  const tally = stats[via];
+  tally.calls++;
   const started = performance.now();
   let res: Response;
   try {
@@ -77,6 +93,7 @@ async function send<T>(via: Via, method: string, params: unknown[], timeoutMs: n
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
+    tally.failed++;
     throw new RpcError(`${method}: ${(err as Error).name === "TimeoutError" ? "timed out" : "network error"}`);
   }
   const ms = Math.round(performance.now() - started);
@@ -86,9 +103,16 @@ async function send<T>(via: Via, method: string, params: unknown[], timeoutMs: n
     body = await res.json();
   } catch {}
   const limited = res.status === 429 || body?.error?.code === -32005 || body?.error?.code === 429;
-  if (limited) throw new RpcError(`${method}: rate limited`, true, retryAfterMs || 1000);
-  if (!res.ok) throw new RpcError(`${method}: HTTP ${res.status}`);
-  if (!body) throw new RpcError(`${method}: unreadable answer`);
+  if (limited) {
+    tally.rateLimited++;
+    throw new RpcError(`${method}: rate limited`, true, retryAfterMs || 1000);
+  }
+  if (!res.ok || !body) {
+    tally.failed++;
+    throw new RpcError(`${method}: ${!res.ok ? `HTTP ${res.status}` : "unreadable answer"}`);
+  }
+  // A JSON-RPC error about the request still means the node answered.
+  tally.ok++;
   if (body.error) throw new RpcError(`${method}: ${body.error.message ?? "error"}`, false, 0, true);
   return { result: body.result as T, ms };
 }
@@ -140,15 +164,96 @@ export async function mainnetCall<T>(
   };
 }
 
-/** Time one getSlot against a single upstream, for the side-by-side on the tape. */
-export async function timeSlot(via: Via): Promise<{ slot: number; ms: number } | null> {
-  if (via === "solami" && !solamiKey()) return null;
+type Outcome<T> = { ok: true; result: T; ms: number } | { ok: false; limited: boolean };
+async function attempt<T>(via: Via, method: string, params: unknown[]): Promise<Outcome<T>> {
   try {
-    const { result, ms } = await send<number>(via, "getSlot", [{ commitment: "confirmed" }], 5_000);
-    return { slot: result, ms };
-  } catch {
-    return null;
+    return { ok: true, ...(await send<T>(via, method, params, 5_000)) };
+  } catch (err) {
+    return { ok: false, limited: err instanceof RpcError && err.rateLimited };
   }
+}
+
+const median = (xs: number[]) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+};
+
+export type RaceSide = {
+  /** Median round trip over the samples this upstream answered. */
+  medianMs: number | null;
+  /** Highest slot it reported across the samples. */
+  slot: number | null;
+  answered: number;
+  rateLimited: number;
+};
+
+export type SlotRace = {
+  method: "getSlot";
+  commitment: "confirmed";
+  /** Paired samples, after one warm-up pair that is thrown away. */
+  samples: number;
+  solami: RaceSide;
+  public: RaceSide;
+  /**
+   * Median of (Solami's slot minus the public RPC's) over pairs sent at the
+   * same instant: positive means Solami was ahead of the chain tip.
+   */
+  slotLead: number | null;
+  at: number;
+};
+
+/**
+ * The same call, getSlot at "confirmed", sent to both upstreams at the same
+ * instant, `samples` times over warm connections (one pair first, discarded,
+ * opens the keep-alive sockets). Each pair goes out together, so neither side
+ * gains from going second and the two slots describe the same moment. Solami's
+ * half waits its turn in the paced queue like any other call.
+ */
+export async function raceSlot(samples = 5): Promise<SlotRace | null> {
+  if (!solamiKey()) return null;
+  const params = [{ commitment: "confirmed" }];
+  const pair = () => Promise.all([attempt<number>("solami", "getSlot", params), attempt<number>("public", "getSlot", params)]);
+  await pair();
+  const rows: Awaited<ReturnType<typeof pair>>[] = [];
+  for (let i = 0; i < samples; i++) rows.push(await pair());
+  const side = (i: 0 | 1): RaceSide => {
+    const ok = rows.map((r) => r[i]).filter((o): o is Extract<Outcome<number>, { ok: true }> => o.ok);
+    return {
+      medianMs: median(ok.map((o) => o.ms)),
+      slot: ok.length ? Math.max(...ok.map((o) => o.result)) : null,
+      answered: ok.length,
+      rateLimited: rows.filter((r) => !r[i].ok && (r[i] as { limited: boolean }).limited).length,
+    };
+  };
+  const leads = rows.flatMap(([a, b]) => (a.ok && b.ok ? [a.result - b.result] : []));
+  return {
+    method: "getSlot",
+    commitment: "confirmed",
+    samples,
+    solami: side(0),
+    public: side(1),
+    slotLead: median(leads),
+    at: Date.now(),
+  };
+}
+
+export type TxCheck = {
+  /** True when the upstream returned the transaction, false when it answered null, null when it failed or 429ed. */
+  solami: boolean | null;
+  public: boolean | null;
+};
+
+/**
+ * Ask both upstreams, at the same instant, for one transaction that landed
+ * seconds ago. An RPC that answers null has not caught up with it yet.
+ */
+export async function raceTransaction(signature: string): Promise<TxCheck | null> {
+  if (!solamiKey()) return null;
+  const params = [signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }];
+  const [a, b] = await Promise.all([attempt<unknown>("solami", "getTransaction", params), attempt<unknown>("public", "getTransaction", params)]);
+  return { solami: a.ok ? a.result != null : null, public: b.ok ? b.result != null : null };
 }
 
 /**

@@ -5,6 +5,7 @@ import { encodeFunctionData, type Address } from "viem";
 import type { ChainBasket, Deployment } from "@/lib/chains";
 import { DESK_ABI, explainEvmError, fromRaw, readDeskOrders, type DeskOrder } from "@/lib/evm";
 import { quantity, shortAddress, timeAgo } from "@/lib/format";
+import { useKeeperKick } from "@/lib/use-keeper-kick";
 import type { EvmWallet } from "./evm-wallet";
 
 /**
@@ -30,6 +31,8 @@ export function EvmDeskBook({
   const [acting, setActing] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  // Ask the house filler to look at this chain's open orders while the page is open.
+  useKeeperKick("/api/evm-keeper", { network: d.network });
 
   const load = useCallback(async () => {
     try {
@@ -37,7 +40,11 @@ export function EvmDeskBook({
       setNow(Date.now());
       setError(null);
     } catch (err) {
-      setError((err as Error).message.split("\n")[0]);
+      setError(
+        /\b(403|429)\b|rate limit|fetch failed|network/i.test(String((err as Error)?.message))
+          ? "The chain's connection is busy. The book will try again in a moment."
+          : "The desk could not be read just now. The book will try again in a moment.",
+      );
     }
   }, [d]);
 
@@ -60,11 +67,13 @@ export function EvmDeskBook({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ network: d.network, order: id }),
       });
-      const json = (await res.json()) as { results?: { status: string; reason?: string }[]; error?: string };
+      const json = (await res.json().catch(() => ({}))) as { results?: { status: string; reason?: string }[]; error?: string };
       const r = json.results?.[0];
-      setNote(r ? (r.status === "filled" ? `Order #${id} filled by the house.` : `Order #${id}: ${r.reason ?? r.status}.`) : (json.error ?? "No answer."));
+      setNote(r ? (r.status === "filled" ? `Order #${id} filled by the house.` : `Order #${id}: ${r.reason ?? r.status}.`) : (json.error ?? "The house did not answer. Try again in a moment."));
       await load();
       onDone();
+    } catch {
+      setNote("The house could not be reached. Try again in a moment.");
     } finally {
       setActing(null);
     }
@@ -103,7 +112,7 @@ export function EvmDeskBook({
           </a>
         </p>
       </div>
-      {error && <p className="mt-6 text-sm text-loss">Could not read the desk: {error}</p>}
+      {error && <p className="mt-6 text-sm text-loss">{error}</p>}
       {!orders ? (
         <p className="mt-7 text-sm text-ink-3">Reading the desk…</p>
       ) : orders.length === 0 ? (

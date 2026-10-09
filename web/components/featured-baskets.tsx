@@ -6,12 +6,14 @@ import { useBaskets } from "@/lib/use-baskets";
 import { BasketCard } from "./basket-card";
 import { useOpenLaunches } from "@/lib/use-launches";
 import { CardSkeletons } from "./skeletons";
+import { isTestBasket } from "@/lib/hidden";
 
 /** Shown first, in this order; any other basket only fills a gap if one cannot be read. */
 const FEATURED = [
-  "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
-  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  // Bitcoin, by proxy: its launch market is on the current curve (sheaf-nav-shelf-v2).
   "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+  "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
 ];
 
 export function FeaturedBaskets() {
@@ -21,7 +23,7 @@ export function FeaturedBaskets() {
     const picked = FEATURED.map((a) => baskets.find((b) => b.address === a)).filter(
       (b): b is NonNullable<typeof b> => b != null,
     );
-    const rest = baskets.filter((b) => !FEATURED.includes(b.address));
+    const rest = baskets.filter((b) => !FEATURED.includes(b.address) && !isTestBasket(b));
     return [...picked, ...rest].slice(0, 3);
   }, [baskets]);
   const launched = useOpenLaunches(shown);
@@ -39,7 +41,7 @@ export function FeaturedBaskets() {
           href="/explore"
           className="rounded-[var(--radius-control)] border border-line-strong bg-surface px-4 py-2.5 text-sm text-ink transition-colors hover:border-ink-3"
         >
-          {baskets ? `See all ${baskets.length}` : "See all"}
+          {baskets ? `See all ${baskets.filter((b) => !isTestBasket(b)).length}` : "See all"}
         </Link>
       </div>
 

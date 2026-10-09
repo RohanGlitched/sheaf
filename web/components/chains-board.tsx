@@ -71,8 +71,8 @@ function SolanaCard() {
         xStocks and PreStocks, the program, the launch markets, dollar orders and monthly plans.
       </p>
       <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-ink-2">
-        Baskets hold xStocks and PreStocks, priced from mainnet, created and redeemed on devnet against mirrors that carry the same Token-2022
-        extensions. Every plan, order and fill is decoded on the ledger.
+        Baskets hold xStocks and PreStocks, priced from mainnet, created and redeemed on devnet against mirror mints with the same decimals and
+        dividend multiplier. Every plan, order and fill is decoded on the ledger.
       </p>
       <div className="mt-auto flex flex-wrap gap-3 pt-6 text-sm">
         <Link href="/explore" className="rounded-[var(--radius-control)] bg-bind px-4 py-2 font-medium text-white hover:bg-bind-deep">

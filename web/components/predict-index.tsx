@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useBaskets } from "@/lib/use-baskets";
+import { isTestBasket } from "@/lib/hidden";
 import { PoweredByPanta } from "./panta-steps";
 import { pantaGet, pantaPost, short, usdcBase, type PantaMode } from "@/lib/panta-client";
 
@@ -40,7 +41,9 @@ const LIFECYCLE: { verb: string; endpoint: string; where: string }[] = [
  * costs on Panta.
  */
 export function PredictIndex() {
-  const { baskets, error } = useBaskets();
+  const { baskets: all, error } = useBaskets();
+  // Baskets our QA runs made stay reachable by URL but are left out of the list.
+  const baskets = useMemo(() => (all ? all.filter((b) => !isTestBasket(b)) : null), [all]);
   const [mode, setMode] = useState<PantaMode | null>(null);
   const [fee, setFee] = useState<Fee | null>(null);
   const [navs, setNavs] = useState<Record<string, Nav | "error">>({});
@@ -114,8 +117,8 @@ export function PredictIndex() {
 
   return (
     <>
-      <section className="grid gap-10 pt-16 pb-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-end">
-        <div>
+      <section className="grid grid-cols-1 gap-10 pt-16 pb-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-end">
+        <div className="min-w-0">
           <p className="text-sm text-bind">Predict</p>
           <h1 className="display mt-2 text-hero leading-[0.95] text-ink">A market on every basket.</h1>
           <p className="mt-6 max-w-[58ch] text-lg leading-relaxed text-ink-2">
@@ -173,7 +176,7 @@ export function PredictIndex() {
             return (
               <div
                 key={b.address}
-                className="grid gap-3 border-b border-line px-5 py-5 last:border-0 md:grid-cols-[minmax(0,1.6fr)_7rem_minmax(0,1fr)_minmax(0,1fr)_8rem] md:items-baseline md:gap-4"
+                className="grid grid-cols-1 gap-3 border-b border-line px-5 py-5 last:border-0 md:grid-cols-[minmax(0,1.6fr)_7rem_minmax(0,1fr)_minmax(0,1fr)_8rem] md:items-baseline md:gap-4"
               >
                 <div className="min-w-0">
                   <Link href={`/basket/${b.address}`} className="text-ink hover:underline hover:underline-offset-4">
@@ -230,8 +233,8 @@ export function PredictIndex() {
         </div>
       </section>
 
-      <section className="mt-24 grid gap-10 border-t border-line pt-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16">
-        <div>
+      <section className="mt-24 grid grid-cols-1 gap-10 border-t border-line pt-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16">
+        <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">How a market resolves.</h2>
           <p className="mt-5 max-w-[48ch] text-base leading-relaxed text-ink-2">
             YES if one share, valued from its vault at the closing time, rose more than SPY&apos;s
@@ -246,7 +249,7 @@ export function PredictIndex() {
             them yourself.
           </p>
         </div>
-        <div className="rounded-[var(--radius-panel)] border border-line bg-vault p-6 text-vault-ink">
+        <div className="min-w-0 rounded-[var(--radius-panel)] border border-line bg-vault p-6 text-vault-ink">
           <p className="text-xs opacity-70">
             What /api/nav answers for {rows[0] ? rows[0].symbol : "a basket"}, live, trimmed
           </p>
@@ -262,17 +265,17 @@ export function PredictIndex() {
         </p>
         <div className="mt-8 divide-y divide-line border border-line">
           {LIFECYCLE.map((row) => (
-            <div key={row.verb} className="grid gap-2 px-5 py-4 md:grid-cols-[9rem_minmax(0,1fr)_16rem] md:gap-6">
+            <div key={row.verb} className="grid grid-cols-1 gap-2 px-5 py-4 md:grid-cols-[9rem_minmax(0,1fr)_16rem] md:gap-6">
               <span className="text-ink">{row.verb}</span>
-              <code className="text-xs leading-relaxed text-ink-2">{row.endpoint}</code>
+              <code className="min-w-0 break-words text-xs leading-relaxed text-ink-2">{row.endpoint}</code>
               <span className="text-sm text-ink-3">{row.where}</span>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="mt-24 grid gap-10 border-t border-line pt-16 lg:grid-cols-2 lg:gap-16">
-        <div>
+      <section className="mt-24 grid grid-cols-1 gap-10 border-t border-line pt-16 lg:grid-cols-2 lg:gap-16">
+        <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">Why the sandbox.</h2>
           <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
             Opening a market on Panta costs about 50 USDC plus SOL, and Sheaf spends no real money. A{" "}
@@ -282,7 +285,7 @@ export function PredictIndex() {
             basket&apos;s price.
           </p>
         </div>
-        <div>
+        <div className="min-w-0">
           <h2 className="display text-title max-w-[18ch] text-ink">What changes for live.</h2>
           <p className="mt-5 max-w-[50ch] text-base leading-relaxed text-ink-2">
             One environment variable: a <code className="text-sm">pk_live_</code> key in{" "}

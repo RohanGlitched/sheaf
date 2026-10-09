@@ -17,33 +17,39 @@ import {
 } from "@/lib/dbc";
 import { GRADUATION_MULTIPLE, LAUNCH_FEE, OPEN_MULTIPLE } from "@/lib/launch";
 import lifecycle from "@/lib/meteora-lifecycle.json";
+import preset from "@/lib/meteora-preset.json";
 import { explorerAddress, explorerTx } from "@/lib/config";
 import { count, money, percent, quantity } from "@/lib/format";
 import { useMeasure } from "@/lib/use-measure";
+import { explainError } from "@/lib/tx";
 import { ConnectButton } from "./connect-button";
 import { confirmSignature } from "@/lib/confirm";
 
 const AMOUNTS = [0.01, 0.05, 0.1];
 const SELL_SHARES = [25, 50, 100];
 
+/** SOL a new launch raises before it graduates, per SOL of NAV, from the SDK's own curve builder. */
+const THRESHOLD_PER_NAV = preset.measured.thresholdSolPerNavSol;
+/** How long the opening bot tax lasts at its full rate: one scheduler period. */
+const FIRST_FEE_SECONDS = LAUNCH_FEE.totalDurationSeconds / LAUNCH_FEE.numberOfPeriod;
+
+/** The Meteora-specific failures first, then the site's shared reading of everything else. */
 function explain(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : String(error ?? "");
-  if (/User rejected|rejected the request|declined/i.test(raw)) {
-    return "You cancelled the transaction.";
-  }
   if (/insufficient lamports|insufficient funds|no record of a prior credit/i.test(raw)) {
     return "Not enough SOL on devnet. Switch the wallet to devnet, or get some at faucet.solana.com.";
   }
-  if (/slippage/i.test(raw)) return "The price moved while you were signing. Try again.";
-  if (/block height exceeded/i.test(raw)) {
-    return "The transaction expired before it was signed. Try again.";
-  }
+  if (/slippage|ExceededSlippage/i.test(raw)) return "The price moved while you were signing. Try again.";
   if (/already in use/i.test(raw)) {
     return "Something took this launch's address while you were signing. Try again: the next free address is used.";
   }
   if (/PoolIsCompleted|pool is completed/i.test(raw)) return CURVE_FULL;
-  return raw.split("\n")[0] || fallback;
+  const text = explainError(error);
+  return text === "The transaction failed. Try again in a moment." ? fallback : text;
 }
+
+/** SOL the curve took in. A graduated curve raised exactly its threshold, whatever its reserve reads now. */
+const raisedOf = (state: DbcState) => (state.migrated ? state.threshold : state.raised);
 
 type LaunchBasketProps = { address: string; name: string; symbol: string; creator: string };
 
@@ -71,7 +77,8 @@ function useLaunch(basket: LaunchBasketProps) {
       setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
     } catch (err) {
-      setReadError(err instanceof Error ? err.message : "The pool could not be read.");
+      const text = explainError(err);
+      setReadError(text.startsWith("The site's connection") ? text : "The pool could not be read just now. Reload to try again.");
     }
   }, [connection, address, name, symbol, creator]);
 
@@ -88,6 +95,9 @@ function graduationMultiple(state: DbcState): number {
 }
 
 export function LaunchMarket() {
+  const launch = useLaunch(FEATURED_BASKET);
+  // The featured curve predates the current preset, so its multiple is read off the pool, never assumed.
+  const featuredMultiple = launch.state ? graduationMultiple(launch.state) : null;
   return (
     <div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
@@ -105,14 +115,14 @@ export function LaunchMarket() {
           </p>
           <p className="mt-4 text-sm leading-relaxed text-ink-3">
             Any basket&rsquo;s creator can open one from the basket page in a single
-            signature, and earns half of its trading fees. This one stands in front
-            of the Frontier Labs basket and graduates at twenty times NAV; launches
-            opened now use a gentler curve that graduates at {GRADUATION_MULTIPLE}{" "}
-            times and puts a quarter of the supply into the graduated pool. Every
-            figure here is read from the pool account on each load.
+            signature, and earns half of its trading fees.{" "}
+            {featuredMultiple != null && featuredMultiple !== GRADUATION_MULTIPLE
+              ? `This one stands in front of the Frontier Labs basket and graduates at ${featuredMultiple} times NAV; launches opened now use a gentler curve that graduates at ${GRADUATION_MULTIPLE} times, after raising about ${THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL, and puts a quarter of the supply into the graduated pool.`
+              : `Launches open at half of NAV and graduate at ${GRADUATION_MULTIPLE} times it, after raising about ${THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL, with a quarter of the supply going into the graduated pool.`}{" "}
+            Every figure here is read from the pool account on each load.
           </p>
         </div>
-        <FeaturedLaunch />
+        <FeaturedLaunch launch={launch} />
       </div>
       <LaunchLifecycle />
     </div>
@@ -120,8 +130,15 @@ export function LaunchMarket() {
 }
 
 /** The featured launch, on its own: the home page and How it works both show it. */
-export function FeaturedLaunch() {
-  const launch = useLaunch(FEATURED_BASKET);
+export function FeaturedLaunch({ launch: given }: { launch?: ReturnType<typeof useLaunch> } = {}) {
+  return given ? <FeaturedCard launch={given} /> : <OwnFeaturedLaunch />;
+}
+
+function OwnFeaturedLaunch() {
+  return <FeaturedCard launch={useLaunch(FEATURED_BASKET)} />;
+}
+
+function FeaturedCard({ launch }: { launch: ReturnType<typeof useLaunch> }) {
   if (!launch.info) return <LaunchSkeleton />;
   return (
     <LaunchCard
@@ -173,8 +190,8 @@ export function BasketLaunch({
             {launch.info.baseSymbol} is a separate token priced off {basket.symbol}&rsquo;s NAV: the
             curve opened at half of it and{" "}
             {launch.state.migrated
-              ? `graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
-              : `graduates at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
+              ? `raised ${quantity(launch.state.threshold, 2)} SOL, then graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
+              : `graduates at ${graduationMultiple(launch.state)} times it, once ${quantity(launch.state.threshold, 2)} SOL has gone in, into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
             Buy and sell it here either way. It is a bet on the basket, not a redemption right into it.
           </p>
         </div>
@@ -278,8 +295,9 @@ function OpenLaunch({
           graduates into a Meteora DAMM v2 pool, liquidity locked for good, at{" "}
           {GRADUATION_MULTIPLE} times it. About a quarter of the supply goes into that pool, so
           it is a real market on the day it opens, and the first fifth of the money in buys
-          about a third of the supply, so no single early wallet takes half the token. You earn
-          half of every trading fee on the curve.
+          about a third of the supply, so no single early wallet takes half the token. It
+          graduates once about {THRESHOLD_PER_NAV.toFixed(2)} times NAV in SOL has gone in.
+          You earn half of every trading fee on the curve.
         </p>
       </div>
       <dl className="grid grid-cols-1 gap-px border-y border-line bg-line sm:grid-cols-3">
@@ -291,12 +309,16 @@ function OpenLaunch({
         <Fact
           label="Graduates at"
           value={navSol != null ? `${quantity(navSol * GRADUATION_MULTIPLE, 2)} SOL` : "—"}
-          note={`${GRADUATION_MULTIPLE} × NAV, into Meteora DAMM v2`}
+          note={
+            navSol != null
+              ? `${GRADUATION_MULTIPLE} × NAV, after about ${quantity(navSol * THRESHOLD_PER_NAV, 2)} SOL in`
+              : `${GRADUATION_MULTIPLE} × NAV, into Meteora DAMM v2`
+          }
         />
         <Fact
           label="Your share of fees"
-          value="50%"
-          note={`${LAUNCH_FEE.startingFeeBps / 100}% in the first seconds, ${LAUNCH_FEE.endingFeeBps / 100}% after ${LAUNCH_FEE.totalDurationSeconds / 60} minutes`}
+          value={`${preset.fees.creatorTradingFeePercentage}%`}
+          note={`The fee is ${LAUNCH_FEE.startingFeeBps / 100}% in the first ${FIRST_FEE_SECONDS} seconds, ${LAUNCH_FEE.endingFeeBps / 100}% after ${LAUNCH_FEE.totalDurationSeconds / 60} minutes`}
         />
       </dl>
       <div className="px-6 py-5">
@@ -314,7 +336,9 @@ function OpenLaunch({
         <p className="mt-4 text-xs leading-relaxed text-ink-3">
           One signature and about 0.02 SOL of rent. The token is fixed once it exists: no mint
           authority, no edits, and one launch per basket. The opening fee is a bot tax: a buy
-          in the first block pays a quarter of its order to you and the treasury.
+          in the first {FIRST_FEE_SECONDS} seconds pays {LAUNCH_FEE.startingFeeBps / 100}% of its
+          order in fees, split between you and the treasury, falling to{" "}
+          {LAUNCH_FEE.endingFeeBps / 100}% over {LAUNCH_FEE.totalDurationSeconds / 60} minutes.
         </p>
       </div>
     </div>
@@ -566,8 +590,11 @@ export function LaunchCard({
         )}
         {state?.migrated && (
           <p className="mb-4 text-sm leading-relaxed text-ink-2">
-            The curve filled and its liquidity moved into a Meteora DAMM v2 pool, locked for good.
-            Trading carries on there, from this card.{" "}
+            <span className="text-ink">
+              Raised {quantity(state.threshold, 2)} SOL and graduated to a Meteora DAMM v2 pool.
+            </span>{" "}
+            The curve&rsquo;s liquidity moved there, locked for good, and trading carries on there,
+            from this card.{" "}
             <a
               href={explorerAddress(dammV2PoolAddress(info.baseMint))}
               target="_blank"
@@ -906,7 +933,7 @@ function Curve({ state, error }: { state: DbcState | null; error: string | null 
     observer.observe(el.current);
     return () => observer.disconnect();
   }, []);
-  const progress = useTween(seen && state ? Math.min(1, state.raised / state.threshold) : 0);
+  const progress = useTween(seen && state ? Math.min(1, raisedOf(state) / state.threshold) : 0);
   return (
     <div ref={ref} className="h-[220px]">
       {state && width > 0 ? (
@@ -971,8 +998,8 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
       .map((f, i) => `${i === 0 ? "M" : "L"}${x(f * state.threshold).toFixed(1)},${y(capAt(f * state.threshold)).toFixed(1)}`)
       .join(" ");
   // While the marker is moving it sits on the curve itself; at rest it sits at the pool's own price.
-  const settled = Math.abs(progress - Math.min(1, state.raised / state.threshold)) < 0.0005;
-  const raised = settled ? state.raised : progress * state.threshold;
+  const settled = Math.abs(progress - Math.min(1, raisedOf(state) / state.threshold)) < 0.0005;
+  const raised = settled ? raisedOf(state) : progress * state.threshold;
   // A graduated pool's live price is off this chart, so its marker stays at the curve's end.
   const cap = settled && !state.migrated ? state.cap : capAt(raised);
   const filled = `${line(0, progress)} L${x(progress * state.threshold).toFixed(1)},${base} L${x(0)},${base} Z`;
@@ -985,7 +1012,11 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
       height={H}
       className="block"
       role="img"
-      aria-label={`Bonding curve: ${quantity(state.raised, 4)} of ${quantity(state.threshold, 2)} SOL raised, market cap ${quantity(state.cap, 2)} SOL`}
+      aria-label={
+        state.migrated
+          ? `Bonding curve: raised ${quantity(state.threshold, 2)} SOL and graduated to Meteora DAMM v2, market cap ${quantity(state.cap, 2)} SOL`
+          : `Bonding curve: ${quantity(state.raised, 4)} of ${quantity(state.threshold, 2)} SOL raised, market cap ${quantity(state.cap, 2)} SOL`
+      }
     >
       <line x1={x(0)} x2={x(state.threshold)} y1={base} y2={base} stroke="var(--color-line)" />
       <path d={line(0, 1)} fill="none" stroke="var(--color-line-strong)" strokeWidth="2" strokeDasharray="4 4" />
@@ -1002,7 +1033,7 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
         textAnchor={progress > 0.6 ? "end" : "start"}
       >
         {state.migrated
-          ? `graduated · ${quantity(raised, 4)} SOL in`
+          ? `graduated · raised ${quantity(state.threshold, 2)} SOL`
           : state.raised === 0
             ? "opens here · be the first buyer"
             : `now · ${quantity(raised, 4)} SOL in`}

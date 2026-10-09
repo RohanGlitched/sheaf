@@ -9,6 +9,7 @@ import { explorerAddress, explorerTx, WRITE_CLUSTER } from "@/lib/config";
 import { count, money, plural, quantity, shortAddress, timeAgo } from "@/lib/format";
 import { symbolForWriteMint } from "@/lib/mirror";
 import type { Basket } from "@/lib/sheaf";
+import { isTeamWallet, teamTag, teamWallet, TEAM_WALLETS } from "@/lib/team-wallets";
 
 /**
  * The program's whole history, from its own logs.
@@ -109,6 +110,28 @@ function amountOf(e: LedgerEntry): { main: string; notes: string[] } {
   return { main, notes };
 }
 
+/** "house" or "test wallet" beside a wallet that is ours, so nobody mistakes it for a user. */
+function TeamTag({ address }: { address: string }) {
+  const tag = teamTag(address);
+  if (!tag) return null;
+  return (
+    <span
+      title={teamWallet(address)?.label}
+      className="ml-2 whitespace-nowrap rounded-full border border-line px-1.5 py-px align-middle text-[11px] leading-none text-ink-3"
+    >
+      {tag}
+    </span>
+  );
+}
+
+/** Distinct wallets behind a set of events, and how many of them are not ours. */
+export function walletCounts(entries: LedgerEntry[]) {
+  const wallets = new Set(entries.map((e) => e.actor));
+  let outside = 0;
+  for (const w of wallets) if (!isTeamWallet(w)) outside++;
+  return { wallets: wallets.size, outside, actions: entries.length };
+}
+
 export function LedgerTable({
   entries,
   baskets,
@@ -144,6 +167,7 @@ export function LedgerTable({
                 <span className="min-w-0 text-ink-2">
                   {amount.main}
                   {amount.notes.length > 0 && <span className="text-xs text-ink-3"> · {amount.notes.join(" · ")}</span>}
+                  <TeamTag address={e.actor} />
                 </span>
                 <a href={explorerTx(e.signature)} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-ink-2 underline decoration-line-strong underline-offset-4">
                   Tx {shortAddress(e.signature, 4, 4)}
@@ -195,6 +219,7 @@ export function LedgerTable({
                     <a href={explorerAddress(e.actor)} target="_blank" rel="noreferrer" className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">
                       {shortAddress(e.actor)}
                     </a>
+                    <TeamTag address={e.actor} />
                   </td>
                   <td className="tnum whitespace-nowrap px-4 py-3 text-right text-ink">
                     {amount.main}
@@ -225,7 +250,7 @@ export function LedgerPage() {
 
   const stats = useMemo(() => {
     const entries = ledger?.entries ?? [];
-    const wallets = new Set(entries.map((e) => e.actor));
+    const { wallets, outside } = walletCounts(entries);
     // A filled dollar order creates shares exactly as an in-kind deposit does,
     // and the basket's own count includes both, so the ledger does too.
     const creations = entries.filter((e) => e.kind === "minted" || e.kind === "filled");
@@ -235,7 +260,9 @@ export function LedgerPage() {
       baskets: entries.filter((e) => e.kind === "created").length,
       creations: creations.length,
       redemptions: entries.filter((e) => e.kind === "redeemed").length,
-      wallets: wallets.size,
+      wallets,
+      outside,
+      actions: entries.length,
       created,
       redeemed,
       first: entries.length ? entries[entries.length - 1].time : null,
@@ -258,10 +285,12 @@ export function LedgerPage() {
         {ledger && (
           <dl className="tnum grid grid-cols-2 gap-x-8 gap-y-4 text-sm sm:flex">
             {[
+              ["Actions", count(stats.actions)],
               ["Baskets", count(stats.baskets)],
               ["Creations", count(stats.creations)],
               ["Redemptions", count(stats.redemptions)],
               ["Wallets", count(stats.wallets)],
+              ["Wallets that aren’t ours", decoding ? "…" : count(stats.outside)],
             ].map(([label, value]) => (
               <div key={label}>
                 <dt className="text-xs text-ink-3">{label}</dt>
@@ -297,6 +326,23 @@ export function LedgerPage() {
             )}
             {ledger.truncated ? " · showing the most recent 300 transactions" : ""}
           </p>
+          {!decoding && (
+            <p className="mt-2 max-w-[72ch] text-xs leading-relaxed text-ink-3">
+              {stats.outside === 0
+                ? `Every wallet here so far is ours: the house key that seeded the baskets and fills dollar orders, and the test wallets our end-to-end and QA runs used. `
+                : `${count(stats.outside)} of the ${count(stats.wallets)} wallets here are not ours. The rest are the house key and our own test wallets. `}
+              Our {count(TEAM_WALLETS.length)} wallets are listed in{" "}
+              <a
+                href="https://github.com/RohanGlitched/sheaf/blob/main/web/lib/team-wallets.ts"
+                target="_blank"
+                rel="noreferrer"
+                className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
+              >
+                team-wallets.ts
+              </a>{" "}
+              and tagged in the rows below.
+            </p>
+          )}
           <div className="mt-4">
             {ledger.entries.length === 0 && decoding ? (
               <p className="text-sm text-ink-3">Reading the program&rsquo;s transactions…</p>

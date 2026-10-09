@@ -15,7 +15,7 @@ import {
 } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { tempoModerato } from "viem/chains";
-import { Account as TempoAccount } from "viem/tempo";
+import { Account as TempoAccount, Actions as TempoActions } from "viem/tempo";
 import { sendTransactionSync } from "viem/actions";
 import { DEPLOYED, type ChainBasket, type Deployment } from "./chains";
 import {
@@ -146,7 +146,15 @@ export type FillResult = { network: string; id: number; status: "filled" | "skip
 /** Above this, the house leaves a real-token order to other participants. */
 const MAX_REAL_SHARES = 2n * ONE_SHARE;
 /** Above this, even a mirror order is left alone. Mirrors are free, gas is not. */
-const MAX_MIRROR_SHARES = 100n * ONE_SHARE;
+const MAX_MIRROR_SHARES = 5n * ONE_SHARE;
+/**
+ * A mirror order must offer at least the shares' value less this band, at the live
+ * quotes (the deploy-time prices when those are unreachable). The order form offers
+ * 1% over, so this only turns away orders asking for shares far below their value.
+ */
+const MIRROR_BAND = 0.05;
+/** House fills per buyer per hour, across chains. Per instance, like the faucets. */
+const perBuyer = rateLimiter(60 * 60_000, 3);
 
 function basketOf(d: Deployment, address: string): ChainBasket | undefined {
   return d.baskets.find((b) => b.address.toLowerCase() === address.toLowerCase());
@@ -172,9 +180,19 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
     if (offered < fair * 0.98) {
       return { ...base, status: "skipped", reason: `offers ${offered.toFixed(2)} ${d.stable.symbol} against a fair ${fair.toFixed(2)}` };
     }
-  } else if (o.shares > MAX_MIRROR_SHARES) {
-    return { ...base, status: "skipped", reason: "larger than the house fills" };
+  } else {
+    if (o.shares > MAX_MIRROR_SHARES) return { ...base, status: "skipped", reason: "larger than the house fills" };
+    const nav = navFrom(basket, { ...(basket.pricedAt ?? {}), ...prices });
+    if (nav == null) return { ...base, status: "skipped", reason: "no price to check the order against" };
+    const fair = nav * fromRaw(o.shares);
+    const offered = fromRaw(o.usdgAmount, d.stable.decimals);
+    if (offered < fair * (1 - MIRROR_BAND)) {
+      return { ...base, status: "skipped", reason: `offers ${offered.toFixed(2)} ${d.stable.symbol} against a fair ${fair.toFixed(2)}` };
+    }
   }
+  const buyerKey = o.buyer.toLowerCase();
+  const quota = perBuyer.check(buyerKey);
+  if (!quota.ok) return { ...base, status: "skipped", reason: `the house has filled this buyer's orders enough for now; try again in ${Math.ceil(quota.retryInSec / 60)} min, or any holder can fill it` };
 
   const balances = await Promise.all(
     basket.components.map((c) => client.readContract({ address: c.token as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [acct.address] })),
@@ -218,6 +236,7 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
     }).extend(publicActions);
     const receipt = await sendTransactionSync(tempo, { calls: [...calls, fillCall] } as never);
     if (receipt.status !== "success") return { ...base, status: "failed", reason: "the fill reverted", hash: receipt.transactionHash };
+    perBuyer.hit(buyerKey);
     return { ...base, status: "filled", hash: receipt.transactionHash };
   }
 
@@ -227,6 +246,7 @@ async function fillOne(d: Deployment, o: DeskOrder, prices: Record<string, numbe
   const hash = await wallet.sendTransaction({ to: fillCall.to, data: fillCall.data });
   const receipt = await client.waitForTransactionReceipt({ hash, timeout: 60_000 });
   if (receipt.status !== "success") return { ...base, status: "failed", reason: "the fill reverted", hash };
+  perBuyer.hit(buyerKey);
   return { ...base, status: "filled", hash };
 }
 
@@ -236,7 +256,8 @@ export async function runEvmKeeper(d: Deployment, opts: { orderId?: number; max?
   const orders = await readDeskOrders(d, 15);
   const open = orders.filter((o) => o.status === "Open" && (opts.orderId == null || o.id === opts.orderId));
   if (open.length === 0) return [];
-  const prices = d.tokenSource === "real" ? await fetchRobinhoodPrices(d.tokens.map((t) => t.symbol)) : {};
+  // Mirror chains are checked against the same quotes; a mirror basket falls back to its deploy-time prices.
+  const prices = await fetchRobinhoodPrices(d.tokens.map((t) => t.symbol));
   return withChainLock(d.network, async () => {
     const out: FillResult[] = [];
     for (const o of open.slice(0, max)) {
@@ -267,12 +288,30 @@ export type SipResult = {
  * The keeper side of a Tempo SIP. The visitor's account (a passkey, usually)
  * signed one key authorization naming the house key as an access key, with a
  * recurring AlphaUSD limit and a call scope. Here the house signs as that access
- * key, for that account. The chain, not this code, decides whether it may.
+ * key, for that account. The chain decides whether it may; the keeper only adds
+ * the schedule (one instalment per period).
  */
 export async function runTempoSip(account: Address, action: SipAction): Promise<SipResult> {
   const d = deploymentFor("tempoTestnet");
   const key = houseKey();
   if (!d || !key) throw new Error("Tempo keeper not configured.");
+  const slot = account.toLowerCase();
+  if (sipInFlight.has(slot)) throw new SipRefused("The keeper is already acting for this account.");
+  sipInFlight.add(slot);
+  try {
+    return await runTempoSipOnce(d, key, account, action);
+  } finally {
+    sipInFlight.delete(slot);
+  }
+}
+
+/** A request the keeper turns down before it reaches the chain. */
+export class SipRefused extends Error {}
+
+/** One SIP call per account at a time, so two requests cannot both pass the budget read. */
+const sipInFlight = new Set<string>();
+
+async function runTempoSipOnce(d: Deployment, key: Hex, account: Address, action: SipAction): Promise<SipResult> {
   const keeper = TempoAccount.fromSecp256k1(key, { access: account });
   const client = createClient({
     account: keeper,
@@ -280,6 +319,38 @@ export async function runTempoSip(account: Address, action: SipAction): Promise<
     transport: http(d.rpc, { timeout: 20_000 }),
   }).extend(publicActions);
   const alpha = d.stable.address as Address;
+
+  // The chain caps what the key may spend in a period, not how often. The keeper
+  // adds the schedule: one instalment per period, read from the key's own budget
+  // (untouched means no instalment yet this period). The overspend demo only runs
+  // once an instalment has left too little for it, so it can only ever be refused.
+  // A revoked, expired or missing key is passed through: the chain refuses it.
+  if (action !== "outOfScope") {
+    // Read without the access-key account: the budget read reverts for a key the account never authorized.
+    const reader = createClient({ chain: tempoModerato, transport: http(d.rpc, { timeout: 15_000 }) }).extend(publicActions);
+    const accessKey = keeper.accessKeyAddress;
+    let budget: { remaining: bigint; periodEnd?: bigint } | null = null;
+    try {
+      const meta = await TempoActions.accessKey.getMetadata(reader, { account, accessKey });
+      const live =
+        !meta.isRevoked &&
+        meta.address.toLowerCase() === accessKey.toLowerCase() &&
+        (meta.expiry === 0n || meta.expiry * 1000n > BigInt(Date.now()));
+      if (live) budget = await TempoActions.accessKey.getRemainingLimit(reader, { account, accessKey, token: alpha });
+    } catch {
+      throw new SipRefused("Could not read this plan's budget on Tempo. Try again in a moment.");
+    }
+    // No live key: let the chain say no.
+    if (budget) {
+      const resets = budget.periodEnd ? ` It resets ${new Date(Number(budget.periodEnd) * 1000).toISOString().slice(0, 10)}.` : "";
+      if (action === "instalment" && budget.remaining < TEMPO_SIP.limit) {
+        throw new SipRefused(`This period's instalment has already been placed.${resets}`);
+      }
+      if (action === "overspend" && budget.remaining >= TEMPO_SIP.overspend) {
+        throw new SipRefused("Place this period's instalment first; the overspend test needs the budget it leaves.");
+      }
+    }
+  }
   const desk = d.desk as Address;
   const basket = d.baskets[0];
   const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);

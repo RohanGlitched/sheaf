@@ -17,8 +17,11 @@ import { clientIp, faucetKeypair } from "@/lib/faucet-server";
  */
 const GRANT = 0.08 * LAMPORTS_PER_SOL;
 const ONLY_BELOW = 0.01 * LAMPORTS_PER_SOL;
-/** Keep enough back that the token faucet can still pay for token accounts. */
-const RESERVE = 0.3 * LAMPORTS_PER_SOL;
+/**
+ * Keep enough back that the token faucet can still open token accounts (it stops
+ * at 1.5 SOL) and the keeper, on the same key, can still pay plan rent (0.5 SOL).
+ */
+const RESERVE = 2 * LAMPORTS_PER_SOL;
 
 const IP_WINDOW_MS = 24 * 60 * 60_000;
 const IP_MAX_GRANTS = 3;

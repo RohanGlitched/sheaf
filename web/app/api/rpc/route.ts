@@ -1,5 +1,6 @@
 import { serverRpcUrl, SHEAF_PROGRAM_ID } from "@/lib/config";
 import { clientIp } from "@/lib/faucet-server";
+import { originAllowed } from "@/lib/server-origin";
 
 /**
  * POST /api/rpc: the browser's devnet RPC.
@@ -9,18 +10,27 @@ import { clientIp } from "@/lib/faucet-server";
  * batch is capped, so the proxy cannot be turned into a general-purpose RPC.
  */
 
+/**
+ * JSON-RPC method names, not Connection method names: getMultipleAccountsInfo
+ * sends getMultipleAccounts, getParsedAccountInfo sends getAccountInfo, and
+ * getParsedTokenAccountsByOwner sends getTokenAccountsByOwner. The list covers
+ * every read the app, @solana/spl-token and the Meteora DBC and DAMM v2 SDKs make
+ * from the browser (the curve's swap reads the clock with getSlot + getBlockTime).
+ */
 const ALLOWED = new Set([
   "getAccountInfo",
   "getBalance",
   "getBlockHeight",
+  "getBlockTime",
   "getEpochInfo",
   "getFeeForMessage",
   "getGenesisHash",
+  "getHealth",
   "getLatestBlockhash",
   "getMinimumBalanceForRentExemption",
   "getMultipleAccounts",
-  "getParsedAccountInfo",
   "getProgramAccounts",
+  "getRecentPrioritizationFees",
   "getSignatureStatuses",
   "getSignaturesForAddress",
   "getSlot",
@@ -47,17 +57,6 @@ function overLimit(ip: string, n: number): boolean {
   return recent.length > PER_MINUTE;
 }
 
-/** Only this site's pages (and server-side callers, which send no Origin) may use the proxy. */
-function originAllowed(origin: string | null, host: string | null): boolean {
-  if (!origin) return true;
-  try {
-    const o = new URL(origin);
-    return o.host === host || o.hostname === "localhost" || o.hostname.endsWith(".vercel.app") && o.hostname.startsWith("sheaf");
-  } catch {
-    return false;
-  }
-}
-
 type Call = { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
 
 export async function POST(req: Request) {
@@ -66,7 +65,8 @@ export async function POST(req: Request) {
   if (!calls.length || calls.length > MAX_BATCH) {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } }, { status: 400 });
   }
-  if (!originAllowed(req.headers.get("origin"), req.headers.get("host"))) {
+  // Only this site's pages (and server-side callers, which send no Origin) may use the proxy.
+  if (!originAllowed(req)) {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "This endpoint serves this site only" } }, { status: 403 });
   }
   if (overLimit(clientIp(req), calls.length)) {
