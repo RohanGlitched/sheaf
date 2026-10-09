@@ -6,7 +6,7 @@
 
 [**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
 
-![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![74 program tests](https://img.shields.io/badge/program%20tests-74%20%2B%2016%20unit-3438c9?style=flat-square) ![158 EVM tests](https://img.shields.io/badge/EVM%20tests-158%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
+![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![74 program tests](https://img.shields.io/badge/program%20tests-74%20%2B%2016%20unit-3438c9?style=flat-square) ![174 EVM tests](https://img.shields.io/badge/EVM%20tests-174%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
 
 </div>
 
@@ -57,7 +57,7 @@ What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
 - **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
-- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 74 integration tests as mocha counts them (`anchor test`) and `lib.rs` 16 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 158 tests.
+- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 74 integration tests as mocha counts them (`anchor test`) and `lib.rs` 16 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 174 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
 - **EVM vaults.** The same vault and recipe as Solidity contracts, deployed and source-verified on five testnets. The EVM v2 desk (`CreationDeskV2`) runs the same Dutch auction as Solana, with a 0.10% protocol fee on fills; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable. `PlanDesk` holds monthly plans whose amount, interval and price cap are on chain. The v1 desk, a fixed-price limit order, stays live beside it:
 
@@ -119,7 +119,7 @@ anchor build -- --features devnet  # devnet build: adds the house stand-in issue
 cd web && pnpm install && pnpm dev
 
 # EVM contracts
-cd evm && npm install && npx hardhat test    # 158 tests
+cd evm && npm install && npx hardhat test    # 174 tests
 ```
 
 The web app reads these variables (see [web/.env.example](web/.env.example); only names are listed here):
