@@ -30,7 +30,7 @@ export type LedgerEntry = {
   /** Unix seconds. */
   time: number;
   slot: number;
-  kind: "created" | "minted" | "redeemed";
+  kind: "created" | "minted" | "redeemed" | "ordered" | "planRun" | "filled" | "returned" | "planOpened";
   basket: string;
   /** The creator, depositor or redeemer. */
   actor: string;
@@ -44,6 +44,10 @@ export type LedgerEntry = {
   feeShares?: number;
   /** Raw units moved per component, in recipe order, as strings. */
   amounts?: string[];
+  /** Dollars escrowed, paid or refunded, for orders and plans. */
+  cash?: number;
+  /** A plan's runs, on a plan opening. */
+  runs?: number;
 };
 
 export type Ledger = {
@@ -58,9 +62,14 @@ export type Ledger = {
 const EVENT_CREATED = [26, 146, 108, 155, 189, 85, 8, 7];
 const EVENT_MINTED = [127, 139, 238, 41, 118, 47, 122, 39];
 const EVENT_REDEEMED = [232, 166, 7, 56, 67, 19, 42, 117];
+const EVENT_ORDER_PLACED = [96, 130, 204, 234, 169, 219, 216, 227];
+const EVENT_ORDER_FILLED = [120, 124, 109, 66, 249, 116, 174, 30];
+const EVENT_ORDER_CANCELLED = [108, 56, 128, 68, 168, 113, 168, 239];
+const EVENT_PLAN_OPENED = [180, 40, 139, 132, 248, 34, 213, 58];
+const CASH = 1_000_000;
 const ONE_SHARE = 1_000_000;
 const PREFIX = "Program data: ";
-const STORE = "sheaf:ledger:v1";
+const STORE = "sheaf:ledger:v2";
 
 class Reader {
   private offset = 8;
@@ -81,6 +90,17 @@ class Reader {
   pubkey() {
     const v = new PublicKey(this.data.subarray(this.offset, this.offset + 32)).toBase58();
     this.offset += 32;
+    return v;
+  }
+  skip(n: number) {
+    this.offset += n;
+  }
+  optPubkey() {
+    return this.u8() === 1 ? this.pubkey() : null;
+  }
+  u32() {
+    const v = this.view.getUint32(this.offset, true);
+    this.offset += 4;
     return v;
   }
   string() {
@@ -131,6 +151,47 @@ export function decodeEvent(
       const shares = Number(r.u64()) / ONE_SHARE;
       const amounts = Array.from({ length: 8 }, () => r.u64().toString());
       return { kind: "redeemed", basket, actor, shares, amounts };
+    }
+    if (matches(data, EVENT_ORDER_PLACED)) {
+      r.pubkey(); // order
+      const basket = r.pubkey();
+      const actor = r.pubkey();
+      const plan = r.optPubkey();
+      r.pubkey(); // cash mint
+      r.u64(); // nonce
+      const cash = Number(r.u64()) / CASH;
+      return { kind: plan ? "planRun" : "ordered", basket, actor, cash };
+    }
+    if (matches(data, EVENT_ORDER_FILLED)) {
+      r.pubkey(); // order
+      const basket = r.pubkey();
+      const actor = r.pubkey(); // the buyer
+      r.pubkey(); // filler
+      r.optPubkey(); // plan
+      const shares = Number(r.u64()) / ONE_SHARE;
+      const feeShares = Number(r.u64()) / ONE_SHARE;
+      const cash = Number(r.u64()) / CASH;
+      return { kind: "filled", basket, actor, shares, feeShares, cash };
+    }
+    if (matches(data, EVENT_ORDER_CANCELLED)) {
+      r.pubkey(); // order
+      const basket = r.pubkey();
+      const actor = r.pubkey();
+      r.optPubkey();
+      r.pubkey(); // by
+      const cash = Number(r.u64()) / CASH;
+      return { kind: "returned", basket, actor, cash };
+    }
+    if (matches(data, EVENT_PLAN_OPENED)) {
+      r.pubkey(); // plan
+      const basket = r.pubkey();
+      const actor = r.pubkey();
+      r.pubkey(); // cash mint
+      r.pubkey(); // cash account
+      const cash = Number(r.u64()) / CASH;
+      r.u64(); // period
+      const runs = r.u32();
+      return { kind: "planOpened", basket, actor, cash, runs };
     }
   } catch {
     // A log line that is not one of ours, or a truncated one. Skip it.
@@ -209,7 +270,8 @@ async function fetchEvents(
           ...event,
         });
       }
-      return entries;
+      // A fill also emits the share mint's own event; the fill row says it all.
+      return entries.some((e) => e.kind === "filled") ? entries.filter((e) => e.kind !== "minted") : entries;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The public endpoint rations this call per address, and a visitor who

@@ -64,10 +64,20 @@ const KIND: Record<LedgerEntry["kind"], { label: string; color: string }> = {
   created: { label: "Basket created", color: "var(--color-bind)" },
   minted: { label: "Shares created", color: "var(--color-gain)" },
   redeemed: { label: "Shares redeemed", color: "var(--color-loss)" },
+  ordered: { label: "Dollar order", color: "#b9821a" },
+  planRun: { label: "Plan run", color: "#2b78a3" },
+  filled: { label: "Order filled", color: "var(--color-gain)" },
+  returned: { label: "Dollars returned", color: "var(--color-ink-3)" },
+  planOpened: { label: "Plan opened", color: "#8a4fa0" },
 };
 
 function describe(entry: LedgerEntry, basket: Basket | undefined): string {
   const parts: string[] = [];
+  if (entry.kind === "ordered") return "Escrowed; fillers bid to deliver the stocks";
+  if (entry.kind === "planRun") return "A plan's scheduled order, run by anyone";
+  if (entry.kind === "filled") return "A filler delivered the stocks to the vault and took the dollars";
+  if (entry.kind === "returned") return "Nobody filled in time; the dollars went back";
+  if (entry.kind === "planOpened") return "Allowed to spend exactly this much per run";
   if (!entry.amounts || !basket) return "";
   basket.components.forEach((c, i) => {
     const raw = entry.amounts![i];
@@ -112,7 +122,7 @@ export function LedgerTable({
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 sm:px-4">
                   <span className="flex items-center gap-2">
-                    <span aria-hidden className="size-2 shrink-0" style={{ background: kind.color }} />
+                    <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: kind.color }} />
                     <span className="text-ink">{kind.label}</span>
                   </span>
                 </td>
@@ -132,7 +142,12 @@ export function LedgerTable({
                 <td className="tnum px-3 py-3 text-right text-ink sm:px-4">
                   {e.kind === "created"
                     ? `${e.componentCount} ${e.componentCount === 1 ? "holding" : "holdings"}`
-                    : quantity(e.shares ?? 0, 4)}
+                    : e.kind === "ordered" || e.kind === "planRun" || e.kind === "returned"
+                      ? `$${(e.cash ?? 0).toFixed(2)}`
+                      : e.kind === "planOpened"
+                        ? `$${(e.cash ?? 0).toFixed(2)} × ${e.runs}`
+                        : quantity(e.shares ?? 0, 4)}
+                  {e.kind === "filled" && e.cash != null ? <span className="block text-xs text-ink-3">for ${e.cash.toFixed(2)}</span> : null}
                   {e.feeShares ? <span className="block text-xs text-ink-3">+{quantity(e.feeShares, 4)} to the creator</span> : null}
                 </td>
                 <td className="tnum hidden px-4 py-3 text-xs text-ink-3 md:table-cell">{describe(e, basket)}</td>
@@ -177,8 +192,9 @@ export function LedgerPage() {
         <div>
           <h1 className="display text-hero leading-[0.95] text-ink">The ledger</h1>
           <p className="mt-4 max-w-[56ch] text-base leading-relaxed text-ink-2">
-            Every basket created, every share created and every share redeemed,
-            read from the events the program wrote into its own transactions.
+            Every basket, every share created or redeemed, every dollar order and
+            every plan run, read from the events the program wrote into its own
+            transactions.
             There is no database behind this page: anyone can rebuild it from the
             chain.
           </p>
@@ -237,9 +253,9 @@ export function LedgerPage() {
             )}
           </div>
           <p className="mt-6 max-w-[62ch] text-xs leading-relaxed text-ink-3">
-            Each row is one <code className="text-ink-2">BasketCreated</code>,{" "}
-            <code className="text-ink-2">SharesMinted</code> or{" "}
-            <code className="text-ink-2">SharesRedeemed</code> event, decoded from
+            Each row is one event the program emitted (<code className="text-ink-2">BasketCreated</code>,{" "}
+            <code className="text-ink-2">SharesMinted</code>, <code className="text-ink-2">SharesRedeemed</code>,{" "}
+            <code className="text-ink-2">OrderPlaced</code>, <code className="text-ink-2">OrderFilled</code> and the rest), decoded from
             the <code className="text-ink-2">Program data</code> lines of the
             transaction log, in your browser, against the public RPC. The decoder is{" "}
             <code className="text-ink-2">web/lib/ledger.ts</code>. The repository
