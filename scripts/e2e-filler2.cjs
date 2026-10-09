@@ -2,6 +2,9 @@
 // dollar order on a basket, then the site's /api/filler2 is asked to fill it, and
 // the script reports who did (the second filler, the house, or nobody).
 //   TEST_WALLET_INDEX=1 node scripts/e2e-filler2.cjs [base] [basket] [dollars]
+// FILLER=house asks /api/keeper instead. START_AGO=165 places an order whose
+// 180 s auction began 165 s earlier (15 s left), as a wallet that sat on the
+// signing prompt would, to check a fill still lands before the end.
 // Run in WSL (it signs with @solana/web3.js). Devnet only.
 const crypto = require("crypto");
 const path = require("path");
@@ -70,7 +73,8 @@ const post = (p, body) => fetch(BASE + p, { method: "POST", headers: { "content-
     cash_token_program: cashProgram,
   };
   const keys = PLACE.accounts.map((a) => ({ pubkey: a.address ? new PublicKey(a.address) : accounts[a.name], isSigner: !!a.signer, isWritable: !!a.writable }));
-  const data = Buffer.concat([Buffer.from(PLACE.discriminator), le64(nonce), le64(cash), le64(start), le64(end), i64(now), i64(now + 180)]);
+  const AGO = Number(process.env.START_AGO || 0);
+  const data = Buffer.concat([Buffer.from(PLACE.discriminator), le64(nonce), le64(cash), le64(start), le64(end), i64(now - AGO), i64(now - AGO + 180)]);
   const shareAta = new TransactionInstruction({
     programId: ATA_PROGRAM,
     keys: [
@@ -85,10 +89,12 @@ const post = (p, body) => fetch(BASE + p, { method: "POST", headers: { "content-
   });
   const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }), shareAta, new TransactionInstruction({ programId: PROGRAM, keys, data }));
   const sig = await web3.sendAndConfirmTransaction(c, tx, [wallet], { commitment: "confirmed" });
-  console.log(`placed $${DOLLARS} order ${order.toBase58()} on ${basket.symbol} (nav $${nav.toFixed(4)}), 180 s auction:`, sig);
+  console.log(`placed $${DOLLARS} order ${order.toBase58()} on ${basket.symbol} (nav $${nav.toFixed(4)}), 180 s auction, ${180 - AGO} s left:`, sig);
 
   for (let i = 0; i < 20; i++) {
-    const r = await fetch(`${BASE}/api/filler2`, { method: "POST" }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    const house = process.env.FILLER === "house";
+    const r = await fetch(`${BASE}/api/${house ? "keeper" : "filler2"}`, { method: "POST" }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    if (house) console.log("  keeper:", JSON.stringify({ filled: r.ordersFilled, skipped: r.skipped, errors: r.errors }).slice(0, 300));
     const mine = (r.filled ?? []).find((f) => f.order === order.toBase58());
     console.log(`  pass ${i + 1}:`, mine ? `FILLED by the second filler, edge ${mine.edgeBps} bps, ${mine.signature}` : (r.log ?? [r.error ?? JSON.stringify(r)]).filter((l) => String(l).includes(order.toBase58().slice(0, 6))).slice(-1)[0] ?? "no line");
     if (mine) return;

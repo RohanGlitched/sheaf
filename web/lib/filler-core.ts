@@ -415,6 +415,8 @@ export type PassResult = {
 };
 
 const short = (k: PublicKey) => k.toBase58().slice(0, 6);
+/** A fill is only sent with at least this long left in the auction, so it lands before the end. */
+const MIN_SECS_LEFT = 5;
 
 /** The cluster's clock (the newest block's time), carried forward by the wall clock. */
 async function chainClock(connection: Connection): Promise<() => number> {
@@ -586,7 +588,7 @@ async function priceAndFillSell(
   // The cash only decays, so the amount owed at the cluster's clock now is the most the fill can cost.
   let t = clock();
   if (edgeAt(t) * 10_000 < edgeBps && o.waitUpToSecs) {
-    for (let dt = 1; dt <= o.waitUpToSecs; dt++) {
+    for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
       if (edgeAt(t + dt) * 10_000 >= edgeBps) {
         log(`${tag}: margin in ${dt}s, waiting`);
         await sleep(dt * 1000);
@@ -594,6 +596,10 @@ async function priceAndFillSell(
         break;
       }
     }
+  }
+  if (order.endTs - t < MIN_SECS_LEFT) {
+    log(`${tag}: skipped, auction ends in under ${MIN_SECS_LEFT}s`);
+    return null;
   }
   const edge = edgeAt(t);
   const pay = payAt(t);
@@ -719,7 +725,7 @@ async function priceAndFill(
   }
   if (p.edge * 10_000 < edgeBps && o.waitUpToSecs) {
     // The auction only decays, so find the first second inside the wait window that clears the margin.
-    for (let dt = 1; dt <= o.waitUpToSecs; dt++) {
+    for (let dt = 1; dt <= o.waitUpToSecs && t + dt <= order.endTs - MIN_SECS_LEFT; dt++) {
       const q = priceAt(t + dt);
       if (!("error" in q) && q.edge * 10_000 >= edgeBps) {
         log(`${tag} margin in ${dt}s, waiting`);
@@ -731,6 +737,10 @@ async function priceAndFill(
     }
   }
   if ("error" in p) return null;
+  if (order.endTs - t < MIN_SECS_LEFT) {
+    log(`${tag} skipped: auction ends in under ${MIN_SECS_LEFT}s`);
+    return null;
+  }
   if (p.edge * 10_000 < edgeBps) {
     log(`${tag} cost $${p.cost.toFixed(2)}, edge ${(p.edge * 100).toFixed(2)}%, waiting`);
     return null;

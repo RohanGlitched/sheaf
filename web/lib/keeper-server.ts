@@ -89,6 +89,8 @@ const MAX_JOBS = 20;
 const MAX_JOBS_PER_BUYER = 3;
 /** An order further than this from the house's price is left for the next run. */
 const MAX_WAIT_SECS = 30;
+/** A fill is only started with at least this long left in the auction, so it lands before the end. */
+const MIN_SECS_LEFT = 5;
 
 type Fill = { order: string; shares: string; cash: string; marginBps: number };
 /** A sell order the house bought: shares taken, dollars paid, and the discount to fair it got. */
@@ -213,45 +215,72 @@ async function send(connection: Connection, ixs: TransactionInstruction[], table
   return signature;
 }
 
+/** True when a transaction was refused for its size, before anything was sent. */
+const tooLarge = (err: unknown) => /too large|overruns|exceeds|encoding/i.test((err as Error)?.message ?? "");
+
+/**
+ * The program's own reason when a transaction fails, from its logs ("Error
+ * Code: OrderExpired" and the like), so a report says why and not only
+ * "Simulation failed".
+ */
+function reason(err: unknown): string {
+  const e = err as { message?: string; logs?: string[]; transactionLogs?: string[] };
+  const logs = e.logs ?? e.transactionLogs ?? [];
+  const code = logs.map((l) => l.match(/Error Code: (\w+)/)?.[1] ?? l.match(/Error: (insufficient funds|[^.]+)/)?.[1]).find(Boolean);
+  const head = (e.message ?? String(err)).split("\n")[0];
+  return (code ? `${code}: ${head}` : head).slice(0, 160);
+}
+
+/**
+ * Fill a dollar order in as few transactions as possible: the house tops up only
+ * the stock it is short of, in the same transaction as the fill when that fits in
+ * one packet, so a fill lands within seconds of the decision. A fill that has to
+ * wait on a separate inventory transaction can miss an order whose auction is
+ * about to end.
+ */
 async function fill(connection: Connection, order: Order, basket: Basket, gross: bigint) {
   const keeper = faucetKeypair()!;
   const componentProgram = new PublicKey(basket.tokenProgram);
+  const shareMint = new PublicKey(basket.shareMint);
+  const cashMint = new PublicKey(order.cashMint);
+  const cashProgram = new PublicKey(order.cashTokenProgram);
+  const holdings = basket.components.map((c) => tokenAccount(new PublicKey(c.mint), keeper.publicKey, componentProgram));
+  const cashAta = tokenAccount(cashMint, keeper.publicKey, cashProgram);
+  const creatorShares = tokenAccount(shareMint, new PublicKey(basket.creator), TOKEN_2022_PROGRAM_ID);
+  const buyerShares = tokenAccount(shareMint, new PublicKey(order.buyer), TOKEN_2022_PROGRAM_ID);
+  const [buyerInfo, cashInfo, creatorInfo, ...holdingInfos] = await connection.getMultipleAccountsInfo([buyerShares, cashAta, creatorShares, ...holdings]);
   // The buyer's share account must already exist: the order form creates it, so the
   // house never pays rent for a stranger's account.
-  const shareMint = new PublicKey(basket.shareMint);
-  const buyerShares = await connection.getAccountInfo(tokenAccount(shareMint, new PublicKey(order.buyer), TOKEN_2022_PROGRAM_ID));
-  if (!buyerShares) throw new Error("buyer has no share account yet");
+  if (!buyerInfo) throw new Error("buyer has no share account yet");
   const table = basket.components.length >= ALT_MIN_COMPONENTS ? await ensureAlt(connection, keeper, basket) : null;
 
-  const inventory: TransactionInstruction[][] = [];
-  for (const c of basket.components) {
+  const setup: TransactionInstruction[] = [];
+  const mints: TransactionInstruction[] = [];
+  basket.components.forEach((c, i) => {
     const mint = new PublicKey(c.mint);
-    const ata = tokenAccount(mint, keeper.publicKey, componentProgram);
     let need = (c.unitsPerShare * gross + ONE_SHARE - 1n) / ONE_SHARE;
     // PreStocks carry a transfer fee; deliver enough that the vault still gets the recipe.
     const fee = BY_SYMBOL_PRESTOCKS[symbolForWriteMint(c.mint) ?? ""]?.transferFeeBps ?? 0;
     if (fee > 0) need = (need * 10_000n + BigInt(10_000 - fee) - 1n) / BigInt(10_000 - fee) + 1n;
-    inventory.push([
-      createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, ata, keeper.publicKey, mint, componentProgram),
-      createMintToInstruction(mint, ata, keeper.publicKey, need, [], componentProgram),
-    ]);
+    const info = holdingInfos[i];
+    const held = info && info.data.length >= 72 ? Buffer.from(info.data).readBigUInt64LE(64) : 0n;
+    if (!info) setup.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, holdings[i], keeper.publicKey, mint, componentProgram));
+    if (held < need) mints.push(createMintToInstruction(mint, holdings[i], keeper.publicKey, need - held, [], componentProgram));
+  });
+  if (!cashInfo) setup.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, cashAta, keeper.publicKey, cashMint, cashProgram));
+  if (basket.creatorFeeBps > 0 && !creatorInfo) {
+    setup.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, creatorShares, new PublicKey(basket.creator), shareMint, TOKEN_2022_PROGRAM_ID));
   }
-  const cashMint = new PublicKey(order.cashMint);
-  const cashProgram = new PublicKey(order.cashTokenProgram);
-  const accounts: TransactionInstruction[] = [
-    createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, tokenAccount(cashMint, keeper.publicKey, cashProgram), keeper.publicKey, cashMint, cashProgram),
-  ];
-  if (basket.creatorFeeBps > 0) {
-    accounts.push(
-      createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, tokenAccount(shareMint, new PublicKey(basket.creator), TOKEN_2022_PROGRAM_ID), new PublicKey(basket.creator), shareMint, TOKEN_2022_PROGRAM_ID),
-    );
+  // New accounts first (rare: once per mint), then stock and fill together.
+  for (let i = 0; i < setup.length; i += 6) await send(connection, setup.slice(i, i + 6), table);
+  const fillIx = fillOrderIx({ filler: keeper.publicKey, order, basket });
+  try {
+    return await send(connection, [...mints, fillIx], table);
+  } catch (err) {
+    if (!tooLarge(err) || mints.length === 0) throw err;
+    for (let i = 0; i < mints.length; i += 4) await send(connection, mints.slice(i, i + 4), table);
+    return send(connection, [fillIx], table);
   }
-  // Inventory first, four components to a transaction, then the fill on its own.
-  for (let i = 0; i < inventory.length; i += 4) {
-    const batch = inventory.slice(i, i + 4).flat();
-    await send(connection, i === 0 ? [...batch, ...accounts] : batch, table);
-  }
-  return send(connection, [fillOrderIx({ filler: keeper.publicKey, order, basket })], table);
 }
 
 /**
@@ -280,7 +309,6 @@ async function fillSell(connection: Connection, order: SellOrder, basket: Basket
     if (!infos[i + 2]) prep.push(createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, componentAtas[i], keeper.publicKey, new PublicKey(c.mint), componentProgram));
   });
   const table = basket.components.length >= ALT_MIN_COMPONENTS ? await ensureAlt(connection, keeper, basket) : null;
-  for (let i = 0; i < prep.length; i += 6) await send(connection, prep.slice(i, i + 6), table);
   const take = fillSellOrderIx({ filler: keeper.publicKey, sellOrder: order, basket });
   const redeem = redeemSharesInstruction({
     basket: new PublicKey(basket.address),
@@ -290,11 +318,17 @@ async function fillSell(connection: Connection, order: SellOrder, basket: Basket
     shares: order.shares,
     componentTokenProgram: componentProgram,
   });
+  // Set-up, the buy and the redemption in one transaction when they fit; else set-up first, then the buy and redemption, then each alone.
+  try {
+    return await send(connection, [...prep, take, redeem], table);
+  } catch (err) {
+    if (!tooLarge(err)) throw err;
+  }
+  for (let i = 0; i < prep.length; i += 6) await send(connection, prep.slice(i, i + 6), table);
   try {
     return await send(connection, [take, redeem], table);
   } catch (err) {
-    // Too big for one packet: buy first, then redeem on its own.
-    if (!/too large|overruns|exceeds/i.test((err as Error).message)) throw err;
+    if (!tooLarge(err)) throw err;
     const sig = await send(connection, [take], table);
     await send(connection, [redeem], table);
     return sig;
@@ -360,7 +394,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     const nav = await navOf(basket);
     if (nav == null) continue;
     const at = houseFillAt(order, basket, nav);
-    if (at == null) neverFair++;
+    if (at == null || at > order.endTs - MIN_SECS_LEFT) neverFair++;
     else if (at - now > MAX_WAIT_SECS) later++;
     else priced.push({ order, basket, nav, cash: Number(order.cashAmount) / 1e6, at });
   }
@@ -383,6 +417,10 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       continue;
     }
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    if (job.order.endTs - clock() < MIN_SECS_LEFT) {
+      report.skipped.push(`${job.order.address.slice(0, 6)}: auction ends in under ${MIN_SECS_LEFT}s`);
+      continue;
+    }
     // The auction only decays, so the count owed at the cluster's clock now is an
     // upper bound on what the fill will need when it lands.
     const shares = requiredShares(job.order, clock());
@@ -403,7 +441,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
         report.skipped.push(`${job.order.address.slice(0, 6)}: filled by another filler first`);
         openOrders.delete(job.order.address);
-      } else report.errors.push(`order ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      } else report.errors.push(`order ${job.order.address.slice(0, 6)}: ${reason(err)}`);
     }
   }
 
@@ -428,7 +466,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     const fair = (Number(order.shares) / Number(ONE_SHARE)) * nav;
     const maxCash = BigInt(Math.floor(fair * (1 - FILL_MARGIN_BPS / 10_000) * 1e6));
     const at = firstSecondAtOrBelow(asLine(order), maxCash);
-    if (at == null) sellNever++;
+    if (at == null || at > order.endTs - MIN_SECS_LEFT) sellNever++;
     else if (at - now <= MAX_WAIT_SECS) sellPriced.push({ order, basket, fair, at });
   }
   if (sellNever) report.skipped.push(`${sellNever} sell orders whose floor is above the house's price`);
@@ -449,6 +487,10 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       continue;
     }
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    if (job.order.endTs - clock() < MIN_SECS_LEFT) {
+      report.skipped.push(`sell ${job.order.address.slice(0, 6)}: auction ends in under ${MIN_SECS_LEFT}s`);
+      continue;
+    }
     const cash = requiredCash(job.order, clock());
     const discount = (1 - Number(cash) / 1e6 / job.fair) * 10_000;
     if (discount < FILL_MARGIN_BPS - 0.01) {
@@ -463,7 +505,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
     } catch (err) {
       if (!(await connection.getAccountInfo(new PublicKey(job.order.address)).catch(() => true))) {
         report.skipped.push(`sell ${job.order.address.slice(0, 6)}: bought by another filler first`);
-      } else report.errors.push(`sell ${job.order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      } else report.errors.push(`sell ${job.order.address.slice(0, 6)}: ${reason(err)}`);
     }
   }
   report.marginUsd = Math.round(report.marginUsd * 100) / 100;
@@ -508,7 +550,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       report.refunded.push(order.address);
       openOrders.delete(order.address);
     } catch (err) {
-      report.errors.push(`refund ${order.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      report.errors.push(`refund ${order.address.slice(0, 6)}: ${reason(err)}`);
     }
     strike(order);
   }
@@ -603,7 +645,7 @@ export async function runKeeper(opts: { maxActions?: number } = {}): Promise<Rep
       if (plan.fills === 0) unproven++;
       budget--;
     } catch (err) {
-      report.errors.push(`plan ${plan.address.slice(0, 6)}: ${(err as Error).message.slice(0, 160)}`);
+      report.errors.push(`plan ${plan.address.slice(0, 6)}: ${reason(err)}`);
     }
   }
   return report;

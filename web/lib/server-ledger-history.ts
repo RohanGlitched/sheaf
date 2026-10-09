@@ -22,8 +22,15 @@ import { GcsConflict, gcsConfigured, getJson, putJson } from "./gcs-store";
 type Row = Omit<LedgerEntry, "signature" | "time" | "slot">;
 type Sig = { s: string; slot: number; t: number | null };
 
+/**
+ * The decoder's version. Rows are stored decoded, so when the decoder learns new
+ * events (v2: the sell desk's SellOrderPlaced, Filled and Cancelled) a stored
+ * history from an older decoder is dropped and rebuilt from the chain.
+ */
+const VERSION = 2;
+
 type History = {
-  v: 1;
+  v: number;
   program: string;
   /** Successful signatures, newest first. */
   sigs: Sig[];
@@ -43,7 +50,7 @@ const PAGE = 1000;
 const BATCH = 25;
 const LANES = 3;
 
-const empty = (): History => ({ v: 1, program: SHEAF_PROGRAM_ID, sigs: [], rows: {}, newest: null, oldest: null, complete: false, updatedAt: 0 });
+const empty = (): History => ({ v: VERSION, program: SHEAF_PROGRAM_ID, sigs: [], rows: {}, newest: null, oldest: null, complete: false, updatedAt: 0 });
 
 let history: History = empty();
 let generation: string | null = null;
@@ -58,7 +65,7 @@ function merge(a: History, b: History): History {
   const sigs = [...bySig.values()].sort((x, y) => y.slot - x.slot);
   const pick = (x: Sig | null, y: Sig | null, older: boolean) => (!x ? y : !y ? x : (older ? x.slot <= y.slot : x.slot >= y.slot) ? x : y);
   return {
-    v: 1,
+    v: VERSION,
     program: a.program,
     sigs,
     rows: { ...a.rows, ...b.rows },
@@ -75,10 +82,13 @@ async function load() {
     return;
   }
   const doc = await getJson<History>(OBJECT);
-  if (doc && doc.data.v === 1 && doc.data.program === SHEAF_PROGRAM_ID) {
+  if (doc && doc.data.v === VERSION && doc.data.program === SHEAF_PROGRAM_ID) {
     history = loaded ? merge(history, doc.data) : doc.data;
     generation = doc.generation;
-  } else if (!doc) {
+  } else if (doc) {
+    // Written by an older decoder: rebuilt from the chain, then written over it.
+    generation = doc.generation;
+  } else {
     generation = "0";
   }
   loaded = true;
