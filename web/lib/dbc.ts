@@ -34,22 +34,23 @@ export type DbcPoolInfo = {
   supply: number;
 };
 
-/** Opened by scripts/dbc-launch.mjs before launches were derived from the basket. */
-const LEGACY: Record<string, DbcPoolInfo> = {
-  "5Z8XUzGVJjcYPxPZ6Hfxx8uJRNKibFcmZd7yStuSPr1p": {
-    pool: "DAZdm2LmiDCfVQaAuVkKdK5Qa1hWmkV1fNK6SzGikqFU",
-    config: "DqxXAWXXqurghukxhZmtridTj1nBobJSHG5aSBeYD5nu",
-    baseMint: "4A1rSrw6PoAVHg1AUfYfxs9nQzbF2ptY86caUuoJsULV",
+/** Launches opened before they were derived from the basket. None on this program. */
+const LEGACY: Record<string, DbcPoolInfo> = {};
+
+/** The launch the home page and the method page show: Frontier Labs' early-access market. */
+export const FEATURED_DBC: [string, DbcPoolInfo] = [
+  "6wDYMvCFE2q8vZgFmoYUkapVuz9Fst3BcCrSuyfpqruv",
+  {
+    pool: "67HdpukuYWudWNuv64vZK3TgGSqDBwS483YaDrSWoK73",
+    config: "5hovqK44hwqE4rtgQ4XDVJAWiH2vKdJLuj1jjYtey1u4",
+    baseMint: "8GcjtcMYoMAAncQs7JWcmfmSbLmNyeZ8CMixsBPfpBSY",
     baseSymbol: "FRNTRA",
     baseName: "Frontier Labs, early access",
     quoteSymbol: "SOL",
     baseDecimals: LAUNCH_DECIMALS,
     supply: LAUNCH_SUPPLY,
   },
-};
-
-/** The launch the home page shows. */
-export const FEATURED_DBC = Object.entries(LEGACY)[0];
+];
 
 export function launchSymbol(symbol: string): string {
   return `${symbol}A`.slice(0, 10);

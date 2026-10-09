@@ -9,6 +9,7 @@ import {
   explorerAddress,
   explorerTx,
 } from "@/lib/config";
+import { PlanSheaf } from "@/components/plan-sheaf";
 import { FEATURED_DBC } from "@/lib/dbc";
 import { fetchBasketAt, type Basket } from "@/lib/sheaf";
 import { stockForWriteMint } from "@/lib/mirror";
@@ -26,13 +27,15 @@ export const revalidate = 300;
 
 const [EXAMPLE, DBC] = FEATURED_DBC;
 const EXAMPLE_MINT_TX =
-  "4jNTjhUgbGUu1eLhCXZmZrzZ8H9Mr1UXJH1stbSw1GVopVM22rdet7xHT5BTWhG6NHYtdoHn3LgHoyppkBAsBbkz";
+  "4ej9mpPfVwzWeSDg5Ftf8pDxbmMWhPsYBv7CjhpYGX3WRMm6kWRF9Mxt9WptgW23qzH7rfMsiKNLr4Wyz92DHHeA";
 
 const STAGES = [
   { id: "recipe", title: "Write the recipe" },
   { id: "market", title: "Open a market" },
   { id: "create", title: "Create shares in kind" },
   { id: "hold", title: "Hold one token" },
+  { id: "dollars", title: "Or pay in dollars" },
+  { id: "plans", title: "Then every month" },
 ];
 
 const GUARANTEES = [
@@ -54,7 +57,7 @@ const GUARANTEES = [
   },
   {
     title: "Anyone can create and redeem",
-    body: "In a traditional fund that right belongs to a few authorised participants. Here it belongs to whoever holds the tokens.",
+    body: "In a traditional fund that right belongs to a few authorized participants. Here it belongs to whoever holds the tokens.",
   },
   {
     title: "Buying with dollars, measured",
@@ -65,8 +68,20 @@ const GUARANTEES = [
     body: "Every basket shows what its recipe would have done over the past year against SPY, from the listed shares' own closes, with the deepest fall beside the return.",
   },
   {
+    title: "Dollars never meet a price feed",
+    body: "A dollar order is an auction on share count. The buyer sets the floor, fillers decide when to fill, and the vault still receives the real stocks.",
+  },
+  {
+    title: "A plan can do one thing",
+    body: "Opening a plan approves exactly its per-run amount for its runs. Anyone can run it when due; nobody, including Sheaf, can make it spend more or buy anything else.",
+  },
+  {
     title: "Everything is in the log",
-    body: "The program emits an event for every creation and redemption. The ledger decodes them from the chain in your browser, so there is no database to trust.",
+    body: "The program emits an event for every creation, redemption, order, fill and plan run. The ledger decodes them from the chain in your browser, so there is no database to trust.",
+  },
+  {
+    title: "The same rules on every chain",
+    body: "On Robinhood Chain and Tempo the vault, recipe and cash desk are immutable contracts with verified source, holding Robinhood's own stock tokens where they exist.",
   },
   {
     title: "Check it without us",
@@ -118,6 +133,44 @@ function Stage({
       </div>
       <div className="min-w-0 self-center">{visual}</div>
     </section>
+  );
+}
+
+function AuctionVisual() {
+  // Shares the buyer receives over the auction: from 2% above fair to 2% below.
+  const W = 520, H = 260, pad = 36;
+  const y = (v: number) => pad + ((1.03 - v) / 0.06) * (H - 2 * pad);
+  const x = (t: number) => pad + t * (W - 2 * pad);
+  return (
+    <figure className="rounded-[var(--radius-panel)] border border-line bg-surface p-5">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Shares offered fall from 2% above fair to 2% below over the auction; a filler takes it near fair">
+        <line x1={pad} x2={W - pad} y1={y(1)} y2={y(1)} stroke="var(--color-line-strong)" strokeDasharray="4 4" />
+        <text x={W - pad} y={y(1) - 8} textAnchor="end" fontSize="13" fill="var(--color-ink-3)">fair count at mainnet prices</text>
+        <line x1={x(0)} y1={y(1.02)} x2={x(1)} y2={y(0.98)} stroke="var(--color-bind)" strokeWidth="3" strokeLinecap="round" />
+        <circle cx={x(0.55)} cy={y(1.02 - 0.04 * 0.55)} r="7" fill="var(--color-gain)" />
+        <text x={x(0.55) + 12} y={y(1.02 - 0.04 * 0.55) + 22} fontSize="13" fill="var(--color-ink)">a filler delivers the stocks</text>
+        <text x={x(0)} y={y(1.02) - 12} fontSize="13" fill="var(--color-ink-2)">+2%</text>
+        <text x={x(1)} y={y(0.98) + 22} textAnchor="end" fontSize="13" fill="var(--color-ink-2)">−2%, the buyer&apos;s floor</text>
+        <text x={x(0)} y={H - 6} fontSize="12" fill="var(--color-ink-3)">0s</text>
+        <text x={x(1)} y={H - 6} textAnchor="end" fontSize="12" fill="var(--color-ink-3)">90s</text>
+      </svg>
+      <figcaption className="mt-2 text-sm text-ink-3">Shares offered for the same dollars, over the auction.</figcaption>
+    </figure>
+  );
+}
+
+function PlanVisual() {
+  return (
+    <figure className="grid grid-cols-4 gap-3">
+      {[1, 3, 6, 12].map((n) => (
+        <div key={n} className="flex flex-col items-center rounded-[var(--radius-panel)] border border-line bg-surface p-3">
+          <div className="aspect-square w-full">
+            <PlanSheaf filled={n} total={12} className="h-full w-full" />
+          </div>
+          <p className="tnum mt-2 text-xs text-ink-3">{n} of 12</p>
+        </div>
+      ))}
+    </figure>
   );
 }
 
@@ -400,6 +453,44 @@ export default async function MethodPage() {
             xStocks pay dividends by raising a multiplier on the mint rather than
             sending tokens. The recipe is in raw units, so the vault keeps every
             dividend for the people holding shares.
+          </p>
+        </Stage>
+
+        <Stage
+          n={5}
+          id="dollars"
+          title="Or pay in dollars"
+          on="Filler auction"
+          visual={<AuctionVisual />}
+        >
+          <p>
+            Most people do not hold eight stocks. So a buyer can escrow dollars instead, for a number of
+            shares that starts a little above the fair count and falls over ninety seconds to a floor the
+            buyer chose.
+          </p>
+          <p>
+            Anyone can fill it by delivering the stocks the recipe names at the current count. The vault
+            receives them exactly as in a creation, the buyer receives the shares, and the filler takes the
+            dollars. Fillers compete on timing, so the price is the market&apos;s and no oracle is read. If
+            nobody fills, the dollars go back.
+          </p>
+        </Stage>
+
+        <Stage
+          n={6}
+          id="plans"
+          title="Then every month"
+          on="Monthly plans"
+          visual={<PlanVisual />}
+        >
+          <p>
+            A plan is that dollar order on a schedule: an amount, a period and a number of runs. Opening it
+            approves exactly the amount per run for its runs, and nothing else.
+          </p>
+          <p>
+            When a run is due anyone may send it, and the person who does is repaid the rent when the order
+            closes. Each fill resets the plan&apos;s reference to the price the market actually cleared at, so
+            next month starts from where this month landed, without an oracle.
           </p>
         </Stage>
       </div>
