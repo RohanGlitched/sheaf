@@ -265,6 +265,8 @@ export function DollarOrder({ basket, navPerShare, onDone }: { basket: Basket; n
         },
       });
       setNotice(null);
+      // Sent: wake the fillers now, so a slow confirmation here never eats into their time.
+      kickFillers();
       await confirmSignature(connection, signature);
       // The order is on chain: wake both fillers now rather than waiting for their schedules.
       kickFillers();

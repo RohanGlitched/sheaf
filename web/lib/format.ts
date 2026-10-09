@@ -138,5 +138,5 @@ export function duration(seconds: number): string {
   const s = Math.floor(seconds % 60);
   if (d > 0) return `${d}d ${h}h ${m}m`;
   if (h > 0) return `${h}h ${m}m ${s}s`;
-  return `${m}m ${s}s`;
+  return m > 0 ? `${m} min ${s} s` : `${s} s`;
 }

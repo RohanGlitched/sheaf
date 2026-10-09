@@ -2,29 +2,31 @@
 
 <img src=".github/readme/cover.png" alt="Sheaf: bind any eight stocks into one share. A basket drawn as a sheaf of stalks tied by one blue band." width="100%">
 
-**Index funds of tokenized stocks.** Bind up to eight tokenized stocks into one share, backed in kind by an onchain vault and redeemable for those stocks at any time. Each basket is a fixed recipe, like a unit investment trust: no manager and no rebalancing; a new mix is a new basket.
+**Baskets of tokenized stocks.** Bind up to eight tokenized stocks into one share, backed in kind by an onchain vault and redeemable for those stocks at any time. Each basket is a fixed recipe, like a unit investment trust: no manager and no rebalancing; a new mix is a new basket.
 
 [**Open Sheaf**](https://sheaf-index.vercel.app) · [How it works](https://sheaf-index.vercel.app/method) · [Ledger](https://sheaf-index.vercel.app/ledger) · [Chains](https://sheaf-index.vercel.app/chains) · [Program reference](docs/program.md)
 
-![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![71 program tests](https://img.shields.io/badge/program%20tests-71%20%2B%2014%20unit-3438c9?style=flat-square) ![158 EVM tests](https://img.shields.io/badge/EVM%20tests-158%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
+![Solana devnet](https://img.shields.io/badge/Solana-devnet-14251c?style=flat-square) ![5 EVM testnets](https://img.shields.io/badge/EVM-5%20testnets-14251c?style=flat-square) ![74 program tests](https://img.shields.io/badge/program%20tests-74%20%2B%2016%20unit-3438c9?style=flat-square) ![158 EVM tests](https://img.shields.io/badge/EVM%20tests-158%20passing-3438c9?style=flat-square) ![MIT](https://img.shields.io/badge/license-MIT-65726a?style=flat-square)
 
 </div>
 
 ---
 
-Tokenized stocks now trade around the clock on Solana and several EVM chains, but you still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens one by one and tracking them yourself, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. The program reads no price, and no share can exist without the stocks behind it. On top of that core: dollar orders filled by competing fillers in a Dutch auction, monthly plans anyone can run when due, a Meteora launch market per basket, a Panta prediction market per basket, and a live mainnet tape through Solami.
+Tokenized stocks now trade around the clock on Solana and several EVM chains, but you still cannot hold a theme ("the AI builders", "the S&P plus gold") as one position. Today that means buying five tokens one by one and tracking them yourself, or trusting someone's fund. **Sheaf turns a list of stocks and weights into one token.** The program writes the recipe once and never changes it. A share is created by depositing exactly the stocks the recipe names and redeemed by taking exactly those back. The program reads no price, and no share can exist without the stocks behind it. On top of that core: dollar orders and sell orders filled by competing fillers in Dutch auctions, monthly plans anyone can run when due, a Meteora launch market per basket, a Panta prediction market per basket, and a live mainnet tape through Solami.
 
 ## Live
 
 | | |
 |---|---|
-| App | [sheaf-index.vercel.app](https://sheaf-index.vercel.app): connect any Solana wallet set to devnet; an empty wallet gets a little devnet SOL |
+| App | [sheaf-index.vercel.app](https://sheaf-index.vercel.app): connect any Solana wallet set to devnet, or choose **Use a wallet in this browser** (nothing to install); an empty wallet gets test SOL and test dollars in one click |
 | Create a basket | [/compose](https://sheaf-index.vercel.app/compose): 28 tokenized stocks (20 xStocks, 8 PreStocks pre-IPO tokens such as OpenAI, Anthropic, SpaceX) |
 | Browse | [/explore](https://sheaf-index.vercel.app/explore) · [/plans](https://sheaf-index.vercel.app/plans) · [/predict](https://sheaf-index.vercel.app/predict) · [/portfolio](https://sheaf-index.vercel.app/portfolio) |
-| Proof | [/ledger](https://sheaf-index.vercel.app/ledger) (every program event, decoded in your browser) · [/chains](https://sheaf-index.vercel.app/chains) (each EVM vault read from its own chain) |
+| Proof | [/ledger](https://sheaf-index.vercel.app/ledger) (every program event, decoded from the chain and cached) · [/business](https://sheaf-index.vercel.app/business) (fees, the protocol-fee claim receipt) · [/live](https://sheaf-index.vercel.app/live) (mainnet xStock trades through Solami) · [/chains](https://sheaf-index.vercel.app/chains) (each EVM vault read from its own chain) |
 | Program | [`GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz`](https://explorer.solana.com/address/GaYNg5YZdNRa82Qn1383mvF1aEKhjVNmbsWg1UBNt8zz?cluster=devnet) on Solana devnet |
 
-Try it in two minutes: open a basket, choose **With dollars**, press **Get 1,000 test dollars**, then place a $100 order. A filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Then choose **Monthly** and start a plan on a 5-minute period to watch it run.
+Try it in two minutes on Solana: **Connect** → **Use a wallet in this browser** → **Get test SOL and test dollars**. Open **The Big Five**, buy $20 with dollars; a filler delivers the stocks, usually within a minute or two (live medians on /ledger), and the shares land in your wallet. Sell some back for dollars from the same panel, or start a **Monthly** plan on a 5-minute period to watch it run.
+
+On Robinhood Chain or Arbitrum Sepolia: open [/chains](https://sheaf-index.vercel.app/chains), pick a basket, connect (or use a wallet in this browser), take test stocks and dollars from the faucet, then create shares in kind or place a dollar auction the house fills. On Tempo: open the MAG8 basket and run the monthly plan panel; the chain itself refuses an overpay, an early run and any call outside the plan.
 
 ## How it works
 
@@ -55,7 +57,7 @@ What you can check without trusting this README:
 
 - **Backing.** Every basket page has a backing table and, under it, the two RPC calls that reproduce it: the share mint's supply and each vault's balance. If vault ≥ supply × units per share for every component, every share is backed.
 - **History.** [/ledger](https://sheaf-index.vercel.app/ledger) decodes every creation, redemption, order, fill and plan run from the program's own events. The server caches the decoded history; anyone can rebuild it from the chain, and the page falls back to decoding in the browser.
-- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 71 integration tests as mocha counts them (`anchor test`) and `lib.rs` 14 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 158 tests.
+- **Tests.** `tests/sheaf.ts`, `tests/mainnet-clone.ts` and `tests/tx-size.ts` hold 74 integration tests as mocha counts them (`anchor test`) and `lib.rs` 16 unit tests (`cargo test -p sheaf --lib`, on the default and the `devnet` build): backing through 40 random creations and redemptions, transfer-fee gross-up, auction math at start, middle and end, plan scheduling and bounds, and the attacks that matter (impostor vaults, redirected shares and fees, stale fills, early cancels, hostile mint extensions), plus a basket of byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock created, minted and redeemed with every issuer power intact. The EVM suite in `evm/` has 158 tests.
 - **Launch lifecycle.** A full Meteora launch on devnet, from first buy through graduation to every fee claim, with each signature: [docs/meteora.md](docs/meteora.md).
 - **EVM vaults.** The same vault and recipe as Solidity contracts, deployed and source-verified on five testnets. The EVM v2 desk (`CreationDeskV2`) runs the same Dutch auction as Solana, with a 0.10% protocol fee on fills; in-kind EVM mints have no protocol fee, because the v1 baskets are immutable. `PlanDesk` holds monthly plans whose amount, interval and price cap are on chain. The v1 desk, a fixed-price limit order, stays live beside it:
 
@@ -74,8 +76,8 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 | Sponsor | What Sheaf does with it | Doc |
 |---|---|---|
 | **Meteora** | Each basket can open a Dynamic Bonding Curve priced from its own NAV (opens at 0.5× NAV, graduates at 5× NAV into a DAMM v2 pool with all LP permanently locked). Launch addresses derive from the basket, so discovery needs no indexer, and a pool only counts if the basket's creator opened it. One launch has been taken through its whole life on devnet. | [docs/meteora.md](docs/meteora.md) |
-| **Panta** | Each basket whose holdings are all listed carries a market, "Will this basket beat SPY this week?". It resolves from the basket's recipe valued at two Friday US closes (adjusted closes × each mint's multiplier) against SPY's adjusted close, published with every input at `/api/nav/<basket>?at=<close>`. Baskets holding pre-IPO companies get no market. Discovery, quotes, create, trade, positions and claims run through Panta's API against its sandbox (`pk_test_` key), where the wallet signs a stand-in transaction that is never broadcast. | [docs/panta.md](docs/panta.md) |
-| **Solami** | Mainnet reads go through Solami's RPC: every xStock's dividend multiplier (which sets NAV) and a live tape of tokenized-stock trades, decoded every few seconds. | [docs/solami.md](docs/solami.md) |
+| **Panta** | Each basket whose holdings are all listed carries a market, "Will this basket beat SPY this week?". It resolves from the basket's recipe (its units written into the rule) valued at two week-ending NYSE closes (adjusted closes × each mint's multiplier, read on mainnet through Solami) against SPY's adjusted close, published with every input at `/api/nav/<basket>?at=<close>`. Baskets holding pre-IPO companies get no market. Discovery, quotes, create, trade, positions and claims run through Panta's API against its sandbox (`pk_test_` key), where the wallet signs a stand-in that is never broadcast. | [docs/panta.md](docs/panta.md) |
+| **Solami** | Mainnet reads go through Solami's RPC: every xStock's dividend multiplier (which sets NAV) and a live tape of tokenized-stock trades, decoded every few seconds. Watch it at [/live](https://sheaf-index.vercel.app/live). The same key reads the dividend multipliers behind every basket's value and every Panta resolution. | [docs/solami.md](docs/solami.md) |
 
 ## Chains
 
@@ -84,10 +86,10 @@ Basket, stock-token and stablecoin addresses for each chain, plus smoke-test has
 | Solana devnet | The Sheaf program: baskets, dollar orders, plans; Meteora launch markets | Mirrors of the 28 mainnet mints | Sheaf test dollar (Token-2022) |
 | Solana mainnet | Read only: prices, dividend multipliers, the tape | xStocks, PreStocks | – |
 | Robinhood Chain testnet | Factory, desk, 3 baskets (HOOD5, CHIPS, PRIME) | Robinhood's own test stock tokens | USDG (testnet) |
-| Tempo testnet | Factory, v1 and v2 desks, 3 baskets; monthly plans on PlanDesk through Tempo access keys, with a recurring spending limit and the price cap on chain | 8 labelled mirrors | AlphaUSD (TIP-20) |
-| Ethereum Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
-| Arbitrum Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
-| Base Sepolia | Factory, desk, 3 baskets | 8 labelled mirrors | sUSD mirror |
+| Tempo testnet | Factory, v1 and v2 desks, 3 baskets; monthly plans on PlanDesk through Tempo access keys, with a recurring spending limit and the price cap on chain | 8 labeled mirrors | AlphaUSD (TIP-20) |
+| Ethereum Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
+| Arbitrum Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
+| Base Sepolia | Factory, desk, 3 baskets | 8 labeled mirrors | sUSD mirror |
 | Hyperliquid (HyperEVM testnet) | Read only: a recipe priced from HyperCore stock perps through precompiles; nothing deployed | – | – |
 
 ## Business
@@ -108,8 +110,8 @@ Holding a share costs nothing a year; there is no management fee. Monthly plans 
 
 ```bash
 # Program (Linux or WSL, Anchor 0.31.1)
-anchor test                      # 71 integration tests on a local validator
-cargo test -p sheaf --lib        # 14 unit tests
+anchor test                      # 74 integration tests on a local validator
+cargo test -p sheaf --lib        # 16 unit tests
 anchor build                     # mainnet build: trusts only Backed's and PreStocks' issuer keys
 anchor build -- --features devnet  # devnet build: adds the house stand-in issuer used by the mirrors
 
@@ -165,7 +167,15 @@ Because `place_order` is permissionless, an order can name any token as cash. Th
 - **Devnet, with mirror mints.** The program is unaudited, so it does not take custody of real stocks. Prices, dividend multipliers and the tape come from mainnet; vaults hold devnet mirrors. The mirrors match the real mints' decimals, metadata, `ScaledUiAmount` dividend multiplier and (for PreStocks) transfer fee. They do not carry the issuer powers the real mints have.
 - **Issuer powers.** Real xStocks and PreStocks carry a freeze authority, a permanent delegate and a pause authority held by their issuer. Sheaf accepts those powers only when Backed or PreStocks hold them (`KNOWN_ISSUERS` in `lib.rs`) and refuses them under anyone else, including the basket creator. This is tested against byte-for-byte clones of mainnet TSLAx, NVDAx and a PreStock; the devnet mirrors themselves carry only metadata, ScaledUiAmount and transfer-fee extensions. An issuer that pauses or freezes one component blocks redemption of the whole basket until it lifts it.
 - **The EVM contracts** have no owner, no pause and no upgrade path, and read no price; they refuse tokens that skim on transfer. Outside Robinhood Chain the stocks are labeled mirrors worth nothing.
-- **Fill competition.** Today the house keeper and a second filler running the published reference code (both ours) do the filling. A filler with no competition can wait for the bottom of every auction; a plan's floor is the owner's own `min_ref`.
+- **Fill competition.** Today the house keeper and a second filler running the published reference code (both ours) do the filling. A filler with no competition can wait for the bottom of every auction; a plan's hard floor is still the owner's own `min_ref`, trailing or not, and no fill can move it past that.
+
+## India
+
+India's monthly-plan habit (10 crore SIP accounts, ₹32,297 crore a month; AMFI, Aug 2026) meets a capped fund route to US stocks. Sheaf's plan form takes rupee amounts and the [/plans](https://sheaf-index.vercel.app/plans) page sets out the rules with sources: Indian residents face the LRS limit, TCS, 30% crypto tax plus 1% TDS and an unsettled FEMA position, so the first users are Indians abroad where xStocks are sold and the wallets that serve them; residents come once the rules are clear. The page carries an India waitlist.
+
+## Who builds it
+
+Rohan Borade, solo, in India ([GitHub](https://github.com/RohanGlitched)).
 
 ## History and disclosure
 
@@ -175,7 +185,7 @@ Sheaf started as Tessera on Sep 13, 2026, one day before the hackathon window op
 
 ```
 programs/sheaf   the Solana program (Anchor, Token-2022)
-tests            71 integration tests
+tests            74 integration tests
 web              Next.js app: pages, the house keeper, the RPC proxy, share images
 evm              Solidity vaults, desks, plans and mirrors for EVM chains, 158 tests
 scripts          devnet setup, the reference filler, Meteora lifecycle scripts

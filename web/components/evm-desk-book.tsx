@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { encodeFunctionData, type Address } from "viem";
+import { encodeFunctionData } from "viem";
 import type { ChainBasket, Deployment } from "@/lib/chains";
 import {
   DESK_ABI,

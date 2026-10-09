@@ -193,6 +193,8 @@ export function SellOrderPanel({
         },
       });
       setNotice(null);
+      // Sent: wake the fillers now, so a slow confirmation here never eats into their time.
+      kickFillers();
       await confirmSignature(connection, signature);
       kickFillers();
       const info = await connection.getAccountInfo(sellOrder);

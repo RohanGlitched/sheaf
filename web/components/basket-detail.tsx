@@ -377,7 +377,7 @@ function Composition({
         These numbers were written once, when the basket was created, and cannot be
         changed: a fixed basket, like a unit investment trust, with no manager and no
         rebalancing. The weight on the right drifts as prices move. To change the
-        recipe, publish a new basket.
+        recipe, create a new basket.
       </p>
 
       {/* The market price of one component is the least useful column here — the
