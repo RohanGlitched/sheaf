@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { launchFor, readDbcState, type DbcPoolInfo } from "@/lib/dbc";
+import { openLaunches, readDbcState, type DbcPoolInfo } from "@/lib/dbc";
 import { count, quantity } from "@/lib/format";
 import { TOKEN_2022_PROGRAM_ID, type Basket } from "@/lib/sheaf";
 
@@ -22,7 +22,11 @@ export function LaunchHoldings({ baskets }: { baskets: Basket[] | null }) {
     if (!owner || !baskets?.length) return;
     let live = true;
     void (async () => {
-      const infos = await Promise.all(baskets.map(launchFor));
+      // Only official launches count: a pool squatting a basket's launch address
+      // is not that basket's token, whatever its name says.
+      const official = await openLaunches(connection, baskets);
+      const launched = baskets.filter((b) => official.has(b.address));
+      const infos = launched.map((b) => official.get(b.address)!);
       const accounts = await connection.getParsedTokenAccountsByOwner(new PublicKey(owner), {
         programId: TOKEN_2022_PROGRAM_ID,
       });
@@ -32,11 +36,11 @@ export function LaunchHoldings({ baskets }: { baskets: Basket[] | null }) {
         held.set(info.mint, (held.get(info.mint) ?? 0) + (info.tokenAmount.uiAmount ?? 0));
       }
       const mine = infos
-        .map((info, i) => ({ info, basket: baskets[i], amount: held.get(info.baseMint) ?? 0 }))
+        .map((info, i) => ({ info, basket: launched[i], amount: held.get(info.baseMint) ?? 0 }))
         .filter((h) => h.amount > 0);
       const rows = await Promise.all(
         mine.map(async (h) => {
-          const state = await readDbcState(connection, h.info).catch(() => null);
+          const state = await readDbcState(connection, h.info, h.basket.creator).catch(() => null);
           return {
             ...h,
             valueSol: state ? (state.cap / h.info.supply) * h.amount : null,

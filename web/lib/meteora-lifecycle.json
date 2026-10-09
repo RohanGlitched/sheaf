@@ -1,0 +1,130 @@
+{
+  "cluster": "devnet",
+  "basket": "FFGgfTHbv9jAAHHv54aPQM7cdWZcr49m2APrjcPuiEfJ",
+  "launch": {
+    "symbol": "BIG5A",
+    "pool": "6rUHFtrZeZAS9HXeSfbWWFLcmwDohrUrp81qD1LArS7s",
+    "config": "4ZiirKVn3V3CcCssyfSfvxxDWhmzJSHDqZA6b1CD9EMD",
+    "mint": "7X46CBfPfFg2cBMaCFKJ8XpEqY7iCn9rMUsnAZnftKxB",
+    "dammPool": "BWUie5pJaUMonq7RFx6Cyp19dbw9TBqH5rmVUVY9Uenj"
+  },
+  "steps": [
+    {
+      "id": "fund",
+      "title": "House funds three throwaway wallets",
+      "detail": "0.45 + 0.45 + 0.6 devnet SOL from the house key",
+      "signature": "4RarDmfwf5fBqvwyanzZQEPhZY98gMoF9uE6g1b9BK7FeK7qcZCJqBMvZaiVr97HQbvuEteHe3FXtzTPkAf7njKc",
+      "at": "2026-10-09T05:43:27.991Z"
+    },
+    {
+      "id": "buy-1",
+      "title": "Wallet 1 buys on the curve",
+      "detail": "0.3 SOL for 548,022,694 BIG5A on the curve (DBC swap2, ExactIn)",
+      "signature": "3DVMgn6aXdiA3fMQV8UZyDsAQRDMkshSTELX4bLny5ka3qKVFKYseBoakr2GtDoyPV5J4AQnc8LZ367tiKHVMpGd",
+      "at": "2026-10-09T05:45:16.736Z"
+    },
+    {
+      "id": "buy-2",
+      "title": "Wallet 2 buys on the curve",
+      "detail": "0.35 SOL for 306,106,403 BIG5A on the curve (DBC swap2, ExactIn)",
+      "signature": "4zdBokM1pui3h26e2cjcHYkzmsmd2XUSiPJXRZF7SQLXmnBCeFHLdmszFAcRcK8DZT1UCXcCxkDt9T1PxDFvqhFg",
+      "at": "2026-10-09T05:45:18.130Z"
+    },
+    {
+      "id": "sell-curve",
+      "title": "Wallet 1 sells a fifth back to the curve",
+      "detail": "109,604,539 BIG5A back to the curve for 0.1803 SOL (DBC swap2)",
+      "signature": "5MsQcm7ZdpwQXMLYtJ8HfH7RdJRea3FFmtRc8M3apEXNmMSuMGjtLxsSYGHjiMCe91inh6CPjY18oa9gPJUZQ6jY",
+      "at": "2026-10-09T05:45:20.197Z"
+    },
+    {
+      "id": "buy-out",
+      "title": "Wallet 3 buys out the rest of the curve",
+      "detail": "PartialFill buy that filled the curve: 1.1263 of 1.1263 SOL raised",
+      "signature": "UtF86mMN2KZU7WZ7zDKbGEzq6G7JByCsQc6a3xFqVx18yYbYr8QGpH5mE3ZBQ1J3PsuwPTeuXg75ZhkEj8Ak8wd",
+      "at": "2026-10-09T05:47:16.192Z"
+    },
+    {
+      "id": "graduate",
+      "title": "Anyone graduates the curve into DAMM v2",
+      "detail": "migrateToDammV2 signed by a buyer, not the creator: pool BWUie5pJaUMonq7RFx6Cyp19dbw9TBqH5rmVUVY9Uenj",
+      "signature": "3HEuEK78b68fgM87BEBhUK4A1pAR7AZ8eW8CD67GuZ7uopNFU4NmNom2GWD2cGc35zJWP4RWFdo8xT4dMyfv1UdA",
+      "at": "2026-10-09T05:47:19.331Z"
+    },
+    {
+      "id": "damm-buy",
+      "title": "Wallet 2 buys on the DAMM v2 pool",
+      "detail": "0.05 SOL for 2,563,869 BIG5A on DAMM v2 (cp-amm swap2)",
+      "signature": "5iguwzaAzPmjELS2RMHfLjiJiZSMGLyzuegreURRP63UyJxPE8YSmSu7oshD11aDFmu2SaBcvtQrPD6JpYe4Z9wX",
+      "at": "2026-10-09T05:47:21.293Z"
+    },
+    {
+      "id": "damm-sell",
+      "title": "Wallet 3 sells on the DAMM v2 pool",
+      "detail": "46,288,677 BIG5A for 0.5125 SOL on DAMM v2 (cp-amm swap2)",
+      "signature": "4RrQSbHQaKRSNE27ZjseqZoLvbT85BNVvNmdPQFvemfbw4S1ac4rnyuijUkvnT8E3haJV8F9WuEaz1xPwFpx3DS7",
+      "at": "2026-10-09T05:47:23.687Z"
+    },
+    {
+      "id": "claim-creator",
+      "title": "Creator claims curve trading fees",
+      "detail": "0.007005 SOL of curve fees to the basket's creator (claimCreatorTradingFee)",
+      "signature": "3vnLmZUGYinqsTbtto8AXfdK2VmBUbAMwCseDNLH8r918ziuJ9hXfmKqxg1tWZztZmyLof4m1ih2uKevoyXAgcHJ",
+      "at": "2026-10-09T05:47:26.392Z"
+    },
+    {
+      "id": "lp-creator",
+      "title": "Creator claims locked-LP fees",
+      "detail": "0.002271 SOL of locked-LP fees to the creator",
+      "signature": "5Ycg7UPR447Arxdpjmkox3Jd3okibcyrozBZsjcNScLUoq7FEXq6wpFhCAqa71sQA4zDt72rGp3EPkFDMg3MN5JU",
+      "at": "2026-10-09T05:47:29.780Z"
+    },
+    {
+      "id": "claim-partner",
+      "title": "Treasury claims the partner's curve fees",
+      "detail": "0.007005 SOL of curve fees to Sheaf's treasury (claimPartnerTradingFee)",
+      "signature": "4TGcxFKATcQ1UJs4BT4GLVmXtabDLY1Uh3rZiF7LLXj9C7VJqvj5waAVTNuN2bdPd1HhUSxWrTUsvrYZ2iZt2WSx",
+      "at": "2026-10-09T05:47:32.886Z"
+    },
+    {
+      "id": "migration-fee",
+      "title": "Treasury withdraws the migration fee",
+      "detail": "1% migration fee to the treasury, about 0.011263 SOL (partnerWithdrawMigrationFee)",
+      "signature": "2pNjWEWFjjUruKJc65WRxRH1ZQvr6uV9wWDnMxsbfvVC5xuHEM8X7bjU9xFGeXCJM2ppSR82AXFGkvEv4Dxy2gqZ",
+      "at": "2026-10-09T05:47:36.956Z"
+    },
+    {
+      "id": "surplus",
+      "title": "Treasury withdraws the partner's surplus",
+      "detail": "The partner's share of SOL raised past the threshold (partnerWithdrawSurplus)",
+      "signature": "3ZkkiBLYpf6hQ6tyVNKhvsCn3rPGBrFvC1tuwHF8Xmgg6hhC2uRQH69qSVfrWSbWPPQQoDRtzCFjPKS1yCGNe42q",
+      "at": "2026-10-09T05:47:40.326Z"
+    },
+    {
+      "id": "leftover",
+      "title": "Leftover supply goes to the treasury",
+      "detail": "The 1% leftover supply to the leftover receiver (withdrawLeftover)",
+      "signature": "3woVQFFw522NMXVpkuajQUMcJ8uuVfvtwUEicg6t4i6yuE48XPfByNh1q4EwsUqf5AfQzb3CHmF9kWuBdMGFqF2W",
+      "at": "2026-10-09T05:47:43.986Z"
+    },
+    {
+      "id": "lp-partner",
+      "title": "Treasury claims locked-LP fees",
+      "detail": "0.002271 SOL of locked-LP fees to the treasury",
+      "signature": "5FBcxq3iF1XmNYVzeU8XzcYg752UBP1TTE4rKfym7EAdyocPbJUve4VMJSzfRq6fzJBvxcefVEQQmDs5J2gDYXEn",
+      "at": "2026-10-09T05:47:46.766Z"
+    }
+  ],
+  "wallets": [
+    "7gVxJVLpSZpuuPQ8uaJs7S98NRvj5hMs1h1S9Hr1Y4CT",
+    "8vQiyPfcXN9FzLojHdj4hanRvCqWJFxp6ZKXKGnWFvxP",
+    "249bT6U4NCEmkw2i3hzgJ8kSRsNWqatHYwJeWjGaY8um"
+  ],
+  "result": {
+    "raisedSol": 1.126261178,
+    "thresholdSol": 1.126261178,
+    "graduated": true,
+    "totalCurveFeesSol": 0.014010721,
+    "readAt": "2026-10-09T05:47:47.402Z"
+  }
+}

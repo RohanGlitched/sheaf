@@ -5,13 +5,18 @@ import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
-  FEATURED_DBC,
+  FEATURED_BASKET,
   dammV2PoolAddress,
+  findLaunch,
   launchFor,
   readDbcState,
   type DbcPoolInfo,
   type DbcState,
+  type FoundLaunch,
+  CURVE_FULL,
 } from "@/lib/dbc";
+import { GRADUATION_MULTIPLE, LAUNCH_FEE, OPEN_MULTIPLE } from "@/lib/launch";
+import lifecycle from "@/lib/meteora-lifecycle.json";
 import { explorerAddress, explorerTx } from "@/lib/config";
 import { count, money, percent, quantity } from "@/lib/format";
 import { useMeasure } from "@/lib/use-measure";
@@ -33,72 +38,94 @@ function explain(error: unknown, fallback: string): string {
   if (/block height exceeded/i.test(raw)) {
     return "The transaction expired before it was signed. Try again.";
   }
-  if (/already in use/i.test(raw)) return "This basket's launch market is already open.";
+  if (/already in use/i.test(raw)) {
+    return "Something took this launch's address while you were signing. Try again: the next free address is used.";
+  }
+  if (/PoolIsCompleted|pool is completed/i.test(raw)) return CURVE_FULL;
   return raw.split("\n")[0] || fallback;
 }
 
-/** Where a basket's launch lives, and its live state once opened. */
-function useLaunch(basket: { address: string; name: string; symbol: string }) {
+type LaunchBasketProps = { address: string; name: string; symbol: string; creator: string };
+
+/**
+ * Where a basket's launch lives, and its live state once opened. Only a pool
+ * that passes `checkLaunch` (opened by the basket's creator, fees to Sheaf's
+ * treasury) counts; anything else found at the basket's launch addresses comes
+ * back in `unofficial` and is never traded from here.
+ */
+function useLaunch(basket: LaunchBasketProps) {
   const { connection } = useConnection();
   const [info, setInfo] = useState<DbcPoolInfo | null>(null);
   const [state, setState] = useState<DbcState | null | undefined>(undefined);
+  const [unofficial, setUnofficial] = useState<FoundLaunch[]>([]);
   const [readError, setReadError] = useState<string | null>(null);
-  const { address, name, symbol } = basket;
+  const { address, name, symbol, creator } = basket;
 
   const load = useCallback(async () => {
     try {
-      const next = await launchFor({ address, name, symbol });
+      const found = await findLaunch(connection, { address, name, symbol, creator });
+      // The official launch if there is one, else where the creator would open it.
+      const next = found.launch?.info ?? found.free ?? (await launchFor({ address, name, symbol }));
       setInfo(next);
-      setState(await readDbcState(connection, next));
+      setUnofficial(found.unofficial);
+      setState(found.launch ? await readDbcState(connection, next, creator) : null);
       setReadError(null);
     } catch (err) {
       setReadError(err instanceof Error ? err.message : "The pool could not be read.");
     }
-  }, [connection, address, name, symbol]);
+  }, [connection, address, name, symbol, creator]);
 
   useEffect(() => {
     void Promise.resolve().then(load);
   }, [load]);
 
-  return { info, state, readError, reload: load };
+  return { info, state, unofficial, readError, reload: load };
+}
+
+/** "20 × NAV", read off a pool's own open and graduation caps, so old and new curves both say the truth. */
+function graduationMultiple(state: DbcState): number {
+  return Math.round((state.graduationCap / state.openCap) * OPEN_MULTIPLE);
 }
 
 export function LaunchMarket() {
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
-      <div className="max-w-[40ch] self-center">
-        <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
-        <h2 className="display mt-3 text-title text-ink">
-          A basket can trade before anyone has built a share.
-        </h2>
-        <p className="mt-5 text-base leading-relaxed text-ink-2">
-          A new basket starts with no shares, and nobody wants to be first to
-          assemble every component. So a bonding curve opens in front of it: a
-          token priced along a curve that starts at half the basket&rsquo;s NAV
-          and graduates into a permanent Meteora pool at twenty times it. The
-          curve opens on a shelf, so early money gets nearly the same price, and
-          steepens only once a basket has proven it has takers.
-        </p>
-        <p className="mt-4 text-sm leading-relaxed text-ink-3">
-          Any basket&rsquo;s creator can open one from the basket page in a single
-          signature, and earns half of its trading fees. This one stands in front
-          of the Frontier Labs basket: buy a little and the dot moves, because
-          every figure here is read from the pool account on each load.
-        </p>
+    <div>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16">
+        <div className="max-w-[40ch] self-center">
+          <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
+          <h2 className="display mt-3 text-title text-ink">
+            A basket can trade before anyone has built a share.
+          </h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
+            A new basket starts with no shares, and nobody wants to be first to
+            assemble every component. So a bonding curve opens in front of it: a
+            token priced along a curve that starts at half the basket&rsquo;s NAV
+            and graduates into a permanent Meteora DAMM v2 pool at a fixed
+            multiple of it, with every LP position locked for good.
+          </p>
+          <p className="mt-4 text-sm leading-relaxed text-ink-3">
+            Any basket&rsquo;s creator can open one from the basket page in a single
+            signature, and earns half of its trading fees. This one stands in front
+            of the Frontier Labs basket and graduates at twenty times NAV; launches
+            opened now use a gentler curve that graduates at {GRADUATION_MULTIPLE}{" "}
+            times and puts a quarter of the supply into the graduated pool. Every
+            figure here is read from the pool account on each load.
+          </p>
+        </div>
+        <FeaturedLaunch />
       </div>
-      <FeaturedLaunch />
+      <LaunchLifecycle />
     </div>
   );
 }
 
 /** The featured launch, on its own: the home page and How it works both show it. */
 export function FeaturedLaunch() {
-  const [address, info] = FEATURED_DBC;
-  const launch = useLaunch({ address, name: info.baseName, symbol: info.baseSymbol });
+  const launch = useLaunch(FEATURED_BASKET);
   if (!launch.info) return <LaunchSkeleton />;
   return (
     <LaunchCard
-      basketAddress={address}
+      basketAddress={FEATURED_BASKET.address}
       info={launch.info}
       state={launch.state ?? null}
       readError={launch.readError}
@@ -146,8 +173,8 @@ export function BasketLaunch({
             {launch.info.baseSymbol} is a separate token priced off {basket.symbol}&rsquo;s NAV: the
             curve opened at half of it and{" "}
             {launch.state.migrated
-              ? "graduated at twenty times into a Meteora DAMM v2 pool, where it trades now with its liquidity locked."
-              : "graduates at twenty times into a Meteora DAMM v2 pool with its liquidity locked."}{" "}
+              ? `graduated at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool, where it trades now with its liquidity locked.`
+              : `graduates at ${graduationMultiple(launch.state)} times it into a Meteora DAMM v2 pool with its liquidity locked.`}{" "}
             Buy and sell it here either way. It is a bet on the basket, not a redemption right into it.
           </p>
         </div>
@@ -162,9 +189,32 @@ export function BasketLaunch({
       </section>
     );
   }
-  if (!isCreator) return null;
+  // A pool squatting this basket's launch address is named as such, never traded from here.
+  const squatted = launch.unofficial.length > 0 && (
+    <p className="mb-5 max-w-[62ch] border-l-2 border-line-strong pl-3 text-sm leading-relaxed text-ink-2">
+      <span className="text-ink">An unofficial pool sits at one of {basket.symbol}&rsquo;s launch addresses.</span>{" "}
+      {launch.unofficial[0].check.reason} Sheaf does not treat it as this basket&rsquo;s launch and
+      will not trade it.{" "}
+      <a
+        href={explorerAddress(launch.unofficial[0].info.pool)}
+        target="_blank"
+        rel="noreferrer"
+        className="underline decoration-line-strong underline-offset-4 hover:text-ink"
+      >
+        The pool on Explorer
+      </a>
+    </p>
+  );
+  if (!isCreator) {
+    return squatted ? (
+      <section id="launch" className="mt-12 scroll-mt-24">
+        {squatted}
+      </section>
+    ) : null;
+  }
   return (
     <section id="launch" className="mt-12 scroll-mt-24">
+      {squatted}
       <OpenLaunch basket={basket} info={launch.info} navUsd={navUsd} onOpened={launch.reload} />
     </section>
   );
@@ -218,31 +268,36 @@ function OpenLaunch({
   }
 
   return (
-    <div className="border border-bind/40 bg-raised">
+    <div className="border border-line bg-raised">
       <div className="px-6 py-6">
         <p className="text-xs tracking-wide text-bind">Meteora Dynamic Bonding Curve</p>
         <h2 className="display mt-2 text-xl text-ink">Open a launch market for {basket.symbol}</h2>
         <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-ink-2">
           Give people a way in before anyone has assembled a share. {info.baseSymbol} trades on
           a Meteora curve priced from this basket&rsquo;s own value: it opens at half the NAV and
-          graduates into a Meteora DAMM v2 pool, liquidity locked for good, at twenty times it.
-          The curve starts with a shelf, so the first fifth of the money in moves the price
-          less than a quarter: nobody is punished for being early. You earn half of every
-          trading fee on the curve.
+          graduates into a Meteora DAMM v2 pool, liquidity locked for good, at{" "}
+          {GRADUATION_MULTIPLE} times it. About a quarter of the supply goes into that pool, so
+          it is a real market on the day it opens, and the first fifth of the money in buys
+          about a third of the supply, so no single early wallet takes half the token. You earn
+          half of every trading fee on the curve.
         </p>
       </div>
       <dl className="grid grid-cols-1 gap-px border-y border-line bg-line sm:grid-cols-3">
         <Fact
           label="Opens at"
-          value={navSol != null ? `${quantity(navSol / 2, 2)} SOL` : "—"}
+          value={navSol != null ? `${quantity(navSol * OPEN_MULTIPLE, 2)} SOL` : "—"}
           note={navUsd != null ? `½ × NAV of ${money(navUsd)}` : "reading NAV"}
         />
         <Fact
           label="Graduates at"
-          value={navSol != null ? `${quantity(navSol * 20, 2)} SOL` : "—"}
-          note="20 × NAV, into Meteora DAMM v2"
+          value={navSol != null ? `${quantity(navSol * GRADUATION_MULTIPLE, 2)} SOL` : "—"}
+          note={`${GRADUATION_MULTIPLE} × NAV, into Meteora DAMM v2`}
         />
-        <Fact label="Your share of fees" value="50%" note="4% at the open, 1% within the hour" />
+        <Fact
+          label="Your share of fees"
+          value="50%"
+          note={`${LAUNCH_FEE.startingFeeBps / 100}% in the first seconds, ${LAUNCH_FEE.endingFeeBps / 100}% after ${LAUNCH_FEE.totalDurationSeconds / 60} minutes`}
+        />
       </dl>
       <div className="px-6 py-5">
         <button
@@ -258,7 +313,8 @@ function OpenLaunch({
         )}
         <p className="mt-4 text-xs leading-relaxed text-ink-3">
           One signature and about 0.02 SOL of rent. The token is fixed once it exists: no mint
-          authority, no edits, and one launch per basket.
+          authority, no edits, and one launch per basket. The opening fee is a bot tax: a buy
+          in the first block pays a quarter of its order to you and the treasury.
         </p>
       </div>
     </div>
@@ -450,8 +506,11 @@ export function LaunchCard({
     }
   }
 
+  const curveFull = state != null && !state.migrated && state.raised >= state.threshold;
+  const untouched = state != null && !state.migrated && state.raised === 0;
+
   return (
-    <div className="border border-bind/40 bg-raised">
+    <div className="border border-line bg-raised">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line px-6 py-4">
         <p className="text-sm text-ink">
           <span className="display text-lg">{info.baseSymbol}</span>{" "}
@@ -461,9 +520,11 @@ export function LaunchCard({
           <span className={`size-1.5 rounded-full bg-gain ${state?.migrated ? "" : "live-dot"}`} aria-hidden />
           {state?.migrated
             ? "Graduated to Meteora DAMM v2"
-            : state && state.raised >= state.threshold
+            : curveFull
               ? "Curve full"
-              : "Trading live"}
+              : untouched
+                ? "Open, no buys yet"
+                : "Trading live"}
         </p>
       </div>
 
@@ -483,17 +544,26 @@ export function LaunchCard({
               ? "reading"
               : state.migrated
                 ? "live on Meteora DAMM v2"
-                : `${percent((state.raised / state.threshold) * 100, 2)} to graduation`
+                : untouched
+                  ? "the opening price, untouched"
+                  : `${percent((state.raised / state.threshold) * 100, 2)} to graduation`
           }
         />
         <Fact
-          label="Graduates at"
+          label={state?.migrated ? "Graduated at" : "Graduates at"}
           value={state ? `${quantity(state.graduationCap, 2)} SOL` : "—"}
-          note="20 × NAV, liquidity locked"
+          note={state ? `${graduationMultiple(state)} × NAV, liquidity locked` : "reading"}
         />
       </dl>
 
       <div className="px-6 py-5">
+        {untouched && state && (
+          <p className="mb-4 text-sm leading-relaxed text-ink-2">
+            <span className="text-ink">Opens at {quantity(state.openCap, 2)} SOL. Be the first buyer.</span>{" "}
+            Nobody has bought yet, so the first buy gets the curve&rsquo;s lowest price; it takes{" "}
+            {quantity(state.threshold, 2)} SOL in all to graduate.
+          </p>
+        )}
         {state?.migrated && (
           <p className="mb-4 text-sm leading-relaxed text-ink-2">
             The curve filled and its liquidity moved into a Meteora DAMM v2 pool, locked for good.
@@ -563,7 +633,8 @@ export function LaunchCard({
                 busy != null ||
                 !state ||
                 (side === "sell" && !(held && held.raw > 0n)) ||
-                (side === "buy" && !state.migrated && state.raised >= state.threshold)
+                // A full curve takes neither buys nor sells until it graduates.
+                curveFull
               }
               className="bg-bind px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-bind-deep disabled:opacity-50 rounded-[var(--radius-control)]"
             >
@@ -573,8 +644,13 @@ export function LaunchCard({
                   : "Selling…"
                 : `${side === "buy" ? "Buy" : "Sell"} ${info.baseSymbol}`}
             </button>
-            {side === "sell" && !(held && held.raw > 0n) && (
-              <p className="w-full text-xs text-ink-3">You hold no {info.baseSymbol} to sell.</p>
+            {curveFull ? (
+              <p className="w-full text-xs text-ink-3">{CURVE_FULL}</p>
+            ) : (
+              side === "sell" &&
+              !(held && held.raw > 0n) && (
+                <p className="w-full text-xs text-ink-3">You hold no {info.baseSymbol} to sell.</p>
+              )
             )}
           </div>
         ) : (
@@ -602,8 +678,8 @@ export function LaunchCard({
             </a>
           </p>
         )}
-        {state && !state.migrated && state.raised >= state.threshold && (
-          <div className="mt-5 border border-bind/40 bg-bind/[0.06] p-4">
+        {curveFull && (
+          <div className="mt-5 border border-line bg-bind/[0.06] p-4">
             <p className="text-sm leading-relaxed text-ink-2">
               <span className="text-ink">The curve is full.</span> Anyone can move it into its
               Meteora DAMM v2 pool, where the liquidity is locked for good and trading carries on.
@@ -679,6 +755,115 @@ export function LaunchCard({
           </a>
         </p>
       </div>
+    </div>
+  );
+}
+
+const PHASES: { title: string; note: string; steps: string[] }[] = [
+  {
+    title: "On the curve",
+    note: "Three fresh wallets, funded with devnet SOL, buy and sell on the bonding curve.",
+    steps: ["fund", "buy-1", "buy-2", "sell-curve", "buy-out"],
+  },
+  {
+    title: "Graduation",
+    note: "A buyer, not the creator, moves the full curve into Meteora DAMM v2.",
+    steps: ["graduate"],
+  },
+  {
+    title: "On DAMM v2",
+    note: "The same token trades on the graduated pool, liquidity locked.",
+    steps: ["damm-buy", "damm-sell"],
+  },
+  {
+    title: "Everyone takes their share",
+    note: "Creator and treasury claim curve fees, the migration fee, surplus, leftover supply and locked-LP fees.",
+    steps: ["claim-creator", "lp-creator", "claim-partner", "migration-fee", "surplus", "leftover", "lp-partner"],
+  },
+];
+
+/**
+ * One launch's whole life on devnet, as receipts: BIG5A bought out from three
+ * wallets, graduated, traded on DAMM v2, and every fee claimed. The signatures
+ * come from `scripts/meteora-lifecycle.mjs`, which wrote them as they landed.
+ */
+export function LaunchLifecycle() {
+  const steps = new Map(lifecycle.steps.map((s) => [s.id, s]));
+  return (
+    <div className="mt-16 border-t border-line pt-12">
+      <div className="max-w-[62ch]">
+        <p className="text-xs tracking-wide text-bind">Receipts</p>
+        <h3 className="display mt-2 text-xl text-ink">The whole life of a launch</h3>
+        <p className="mt-3 text-sm leading-relaxed text-ink-2">
+          {lifecycle.launch.symbol}, the launch in front of The Big Five, went the whole way on
+          devnet: {quantity(lifecycle.result.raisedSol, 3)} SOL raised from{" "}
+          {lifecycle.wallets.length} wallets, graduated into a Meteora DAMM v2 pool, traded
+          there, and every party paid. Each line is a transaction you can open.
+        </p>
+      </div>
+      <ol className="mt-8 grid gap-px border border-line bg-line sm:grid-cols-2 xl:grid-cols-4">
+        {PHASES.map((phase, i) => (
+          <li key={phase.title} className="bg-raised px-5 py-5">
+            <p className="tnum text-xs text-ink-3">{String(i + 1).padStart(2, "0")}</p>
+            <p className="display mt-1 text-lg text-ink">{phase.title}</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-3">{phase.note}</p>
+            <ul className="mt-4 space-y-3">
+              {phase.steps.map((id) => {
+                const step = steps.get(id);
+                if (!step) return null;
+                return (
+                  <li key={id} className="text-sm leading-snug">
+                    <a
+                      href={explorerTx(step.signature)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group block"
+                    >
+                      <span className="text-ink underline decoration-line-strong underline-offset-4 group-hover:decoration-bind">
+                        {step.title}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-ink-3 [overflow-wrap:anywhere]">{step.detail}</span>
+                      <span className="tnum mt-0.5 block font-mono text-[11px] text-ink-3">
+                        {step.signature.slice(0, 10)}…{step.signature.slice(-6)}
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-3">
+        <a
+          href={explorerAddress(lifecycle.launch.pool)}
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+        >
+          The curve on Explorer
+        </a>
+        <a
+          href={explorerAddress(lifecycle.launch.dammPool)}
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+        >
+          The DAMM v2 pool on Explorer
+        </a>
+        <Link
+          href={`/basket/${lifecycle.basket}#launch`}
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+        >
+          Trade {lifecycle.launch.symbol} on DAMM v2
+        </Link>
+        <a
+          href="/api/launches"
+          className="underline decoration-line-strong underline-offset-4 hover:text-ink-2"
+        >
+          Every launch as JSON
+        </a>
+      </p>
     </div>
   );
 }
@@ -816,7 +1001,11 @@ function CurvePlot({ state, W, progress }: { state: DbcState; W: number; progres
         fontSize="13"
         textAnchor={progress > 0.6 ? "end" : "start"}
       >
-        {state.migrated ? "graduated" : "now"} · {quantity(raised, 4)} SOL in
+        {state.migrated
+          ? `graduated · ${quantity(raised, 4)} SOL in`
+          : state.raised === 0
+            ? "opens here · be the first buyer"
+            : `now · ${quantity(raised, 4)} SOL in`}
       </text>
       <circle cx={x(state.threshold)} cy={y(state.graduationCap)} r="4" fill="none" stroke="var(--color-ink-2)" strokeWidth="1.5" />
       {progress < 0.85 && (

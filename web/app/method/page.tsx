@@ -502,24 +502,26 @@ export default async function MethodPage() {
           </p>
           <p>
             The curve is set from the basket&rsquo;s own value per share (its
-            NAV) rather than round numbers. It opens at half of it and, at twenty
-            times it, moves into a permanent Meteora pool with all liquidity
-            locked. The fee starts at 4% to deter snipers and settles at 1% within
-            the hour.
+            NAV) rather than round numbers. It opens at half of it and, at five
+            times it, moves into a permanent Meteora pool with every liquidity
+            position locked. A quarter of the supply goes into that pool, so it
+            starts deep enough to trade. The fee is 25% in the first seconds, to
+            make sniping expensive, and falls to 1% over ten minutes.
           </p>
           <p>
             The shape is ours. Four segments, weighted so the curve opens on a
-            shelf: the first fifth of the SOL raised moves the price less than a
-            quarter above the open, and half the raise is in before the price
-            reaches a sixth of graduation. A basket is not a meme, and its
-            early buyers should not be racing each other.
+            shelf: the first fifth of the SOL raised buys about a third of the
+            supply, not half of it, so early buyers are not racing each other. A
+            basket is not a meme. The whole curve is published as a reusable
+            preset in the repository.
           </p>
           <p>
             The basket&rsquo;s creator opens it from the basket page in one
             signature and earns half of the curve&rsquo;s trading fees; Sheaf
             earns the other half. The pool&rsquo;s address is derived from the
-            basket&rsquo;s, so every basket has exactly one launch and anyone can
-            find it. When the curve fills, anyone can move it into the permanent
+            basket&rsquo;s, so anyone can find it without an indexer, and a pool
+            only counts as the basket&rsquo;s launch if the basket&rsquo;s creator
+            opened it. When the curve fills, anyone can move it into the permanent
             pool from the same page, and the same card keeps buying and selling
             there instead of on the curve.
           </p>

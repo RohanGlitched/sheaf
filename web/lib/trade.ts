@@ -11,7 +11,7 @@ import {
   getTokenProgram,
   getUnClaimLpFee,
 } from "@meteora-ag/cp-amm-sdk";
-import { NATIVE_SOL, dammV2PoolAddress, type DbcPoolInfo } from "./dbc";
+import { CURVE_FULL, NATIVE_SOL, dammV2PoolAddress, type DbcPoolInfo } from "./dbc";
 
 export type Side = "buy" | "sell";
 
@@ -55,6 +55,11 @@ async function buildCurveTrade({
     client.state.getPoolConfig(info.config),
   ]);
   if (!virtualPool || !config) throw new Error("The pool could not be read.");
+  // A full curve takes no more trades either way until it graduates; say so
+  // rather than sending a swap the program will reject.
+  if (virtualPool.poolState.quoteReserve.gte(config.migrationQuoteThreshold)) {
+    throw new Error(CURVE_FULL);
+  }
 
   // A buy bigger than what is left on the curve takes the rest and refunds the
   // difference rather than failing at the last step; a sell is exact.

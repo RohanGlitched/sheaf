@@ -1,0 +1,74 @@
+{
+  "id": "sheaf-nav-shelf-v2",
+  "title": "NAV shelf: open at 0.5x NAV, graduate at 5x NAV",
+  "description": "A Meteora DBC curve for anything with an onchain-verifiable net asset value. Market caps are multiples of a NAV you supply in the quote token; the four segments and weights fix the shape. Built with buildCurveWithCustomSqrtPrices.",
+  "program": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+  "openMultipleOfNav": 0.5,
+  "graduationMultipleOfNav": 5,
+  "token": {
+    "type": "Token2022",
+    "decimals": 6,
+    "quoteDecimals": 9,
+    "totalSupply": 1000000000,
+    "authority": "Immutable"
+  },
+  "leftoverPercentOfSupply": 1,
+  "curve": {
+    "builder": "buildCurveWithCustomSqrtPrices",
+    "capMultiplesOfOpen": [1, 1.5, 2.5, 5, 10],
+    "liquidityWeights": [3, 3, 3, 4]
+  },
+  "fees": {
+    "collectFeeMode": "QuoteToken",
+    "creatorTradingFeePercentage": 50,
+    "dynamicFee": true,
+    "activationType": "Timestamp",
+    "antiSnipe": {
+      "mode": "FeeSchedulerExponential",
+      "startingFeeBps": 2500,
+      "endingFeeBps": 100,
+      "numberOfPeriod": 60,
+      "totalDurationSeconds": 600
+    }
+  },
+  "migration": {
+    "option": "MET_DAMM_V2",
+    "migrationFeeOption": "Customizable",
+    "migrationFeePercentage": 1,
+    "lockedLiquidity": { "partnerPermanentPercent": 50, "creatorPermanentPercent": 50 },
+    "dammV2": {
+      "collectFeeMode": "QuoteToken",
+      "baseFeeMode": "FeeMarketCapSchedulerExponential",
+      "startingFeeBps": 200,
+      "endingFeeBps": 100,
+      "numberOfPeriod": 10,
+      "priceMultiple": 2,
+      "schedulerExpirationSeconds": 604800
+    }
+  },
+  "measured": {
+    "note": "From the SDK's curve builder at NAV = 10 SOL; every figure scales linearly with NAV.",
+    "thresholdSolPerNavSol": 1.258,
+    "supplySoldOnCurvePercent": 74.1,
+    "supplyInGraduatedPoolPercent": 24.9,
+    "supplyBoughtByFirstFifthOfRaisePercent": 33.7,
+    "priceRiseAtFirstFifthOfRaisePercent": 123,
+    "capAtHalfRaiseMultipleOfNav": 2.5
+  },
+  "previous": {
+    "id": "sheaf-nav-shelf-v1",
+    "openMultipleOfNav": 0.5,
+    "graduationMultipleOfNav": 20,
+    "capMultiplesOfOpen": [1, 1.26, 2, 6.3, 40],
+    "liquidityWeights": [16, 6, 2, 1],
+    "activationType": "Slot",
+    "antiSnipe": { "startingFeeBps": 400, "endingFeeBps": 100, "numberOfPeriod": 60, "totalDurationSlots": 3600, "realDurationMinutes": 24 },
+    "measured": {
+      "thresholdSolPerNavSol": 1.219,
+      "supplySoldOnCurvePercent": 93.0,
+      "supplyInGraduatedPoolPercent": 6.0,
+      "supplyBoughtByFirstFifthOfRaisePercent": 43.5,
+      "priceRiseAtFirstFifthOfRaisePercent": 26
+    }
+  }
+}

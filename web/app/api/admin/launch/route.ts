@@ -3,6 +3,7 @@ import { WRITE_RPC } from "@/lib/config";
 import { faucetKeypair } from "@/lib/faucet-server";
 import { fetchBasketAt } from "@/lib/sheaf";
 import { buildLaunch, solUsd } from "@/lib/launch";
+import { findLaunch } from "@/lib/dbc";
 import { fetchMarket } from "@/lib/market";
 import { stockForWriteMint } from "@/lib/mirror";
 
@@ -36,15 +37,31 @@ export async function POST(req: Request) {
     nav += (Number(c.unitsPerShare) / 10 ** c.decimals) * q.price * (q.multiplier ?? 1);
   }
   const connection = new Connection(WRITE_RPC, "confirmed");
-  const tx = await buildLaunch({
-    connection,
-    creator: keeper.publicKey,
-    basket: { address: basket.address, name: basket.name, symbol: basket.symbol },
-    navSol: nav / sol,
-  });
+  // Idempotent: buildLaunch refuses a basket that already has an official
+  // launch, and skips any slot a squatter has taken.
+  let tx;
+  try {
+    tx = await buildLaunch({
+      connection,
+      creator: keeper.publicKey,
+      basket: { address: basket.address, name: basket.name, symbol: basket.symbol },
+      navSol: nav / sol,
+    });
+  } catch (err) {
+    return Response.json({ error: err instanceof Error ? err.message : "Could not build the launch." }, { status: 409 });
+  }
   // buildLaunch partially signs with the launch's derived keys; the creator signs last.
   tx.partialSign(keeper);
   const sig = await connection.sendRawTransaction(tx.serialize());
   await connection.confirmTransaction(sig, "confirmed");
-  return Response.json({ basket: basket.address, navUsd: nav, signature: sig, pubkey: new PublicKey(keeper.publicKey).toBase58() });
+  const { launch } = await findLaunch(connection, { ...basket, creator: keeper.publicKey.toBase58() });
+  return Response.json({
+    basket: basket.address,
+    navUsd: nav,
+    solUsd: sol,
+    signature: sig,
+    pubkey: new PublicKey(keeper.publicKey).toBase58(),
+    pool: launch?.info.pool ?? null,
+    slot: launch?.info.slot ?? null,
+  });
 }

@@ -1,0 +1,19 @@
+{
+  "cluster": "devnet",
+  "basket": "FCzzVUBxL2NMpbxqR8dkhQ3U7gG9XFNKdg49jDFSnqF8",
+  "squatter": "7gVxJVLpSZpuuPQ8uaJs7S98NRvj5hMs1h1S9Hr1Y4CT",
+  "pool": "9xumGUbxHxjrQzJwPVARxskTeoqLhdP7YS6wZFwVg3Zv",
+  "signature": "4idbhKkH8RXQroStBLrsUDBovzeLsjCZddnGqVvvDutLjr6ZkGTb8uAZJVG6NM3MhYE5bHox49FR7D2Qm9KcXX45",
+  "note": "A deliberate squat of slot 0 with the public derived keys: fees to the treasury, but the pool creator is not the basket's creator, so checkLaunch rejects it.",
+  "at": "2026-10-09T06:03:52.103Z",
+  "officialLaunch": {
+    "slot": 1,
+    "pool": "3HX35pe7XTfD38o9EZEwhYKfVLZuE7Vx7SZfaLvjz8hV",
+    "signature": "xRNiKFgdw4DNUBVGUpMxGhjSktu6cMqVk7QFUFBSrU7vCNiJ67tchr8DehBr4dPMVDEPCgEEqNaaESqGp8z61qs",
+    "note": "The basket creator opened the real launch afterwards; buildLaunch skipped the squatted slot 0 and used slot 1, with the v2 preset (Timestamp activation, 25%->1% over 10 minutes, DAMM v2 market-cap fee scheduler).",
+    "firstBuy": {
+      "signature": "3FdswP7jGShqdzic17P4V65Ga3VNsRpSYB3gVH7WP9bECiRa6tKVoL5iXkpqghKgRGCRBiAJRbCCP4yABttvuk54",
+      "note": "0.01 SOL buy 98 seconds after the open paid a 15.43% fee: the anti-snipe schedule counting in seconds (25% at 0 s, 1% at 600 s)."
+    }
+  }
+}
