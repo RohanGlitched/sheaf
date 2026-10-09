@@ -14,7 +14,14 @@
     "smoke:tempo": "hardhat run scripts/smoke.js --network tempoTestnet",
     "verify:robinhood": "hardhat run scripts/verify.js --network robinhoodTestnet",
     "verify:tempo": "hardhat run scripts/verify-sourcify.js --network tempoTestnet",
-    "sip:tempo": "node scripts/tempo-sip.mjs"
+    "sip:tempo": "node scripts/tempo-sip.mjs",
+    "deploy:v2:robinhood": "hardhat run scripts/deploy-v2.js --network robinhoodTestnet",
+    "deploy:v2:tempo": "hardhat run scripts/deploy-v2.js --network tempoTestnet",
+    "smoke:v2:robinhood": "hardhat run scripts/smoke-v2.js --network robinhoodTestnet",
+    "smoke:v2:tempo": "hardhat run scripts/smoke-v2.js --network tempoTestnet",
+    "verify:v2:robinhood": "hardhat run scripts/verify-v2.js --network robinhoodTestnet",
+    "verify:v2:tempo": "hardhat run scripts/verify-v2.js --network tempoTestnet",
+    "sip:v2:tempo": "node scripts/tempo-sip-v2.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",

@@ -194,5 +194,62 @@
       "CHIPS": true,
       "PRIME": true
     }
+  },
+  "v2": {
+    "desk": "0x5C49b021F5E53514B6457907b92fA5Eb6DdeBa24",
+    "planDesk": "0xF1C863cbdeBDFac4a4Adb6B440567F7772619c05",
+    "treasury": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+    "protocolFeeBps": 10,
+    "cash": "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+    "factory": "0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1",
+    "txs": {
+      "desk": "0x916aab48f9a4b48b3800e892e2d61626b7631275c9aca08e73cd5ef40241d949",
+      "planDesk": "0x0bc6083cd9493edc5913a97d7a56e0ed6b57c88a9b9a7d77d2684390e6017b2f"
+    },
+    "gasUsed": {
+      "desk": 1538245,
+      "planDesk": 1181436
+    },
+    "startBlock": 131633965,
+    "nativeSpent": "0.00002719681",
+    "deployedAt": "2026-10-09T11:51:08.824Z",
+    "smoke": {
+      "passedAt": "2026-10-09T11:52:20.863Z",
+      "basket": "HOOD5",
+      "auctionOrderId": 0,
+      "planId": 0,
+      "planOrderId": 1,
+      "auction": {
+        "sharesToBuyer": "1.019733333333333336",
+        "protocolFeeShares": "0.001023314935607961"
+      },
+      "plan": {
+        "sharesToBuyer": "1.019600000000000001",
+        "protocolFeeShares": "0.001023181133968891"
+      },
+      "gasUsed": 2227390,
+      "txs": {
+        "approve_desk_0": "0xd16d4f3cd7fa1f2cb2abc771676fb77d1e88ea2d815e53e047925eca9131c6ca",
+        "approve_desk_1": "0xcdb7bcf9fb31c171a278acc9947725be5b4334b4680bf767bd56ecc125e25d15",
+        "approve_desk_2": "0xa69d855b5316ee27f55d3a405ccea9836e1b062bdaf41aa586e7e6ccb87cec98",
+        "approve_desk_3": "0x63c2380e8768214fea28a7c69dd9c18ab31ac50c01e9a966ef5a7379397f5c4a",
+        "approve_desk_4": "0xcda244c897068d8f0531e0265a64602962925c9ee044d90f75114d3f61372a24",
+        "approve_cash_desk": "0xb5b686352f383c2d6277207903ea9722e6cf954eab9879f469e4b23d24a10171",
+        "approve_cash_plans": "0xd67f1ba73d753a18409dde28f6b3722a7a4e3f54293b4baa9ec11833c7cd0237",
+        "placeAuction": "0x319dd9d54900a1aeb5a40cbb78b712973a962a84ee18da57e47b61dca9a3de1d",
+        "auction_fill": "0x2ad335ecc3e5c628eec01440bcd8a5e7a108076e93814af3f1beaabbba81148e",
+        "openPlan": "0xc2246d57c0a16447e99dbb38d74c27ac7719f78eb3d261f16f253d6a2a956db4",
+        "instalment": "0x26477ea24be31b80e82400bcc74dd1b7e21c60db563330ce8d9162fbc82c1616",
+        "plan_fill": "0x0699461f154ee9cd77ab78dbedba40c7be22f9b5db51ae7c5c0b356c859a09da"
+      }
+    },
+    "verified": {
+      "via": "Blockscout https://explorer.testnet.chain.robinhood.com",
+      "at": "2026-10-09T12:07:37.700Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDesk": true
+      }
+    }
   }
 }

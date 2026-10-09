@@ -288,5 +288,98 @@
     "orderId": 2,
     "limitPerPeriod": "25 AlphaUSD",
     "periodSeconds": 2592000
+  },
+  "v2": {
+    "desk": "0x18556B83da661B0341C4dc9218137FBfA81B4742",
+    "planDesk": "0xEB0482405811264c6F46479516F6c523750851f2",
+    "treasury": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+    "protocolFeeBps": 10,
+    "cash": "0x20c0000000000000000000000000000000000001",
+    "factory": "0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7",
+    "txs": {
+      "desk": "0x94856d3602561477785edd420147852eeb972836bf618d1817e21f45c25ae1c0",
+      "planDesk": "0xb1849738bb6ec8aeb4e7d6e0e821f15daad99243f4398ef372cad28250578faa"
+    },
+    "gasUsed": {
+      "desk": 7639841,
+      "planDesk": 5961636
+    },
+    "startBlock": 38844083,
+    "deployedAt": "2026-10-09T11:49:04.553Z",
+    "smoke": {
+      "passedAt": "2026-10-09T11:50:36.216Z",
+      "basket": "MAG8",
+      "auctionOrderId": 0,
+      "planId": 0,
+      "planOrderId": 1,
+      "auction": {
+        "sharesToBuyer": "1.019733333333333336",
+        "protocolFeeShares": "0.001023314935607961"
+      },
+      "plan": {
+        "sharesToBuyer": "1.019733333333333336",
+        "protocolFeeShares": "0.001023314935607961"
+      },
+      "gasUsed": 8839114,
+      "txs": {
+        "faucet_TSLA": "0xb36c279d85a54fb80ec5847c7b7b4a0b2eb517cec2077cf63074a9288485da4c",
+        "faucet_NVDA": "0x4b3910f46850a83f8d6be6e3e6b3e973e68cf4ffeb40822bc3a5c412010e7f95",
+        "faucet_AAPL": "0xa181da676fea08ab221637894a74b4d434c4bbc89876fbd30714aed2ca1a35a3",
+        "faucet_MSFT": "0xb769b4cc78ca1fda156c5d27d1cb94f5e44daa687e870fa675379ebf374adac4",
+        "faucet_AMZN": "0xa45369131c87150182ac1c3f2cf24534f8fd0b5e280d992cf5f8e744ad377299",
+        "faucet_GOOGL": "0x888531140015c9182d02675fa8ea2b12409ba43945a95a7ec53746e1e5680f52",
+        "faucet_META": "0xd7c0826ea4014966137bb903a33f49d45cbde4175eae491b6961c8449236c167",
+        "faucet_PLTR": "0xc7c0810c45a31731fa4251028254bfa4e131af5629cf03fd1a62db5a433b3100",
+        "approve_desk_0": "0x2c1258f561eab6918b4d19a1b16b40d4737ec09198bfdb1e90d7b6445ee1edb9",
+        "approve_desk_1": "0x7682c8f5dc9b43ad1d53bd8781cbbf2ca5100210bcdcc739a825bf8a73eda175",
+        "approve_desk_2": "0xc638ac2c43b8da06cff0a107a73a3db7483a290001424a23883f35cdfefcd7e7",
+        "approve_desk_3": "0x2c48bcccaa1d51daa107155384de74f04945cc7d2d761fc25e3620d87138aa97",
+        "approve_desk_4": "0x6f350d0c2f970256bd9b481fcf8610e34af46775f699ed3a8135a61609a88b9f",
+        "approve_desk_5": "0x95cc006d783a30138fbd72e4733c4a8a03c7769a3ede4b771b2c83aad15e5974",
+        "approve_desk_6": "0xcbfadebbc3a064b72e50e8c90f01a444a60b7358cc2ae3ee3bafbc260eda7813",
+        "approve_desk_7": "0x317fb11f9b40290ad725a3e739212141c3752aa16434b5b563864293a6aa9f5b",
+        "approve_cash_desk": "0xc8bd0dc75b21a693366e650faa5330d9fc208f5c62c0c92947ec677b5fade015",
+        "approve_cash_plans": "0x8f35f16b6c6011e690f4072293d99739c6aab2ce06963ac71fb38cd1771984e3",
+        "placeAuction": "0xf3391e9f2773e2c2d5bcac77846df7f88a39b5300223453e0cc6d8ab6154f8b1",
+        "auction_fill": "0xfa994d2e0b4a0ce69e09ad8840acf9c56a4ead2230ab2238b7edbfe88190eaa6",
+        "openPlan": "0xb552d9e69cbeb9e1e58cd5622f2a294ce5f9f6f49392770387c6e38be36d40b7",
+        "instalment": "0x8eb3b97b3074b44f5afdb80ab13866027eb85cb213c96cd7c509a8157105a110",
+        "plan_fill": "0x7856984dd01793cef9ac6760ff9074d1b668150e348b07affc3e2bba194f12c4"
+      }
+    },
+    "verified": {
+      "via": "Sourcify https://contracts.tempo.xyz",
+      "at": "2026-10-09T12:06:23.320Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDesk": true
+      }
+    },
+    "sip": {
+      "at": "2026-10-09T12:09:36.065Z",
+      "keeperKey": "0x1f9e89e63561313f9880e0cd1d3a94c7d75f7a10",
+      "planId": 2,
+      "openPlanTx": "0xb20c038ba7906716d2af224621de4e36a31563e3c0e726522650a7d90b75b951",
+      "authorizeTx": "0xc6bc538e40018406a60c19e0c44bbc5d520ab703a778acfaf051f70842f94736",
+      "instalmentTx": "0x6fd5a273bbaf459169aaeddeb405478633e8b07c20b96a608996caeef24bb954",
+      "fillTx": "0xc156d7ed271868bebfb88e335970acb435f3ada8fcd0d0a1f4501abccadc4429",
+      "orderId": 3,
+      "cashPerRun": "10.10 AlphaUSD",
+      "minSharesPerRun": "0.97",
+      "maxSharesPerRun": "1.05",
+      "sharesToInvestor": "1.0199666666666667",
+      "limitPerPeriod": "25 AlphaUSD",
+      "periodSeconds": 2592000,
+      "scopes": [
+        "AlphaUSD.approve(spender = PlanDesk)",
+        "PlanDesk.instalment(uint256,uint256)"
+      ],
+      "refused": {
+        "dustFair": "FairOutOfBounds",
+        "directOrder": "CallNotAllowed",
+        "rewriteTerms": "CallNotAllowed",
+        "tooSoon": "TooSoon"
+      }
+    }
   }
 }

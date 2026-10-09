@@ -288,5 +288,74 @@
       "MockStock PLTR": true,
       "MockDollar": true
     }
+  },
+  "v2": {
+    "desk": "0xd47a3957e7D66fAb781A47cEe0E7076c3157E9fB",
+    "planDesk": "0xFD0cA910186c9dD613B57DAa52Dad20B057908FE",
+    "treasury": "0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285",
+    "protocolFeeBps": 10,
+    "cash": "0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7",
+    "factory": "0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0",
+    "txs": {
+      "desk": "0x6b4a729e32372ed9752f77a3a391f2d365151f8ff01b1b8725a801014b9f17e8",
+      "planDesk": "0xa6b1c95148954c6c8c1b84cbeb5144ea89672d9852b3c5f89703c681bca9e5a5"
+    },
+    "gasUsed": {
+      "desk": 1538245,
+      "planDesk": 1181436
+    },
+    "startBlock": 317387472,
+    "nativeSpent": "0.000178396914889681",
+    "deployedAt": "2026-10-09T11:52:47.701Z",
+    "smoke": {
+      "passedAt": "2026-10-09T11:54:34.240Z",
+      "basket": "MAG8",
+      "auctionOrderId": 0,
+      "planId": 0,
+      "planOrderId": 1,
+      "auction": {
+        "sharesToBuyer": "1.019600000000000001",
+        "protocolFeeShares": "0.001023181133968891"
+      },
+      "plan": {
+        "sharesToBuyer": "1.019666666666666668",
+        "protocolFeeShares": "0.001023248034788426"
+      },
+      "gasUsed": 2687364,
+      "txs": {
+        "faucet_TSLA": "0x6d5e8231f5e4cb325ed9c1da222031824f8a67cabe9f3156e686f3d24a7fb59e",
+        "faucet_NVDA": "0xaf333a7f802f6f3d023d3a29a999b376efcf346f2b5d422118aac3cb0e92ef87",
+        "faucet_AAPL": "0xc202cf63297085bac5c3173b774dabf3c63ddb6961d3bc571f21d9cd9adac877",
+        "faucet_MSFT": "0xb600c4a2731a754712a507ece4098c6bc2c1382579c456705ae79ef391bc7f08",
+        "faucet_AMZN": "0xf9b884f698374f0a17d7f26af98d85b8bbd3f717a867e7fc85e276e1b6042df0",
+        "faucet_GOOGL": "0xbb9b3dda394a51a8c5c63f4104a968387a2693368a9ae3bada03a78cd1dcf62a",
+        "faucet_META": "0xbc96ed90ca87efffc9b219ae365301332a2dfd9a79d33f7dd6858ee1664b56a8",
+        "faucet_PLTR": "0x74ae9c0a1df77b1acf50ebc5f94e5596b828dae5a7397a54f9580a4cdd8e0e2e",
+        "faucet_dollar": "0x922a8a373507ca4bea71fd905236b5a81a084b9304e02cc84d4c9838cc8ae6e6",
+        "approve_desk_0": "0x8f385d8796952aeb5cbd56e64d1765ce29191ca2c493c415c276aea6bbaccb26",
+        "approve_desk_1": "0x20ad8af0ce85e60a205b20e38ba651a2956913697ce8c32597aa7e1d60d761d1",
+        "approve_desk_2": "0xdecf673a0a4608a32d02d9eb9184c0c85aa3c80a6a7fce9f96b0bcc7f55da307",
+        "approve_desk_3": "0xf8b668d3ef69bafd025f769c4335ada2ad671dff11f959ec7daafb6cb508f378",
+        "approve_desk_4": "0xa9cf8154d9f66af8df20fe9f58992cda66c2610045c8ec046be9e8d118e40534",
+        "approve_desk_5": "0xa70bdb3d06cb3df208667aedbd0dca8d4cf085676588ed813cbf82f790b42c49",
+        "approve_desk_6": "0x1728b35608fc3dad60fd0f7b9389795509e55cc6833b89af05188c9cde56180c",
+        "approve_desk_7": "0xe8893a051dbdbfea294c77bc54dcb78cb43d3082ea9299d349a45b79463b646a",
+        "approve_cash_desk": "0x2eb7065c5fd88a7572501040314015e709fb416f7d426e04b555013ec7688ade",
+        "approve_cash_plans": "0x29035b0414ef17b22105eb50152401e957dc3e99e09d2a105198a1b1fe6b26b5",
+        "placeAuction": "0x2873f29f0fa2446138252509b72ad4d5798344dff01eb933ede620164e5764c9",
+        "auction_fill": "0xbd0e727bee583793092925a5ed8b7463ee008ef5b68f9cc889be36c20ae0d1f8",
+        "openPlan": "0x4ec6ac42cb0bf38a6b70e94861113f1e11065a2c43b624ba81ebebc4727cc741",
+        "instalment": "0x563f8409477c1785c04740523fba57ce42f4f73d7e7c156bfb8e62c180f286a0",
+        "plan_fill": "0xd01ce3b1dfc846364c08818bba6801732a879f363c7217ffb653fd7a5306aac2"
+      }
+    },
+    "verified": {
+      "via": "Sourcify https://sourcify.dev/server",
+      "at": "2026-10-09T12:06:42.468Z",
+      "contracts": {
+        "CreationDeskV2": true,
+        "PlanDesk": true
+      }
+    }
   }
 }

@@ -9,9 +9,49 @@ desk mints the shares straight to the buyer, and the filler collects the cash.
 This folder is the EVM side of Sheaf: Hardhat, Solidity 0.8.24, OpenZeppelin 5, via-IR, Cancun.
 Everything here runs on free testnets only.
 
-## Deployments
+There are two desk versions, deployed side by side. Contracts here are immutable, so v2 is a new
+deployment rather than an upgrade, and every v1 address below keeps working.
 
-| Chain | Chain ID | Factory | Desk | Baskets | Stocks | Desk cash | Status |
+| | v1 `CreationDesk` | v2 `CreationDeskV2` + `PlanDesk` |
+| --- | --- | --- |
+| Price | A fixed-price limit order: N shares for X dollars | A Dutch auction on share count, as on Solana: the shares the buyer must receive fall from `startShares` to `endShares` over the auction |
+| Protocol fee | None | 0.10% of the gross shares each fill creates, to the treasury. It is an immutable constant of the desk |
+| Creator fee | Charged by the basket | Charged by the basket (unchanged) |
+| Recurring buys | None on chain | `PlanDesk`: the amount, the interval and a price cap are written by the owner and enforced on chain |
+| Tempo SIP access key scope | `CreationDesk.placeOrder`, so the key picks the price | `PlanDesk.instalment`, so the key runs the owner's plan and cannot rewrite it |
+| Baskets | v1 factory's baskets | The same baskets. v2 serves the v1 factory, so nothing was redeployed |
+
+## v2 deployments (Oct 9)
+
+| Chain | CreationDeskV2 | PlanDesk | Verified | Live smoke test |
+| --- | --- | --- | --- | --- |
+| Robinhood Chain testnet (46630) | [`0x5C49b021F5E53514B6457907b92fA5Eb6DdeBa24`](https://explorer.testnet.chain.robinhood.com/address/0x5C49b021F5E53514B6457907b92fA5Eb6DdeBa24#code) | [`0xF1C863cbdeBDFac4a4Adb6B440567F7772619c05`](https://explorer.testnet.chain.robinhood.com/address/0xF1C863cbdeBDFac4a4Adb6B440567F7772619c05#code) | Blockscout | Passed (HOOD5, real stock tokens, real USDG) |
+| Tempo testnet (42431) | [`0x18556B83da661B0341C4dc9218137FBfA81B4742`](https://explore.testnet.tempo.xyz/address/0x18556B83da661B0341C4dc9218137FBfA81B4742) | [`0xEB0482405811264c6F46479516F6c523750851f2`](https://explore.testnet.tempo.xyz/address/0xEB0482405811264c6F46479516F6c523750851f2) | Sourcify (`contracts.tempo.xyz`, exact match) | Passed (MAG8, AlphaUSD), plus the v2 access-key SIP run |
+| Ethereum Sepolia (11155111) | [`0x5F6607dd194304fd8DC28Dac683136bf5Fd051d6`](https://eth-sepolia.blockscout.com/address/0x5F6607dd194304fd8DC28Dac683136bf5Fd051d6) | [`0x43e50Ed35ae6250dB43713AA4d89eB90c81d2330`](https://eth-sepolia.blockscout.com/address/0x43e50Ed35ae6250dB43713AA4d89eB90c81d2330) | Blockscout | Passed |
+| Arbitrum Sepolia (421614) | [`0xd47a3957e7D66fAb781A47cEe0E7076c3157E9fB`](https://arbitrum-sepolia.blockscout.com/address/0xd47a3957e7D66fAb781A47cEe0E7076c3157E9fB) | [`0xFD0cA910186c9dD613B57DAa52Dad20B057908FE`](https://arbitrum-sepolia.blockscout.com/address/0xFD0cA910186c9dD613B57DAa52Dad20B057908FE) | Sourcify (`sourcify.dev`, exact match) | Passed |
+| Base Sepolia (84532) | [`0x2B14dC27D9b5202AEBEDbB4fa70bdF7A8B123432`](https://base-sepolia.blockscout.com/address/0x2B14dC27D9b5202AEBEDbB4fa70bdF7A8B123432) | [`0x74a4f663Fee63462d43D04769C9b14526D644B6c`](https://base-sepolia.blockscout.com/address/0x74a4f663Fee63462d43D04769C9b14526D644B6c) | Blockscout | Passed |
+
+On every chain the v2 desk takes the same dollar as v1 (USDG, AlphaUSD or the sUSD mirror) and
+the v1 factory's baskets. The treasury is the deployer, `0x59d3E1239708a1CDD6Ef876688B3cd69d4aB0285`.
+The records are under `v2` in [`deployments/<network>.json`](deployments): addresses, deploy
+hashes and gas, verification results, and the smoke-test hashes. Tempo's file also holds the
+v2 SIP run under `v2.sip`. On Base Sepolia, one of the cut-short runs left a plan order unfilled.
+After its auction ended, `cancel-expired-v2.js` cancelled it from the deployer, and the 10.10 sUSD
+went back to the buyer. That was a live refund after expiry.
+
+Cost of the v2 rollout (deploy, smoke test and verification together):
+
+| Chain | Deploy gas (desk + plans) | Smoke-test gas | Spent |
+| --- | --- | --- | --- |
+| Robinhood Chain testnet | 1.54M + 1.18M | 2.23M | 0.00005 ETH |
+| Tempo testnet | 7.64M + 5.96M | 8.84M | 0.024 pathUSD, SIP run included |
+| Ethereum Sepolia | 10.76M + 8.21M | 5.27M | 0.00003 ETH |
+| Arbitrum Sepolia | 1.54M + 1.18M | 2.69M | 0.00035 ETH |
+| Base Sepolia | 1.54M + 1.18M | 2.40M, after two runs cut short by RPC lag | 0.0001 ETH |
+
+## v1 deployments
+
+| Chain | Chain ID | Factory | Desk (v1) | Baskets | Stocks | Desk cash | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Robinhood Chain testnet | 46630 | [`0xC836…89B1`](https://explorer.testnet.chain.robinhood.com/address/0xC836C83E283DA57aBD13c271Dd73D22B65dF89B1#code) | [`0x4184…951C`](https://explorer.testnet.chain.robinhood.com/address/0x4184eb1540908CB0DbEd533c45Fba7123991951C#code) | HOOD5, CHIPS, PRIME | **real** Robinhood test stock tokens | **real** testnet USDG | Live, verified, smoke test passed |
 | Tempo testnet (Moderato) | 42431 | [`0x4925…95e7`](https://explore.testnet.tempo.xyz/address/0x4925f418fac49b26C68Ac7016Ba3591cDbF895e7) | [`0x4EB6…2Eb0`](https://explore.testnet.tempo.xyz/address/0x4EB6955e6bD0912EA2E5230f0B3D8DD4Bc7a2Eb0) | MAG8, AICORE, EVDY | 8 labelled mirrors | **real** AlphaUSD (TIP-20) | Live, verified (Sourcify), smoke test and SIP demo passed |
@@ -116,24 +156,140 @@ Mirror stocks: TSLA `0xaeF91E3De7a4b96063EB6Fe89890dc8339aB7676`, NVDA `0xf17DDb
 | --- | --- |
 | `contracts/Basket.sol` | The vault and share token. The recipe is written once, at construction. There is no owner, no pause, no upgrade path and no oracle. Mints round up and redemptions round down. The creator fee (at most 1%) is paid in newly issued shares, never out of the vault. Tokens that skim on transfer are refused. |
 | `contracts/SheafFactory.sol` | Anyone can publish a basket. The factory validates the recipe (1 to 8 distinct components, non-zero units, weights summing to 100%, fee ≤ 1%, one symbol per creator) and deploys the basket with CREATE2. |
-| `contracts/CreationDesk.sol` | Cash creations. A buyer escrows the dollar token for N shares. Any filler delivers the components and is paid the escrow. The buyer can cancel at any time, and anyone can cancel after expiry. The cash token is called `usdg` in the ABI for compatibility; it is whatever stablecoin the chain's deployment uses. |
+| `contracts/CreationDesk.sol` | v1 cash creations. A buyer escrows the dollar token for N shares. Any filler delivers the components and is paid the escrow. The buyer can cancel at any time, and anyone can cancel after expiry. The cash token is called `usdg` in the ABI for compatibility; it is whatever stablecoin the chain's deployment uses. |
+| `contracts/CreationDeskV2.sol` | v2 cash creations: a Dutch auction on share count plus the 0.10% protocol fee. See [The v2 desk](#the-v2-desk). No owner, no setter, no pause. |
+| `contracts/PlanDesk.sol` | Recurring buys on the v2 desk, with the amount, the interval and a price cap written on chain by the owner. See [Plans and the Tempo price cap](#plans-and-the-tempo-price-cap). |
+| `contracts/SheafAuction.sol` | The auction math both share: the linear decay (`sharesAt`) and the band around a fair count (`bounds`). It matches the Solana program's `required_shares` and `plan_bounds`. |
 | `contracts/mirrors/MockStock.sol` | A labelled testnet stock mirror. 18 decimals, `isMirror() == true`, public `faucet(amount)` / `mint(to, amount)` capped at 100 tokens per call. Worth nothing. |
 | `contracts/mirrors/MockDollar.sol` | A labelled 6-decimal dollar mirror (`sUSD`). Public faucet capped at 10,000 per call. Used only where no real testnet stablecoin exists. |
 | `contracts/mocks/*` | Test-only tokens: `MockERC20`, `FeeOnTransferERC20`, and the hostile `ReentrantERC20` and `PausableERC20`. |
+
+## The v2 desk
+
+A buyer escrows a fixed amount of cash and posts a falling share count.
+
+- **The auction.** The shares the buyer must receive are `startShares` until `startTs`, then fall
+  linearly to `endShares` at `endTs`. After `endTs` the order cannot be filled. The decay rounds
+  down, so between the endpoints the buyer keeps the rounding. A filler takes the order as soon
+  as the count is one they can deliver at a profit. The buyer pays the going rate, and never
+  worse than `endShares` for the cash.
+- **Placing.** `placeOrder(basket, cash, startShares, endShares, startTs, endTs)` takes explicit
+  terms. `placeAuction(basket, cash, fairShares, bandBps, auctionSecs, minShares)` takes the usual
+  shape: it starts now at fair plus the band and ends `auctionSecs` later at fair minus the band,
+  never below the buyer's own `minShares`. The fair count is the buyer's own number; the desk
+  never reads a price. Bands are capped at 50% and auctions at 30 days, as on Solana.
+  `placeOrderFor(buyer, ...)` lets the caller pay for an order that belongs to `buyer`. The
+  plan desk uses it.
+- **Filling.** `fill(id)` works out the gross shares the fill must create:
+  `gross = ceil(count × 10000 / (10000 − creatorFeeBps − 10))`. It pulls
+  `basket.previewMint(gross)` of each component from the filler and mints `gross` in kind. The
+  basket sends its creator fee to the creator, as on every mint. The desk sends
+  `floor(gross × 10 / 10000)` to the treasury and the rest to the buyer, then pays the filler the
+  escrow. Because both fees are floored, the buyer gets at least the auction's count and at most
+  2 raw units more. `quoteFill(id)` returns the count, the gross and the component amounts for
+  the current block. The count only falls, so an approval sized at the quote covers any later
+  fill.
+- **Refunds.** The buyer can cancel at any time. After `endTs` anyone can, and the cash always goes
+  back to the buyer.
+- **Safety.**
+  - Every mutating function is `nonReentrant`, and state is written before any token moves.
+  - A cash token that skims on transfer is refused at placement (`ShortCash`).
+  - The basket already refuses skimming components.
+  - Orders pack into five storage slots, and placing one writes four. This matters on Tempo,
+    where a new slot costs 250k gas.
+
+**Where it differs from Solana.** On Solana the protocol fee is part of the basket and is charged
+on in-kind mints too. On EVM the v1 baskets are immutable and have no protocol fee, so v2
+charges it on desk fills only. In-kind `Basket.mint` and `redeem` stay fee-free apart from the
+creator fee. The fee is still fixed for every basket: it is a constant of an immutable desk.
+
+### Plans and the Tempo price cap
+
+`PlanDesk` makes a recurring buy whose terms the trigger cannot change.
+
+- **Opening.** `openPlan(basket, cashPerRun, interval, auctionSecs, bandBps, minShares, maxShares, keeper)`
+  stores the plan with the caller as owner.
+- **The cap.** `minShares` is the owner's price cap: the fewest shares a run of `cashPerRun` may
+  ever buy. That makes the maximum price `cashPerRun / minShares`. `maxShares` stops a trigger
+  from posting a fair count so high that no filler would take the run.
+- **Running.** `instalment(id, fairShares)` checks four things:
+  - the caller is the owner, or the plan's `keeper` if one is named;
+  - the plan is open;
+  - at least `interval` has passed since the last run (`TooSoon`);
+  - `fairShares` is inside `[minShares, maxShares]` (`FairOutOfBounds`).
+
+  It then pulls exactly `cashPerRun` from the owner. It posts
+  `placeOrderFor(owner, …, bounds(fair, band, minShares), now, now + auctionSecs)` on the v2 desk,
+  so the shares and any refund belong to the owner. No auction ever ends below `minShares`.
+- **Closing.** `closePlan(id)` is owner-only and stops the plan for good. Orders already posted
+  stay refundable on the desk.
+
+**On Tempo**, the visitor's root key opens the plan. It then authorizes the keeper's access key
+with a recurring AlphaUSD limit and exactly two scopes:
+
+- `AlphaUSD.approve(address,uint256)`, with `PlanDesk` as the only allowed spender;
+- `PlanDesk.instalment(uint256,uint256)`.
+
+A key signing for the account is `msg.sender == owner`, so `openPlan` and `closePlan` must stay
+out of its scope. The key can then run the owner's plan but never rewrite it.
+
+**The worst a compromised house key can do** is run one instalment per interval of exactly
+`cashPerRun`, at a fair count of `minShares`, and fill it at the end of the auction itself. The
+visitor still receives at least `minShares` for `cashPerRun`, at the price they chose. In v1 the
+same key could post `placeOrder(basket, 1 wei, budget)` and fill it.
+
+**Without access keys** (Robinhood Chain, the Sepolias), the owner names a `keeper` and gives
+`PlanDesk` a standing allowance. The same on-chain terms bound the keeper, so it can take at
+most `cashPerRun` per interval at no worse than the cap.
 
 ## Run it
 
 ```bash
 cd evm
 npm install
-npx hardhat test          # 100 tests
+npx hardhat test          # 158 tests
 ```
 
-All 100 tests pass. That is the 94 tests ported from the original suite plus 6 for the
-mirror tokens. The suite covers rounding, the creator fee, CREATE2 addresses, recipe
-validation, reentrancy, paused and blocklisted components, fee-on-transfer refusal, events,
-gas, the absence of admin functions and selfdestruct, and seeded random-walk invariants (full
-backing after every step, then a bank run).
+All 158 tests pass:
+
+- **100 v1 tests:** the 94 ported from the original suite plus 6 for the mirror tokens. They
+  cover rounding, the creator fee, CREATE2 addresses, recipe validation, reentrancy, paused and
+  blocklisted components, fee-on-transfer refusal, events, gas, the absence of admin functions
+  and selfdestruct, and seeded random-walk invariants (full backing after every step, then a
+  bank run).
+- **37 tests for `CreationDeskV2`** (`test/desk-v2.test.js`):
+  - auction math at the start, before the start, at the midpoint, a quarter in, at the last
+    second and after it, including the rounding;
+  - fee math for 0%, 0.50% and 1% baskets, a fill too small to pay a protocol fee, and a seeded
+    randomized sweep of share counts and creator fees that checks exact fees and full backing;
+  - `quoteFill` against an actual fill;
+  - refunds by the buyer, and by anyone after expiry;
+  - re-entry from hostile component and cash tokens into `fill`, `cancel` and all three place
+    functions;
+  - paused and skimming tokens;
+  - v1 and v2 serving the same basket.
+- **16 tests for `PlanDesk`** (`test/plan-desk.test.js`):
+  - the price cap, including the 1-wei attack;
+  - the band floor, the exact amount, and the interval;
+  - unfilled runs refunded after expiry;
+  - keeper permissions, and the drain bound with a standing allowance;
+  - closing a plan;
+  - re-entry.
+- **5 tests for v2 immutability and gas** (`test/v2.immutability.test.js`): the mutating
+  functions, no admin names, no DELEGATECALL or SELFDESTRUCT, and a gas snapshot.
+
+v2 gas on a local Cancun node:
+
+| Call | Gas |
+| --- | --- |
+| Deploy `CreationDeskV2` | 1.54M |
+| Deploy `PlanDesk` | 1.18M |
+| `placeOrder` | 186k |
+| `placeAuction` | 152k |
+| `fill` (3 components, both fees) | 445k |
+| `cancel` | 45k |
+| `openPlan` | 198k |
+| `instalment` | 190k to 207k |
 
 Hardhat warns that Node 21 is unsupported. The suite still passes on Node 21.7.0; Node 20 or
 22 LTS removes the warning.
@@ -149,8 +305,20 @@ npx hardhat run scripts/verify-blockscout.js --network <network>   # Blockscout 
 npx hardhat run scripts/verify-sourcify.js --network tempoTestnet  # Tempo's Sourcify v2
 SOURCIFY_V2=https://sourcify.dev/server npx hardhat run scripts/verify-sourcify.js --network arbitrumSepolia
 BRIDGE_ETH=0.012 npx hardhat run scripts/bridge.js --network sepolia   # Sepolia -> Arbitrum + Base Sepolia
-node scripts/tempo-sip.mjs                                     # Tempo access-key SIP demo
+node scripts/tempo-sip.mjs                                     # Tempo access-key SIP demo (v1)
+
+# v2, next to an existing v1 deployment (TREASURY=0x... to override the deployer)
+npx hardhat run scripts/deploy-v2.js  --network <network>
+npx hardhat run scripts/smoke-v2.js   --network <network>
+npx hardhat run scripts/verify-v2.js  --network <network>
+npx hardhat run scripts/cancel-expired-v2.js --network <network>   # refund any expired v2 order
+node scripts/tempo-sip-v2.mjs                                  # Tempo access-key SIP on PlanDesk
 ```
+
+`smoke-v2.js` places a `placeAuction` order (10.10 dollars, fair 1 share, ±2%, 10 minutes, floor
+0.98), fills it, opens a daily plan, runs one instalment, checks that a second run is refused
+(`TooSoon`) and that a fair below the cap is refused (`FairOutOfBounds`), and fills the run. It
+checks each `OrderFilled` against the fee formula, and checks every share delta exactly.
 
 The networks are `robinhoodTestnet`, `tempoTestnet`, `arbitrumSepolia`, `sepolia`,
 `baseSepolia` and `hyperEvmTestnet`. For a local dry run, use `localhost` after starting
@@ -206,6 +374,24 @@ games are needed.
 The transaction hashes are recorded under `sip` in `deployments/tempoTestnet.json`. The keeper key
 lives only in memory for the run. A production keeper would persist it in a KMS and fire on a
 schedule.
+
+That v1 scope limits which functions the key may call but not their arguments: the key chose the
+share count and the price of every order. `scripts/tempo-sip-v2.mjs` runs the v2 plan, where the
+price cap is on chain. These steps ran on Oct 9; the hashes are under `v2.sip`:
+
+1. The investor's root key opens plan 2 on `PlanDesk`: 10.10 AlphaUSD every 30 days, a ±2%
+   auction over an hour, and no run below 0.97 MAG8. The fair count is bounded to 0.97–1.05.
+2. The investor authorizes a fresh P256 keeper key:
+   - **Limits:** 25 AlphaUSD and 2 pathUSD per 30 days.
+   - **Scopes:** `AlphaUSD.approve` with `PlanDesk` as spender, and `PlanDesk.instalment`.
+3. The keeper tries what the v1 scope allowed, and each attempt is refused:
+   - An instalment at 1 raw share unit for 10.10 AlphaUSD: `FairOutOfBounds`, from the contract.
+   - A direct `CreationDeskV2.placeOrder` at its own price: `CallNotAllowed`, from the chain.
+   - A new plan with its own terms: `CallNotAllowed`, from the chain.
+4. The keeper runs the month's instalment in one atomic transaction (approve + instalment), and the
+   budget drops from 25.00 to 14.90. A second run straight after is refused: `TooSoon`.
+5. The investor fills the auction as the participant and receives 1.02 MAG8. That is the count
+   at the moment of the fill, after the creator fee and the 0.10% protocol fee.
 
 ## Chain notes and quirks
 

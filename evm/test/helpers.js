@@ -87,4 +87,46 @@ async function freshRecipe(n, units = E18) {
   return { tokens, recipe };
 }
 
-module.exports = { E18, E6, ONE_SHARE, prng, ceilDiv, approveAll, deployCore, createBasket, freshRecipe };
+/// deployCore plus the v2 desk (treasury: a signer that holds nothing) and the
+/// plan desk on top of it.
+async function deployV2() {
+  const f = await deployCore();
+  const signers = await ethers.getSigners();
+  const treasury = signers[6];
+  const keeper = signers[7];
+  const deskV2 = await (await ethers.getContractFactory("CreationDeskV2")).deploy(f.usdg, f.factory, treasury.address);
+  const plans = await (await ethers.getContractFactory("PlanDesk")).deploy(deskV2);
+  return { ...f, treasury, keeper, deskV2, plans };
+}
+
+/// The v2 fill split for `out` shares to the buyer on a basket with
+/// `creatorBps`: gross created, creator cut, protocol cut, buyer's shares.
+function v2Split(out, creatorBps, protocolBps = 10n) {
+  const B = 10_000n;
+  const gross = ceilDiv(out * B, B - creatorBps - protocolBps);
+  const creator = (gross * creatorBps) / B;
+  const protocol = (gross * protocolBps) / B;
+  return { gross, creator, protocol, buyer: gross - creator - protocol };
+}
+
+/// SheafAuction.sharesAt, in BigInt.
+function sharesAt(start, end, startTs, endTs, now) {
+  if (now <= startTs) return start;
+  if (now >= endTs) return end;
+  return start - ((start - end) * (now - startTs)) / (endTs - startTs);
+}
+
+module.exports = {
+  E18,
+  E6,
+  ONE_SHARE,
+  prng,
+  ceilDiv,
+  approveAll,
+  deployCore,
+  deployV2,
+  v2Split,
+  sharesAt,
+  createBasket,
+  freshRecipe,
+};
