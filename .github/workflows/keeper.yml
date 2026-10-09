@@ -14,3 +14,5 @@ jobs:
     steps:
       - name: Run the keeper
         run: curl -fsS -X POST https://sheaf-index.vercel.app/api/keeper | head -c 2000
+      - name: Fill dollar orders on the EVM chains
+        run: curl -fsS https://sheaf-index.vercel.app/api/evm-keeper | head -c 2000
