@@ -8,11 +8,13 @@ import { slotColor } from "@/lib/palette";
 import { signedPercent, money } from "@/lib/format";
 import { useMarket } from "./market-provider";
 import { SheafMark, type Stalk } from "./sheaf-mark";
+import { basketFromJson, type BasketJson } from "@/lib/sheaf";
+import type { MarketSnapshot } from "@/lib/market";
+import { HERO_BASKET } from "@/lib/hero";
 
-/** The basket the hero draws (the Magnificent Seven, which the hero button opens), when it can be read; otherwise the first one. */
-const HERO_BASKET = "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x";
 
-/** Drawn while the chain is being read, so the hero is never empty. */
+
+/** Drawn, still, only when the server could not read the basket, so the hero is never empty. */
 const PLACEHOLDER: Stalk[] = [
   { key: "a", weight: 0.3, color: slotColor(0) },
   { key: "b", weight: 0.22, color: slotColor(1) },
@@ -22,12 +24,23 @@ const PLACEHOLDER: Stalk[] = [
   { key: "f", weight: 0.05, color: slotColor(5) },
 ];
 
-export function HomeSheaf() {
+/**
+ * The server reads the hero basket and its last market snapshot, so the first
+ * paint is already the real sheaf with its names. It gathers once, then live
+ * reads only update numbers in place: the stalks keep their keys, so nothing
+ * mounts again and the drawing never plays twice.
+ */
+export function HomeSheaf({
+  initialBasket = null,
+  initialSnapshot = null,
+}: { initialBasket?: BasketJson | null; initialSnapshot?: MarketSnapshot | null } = {}) {
   const { baskets } = useBaskets();
-  const { snapshot } = useMarket();
+  const { snapshot: liveSnapshot } = useMarket();
+  const snapshot = liveSnapshot ?? initialSnapshot;
+  const first = useMemo(() => (initialBasket ? basketFromJson(initialBasket) : null), [initialBasket]);
   const basket = useMemo(
-    () => baskets?.find((b) => b.address === HERO_BASKET) ?? baskets?.[0] ?? null,
-    [baskets],
+    () => baskets?.find((b) => b.address === HERO_BASKET) ?? first ?? baskets?.[0] ?? null,
+    [baskets, first],
   );
   const valuation = useMemo(() => (basket ? valueBasket(basket, snapshot) : null), [basket, snapshot]);
   const { onChain } = useOnChainBasket(basket);
@@ -58,7 +71,7 @@ export function HomeSheaf() {
       <SheafMark
         stalks={stalks ?? PLACEHOLDER}
         labels={stalks != null}
-        animate
+        animate={stalks != null}
         bandNote={stalks ? bandNote : undefined}
         className="mx-auto w-full max-w-[560px]"
         title={basket ? `${basket.name}: ${stalks?.length ?? 0} tokenized stocks bound into one share` : "A basket of tokenized stocks bound into one share"}

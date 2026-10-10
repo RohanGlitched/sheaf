@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { HomeStats, ComposeCta } from "@/components/home-mosaic";
 import { HomeSheaf } from "@/components/home-sheaf";
+import { HERO_BASKET } from "@/lib/hero";
+import { basketToJson, fetchBasketAt, type BasketJson } from "@/lib/sheaf";
+import { lastGood } from "@/lib/price-snapshot";
+import type { MarketSnapshot } from "@/lib/market";
 import { LiveTape } from "@/components/live-tape";
 import { HomePlans } from "@/components/home-plans";
 import { HomeChains } from "@/components/home-chains";
@@ -19,7 +23,7 @@ import { HomeNav } from "@/components/home-nav";
  * carries Sheaf's 0.10%. The Big Five, from before the fee, is taken apart
  * further down and listed beside it.
  */
-const HERO = "v56AitEYWBeC2jdtQzVb4NC9cmW5vCKZVDogVv5bq3x";
+const HERO = HERO_BASKET;
 
 /**
  * The story in the order it happens to a basket. The first five are the share
@@ -78,7 +82,21 @@ const LIFE = [
   },
 ];
 
-export default function Home() {
+/** Rebuilt at most every five minutes, so the hero sheaf starts from a recent read. */
+export const revalidate = 300;
+
+/** The hero basket (one account read, given 4 s) and the last market snapshot (1.5 s), so the hero's first paint is the real sheaf. */
+async function heroData(): Promise<{ basket: BasketJson | null; snapshot: MarketSnapshot | null }> {
+  const within = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+  const [basket, snapshot] = await Promise.all([
+    within(fetchBasketAt(HERO_BASKET), 4000).catch(() => null),
+    within(lastGood(), 1500).catch(() => null),
+  ]);
+  return { basket: basket ? basketToJson(basket) : null, snapshot };
+}
+
+export default async function Home() {
+  const hero = await heroData();
   return (
     <div className="mx-auto max-w-[1400px] px-5 sm:px-8">
       {/* ------------------------------------------------------------- hero */}
@@ -120,7 +138,7 @@ export default function Home() {
         </div>
 
         <div className="self-center">
-          <HomeSheaf />
+          <HomeSheaf initialBasket={hero.basket} initialSnapshot={hero.snapshot} />
           <p className="mt-3 text-center text-xs text-ink-3">
             Backed today by devnet mirror tokens; on mainnet, by the real xStocks.
           </p>
