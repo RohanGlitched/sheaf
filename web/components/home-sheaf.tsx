@@ -51,7 +51,8 @@ export function HomeSheaf({
       const move = c.quote?.change24h ?? null;
       return {
         key: c.mint,
-        weight: (c.actualWeightBps ?? c.targetWeightBps) / 10_000,
+        // The recipe's own weight, fixed for good: live weights shift with prices and would reorder the stalks mid-animation.
+        weight: c.targetWeightBps / 10_000,
         color: slotColor(c.slot),
         label: c.base,
         sub: move == null ? undefined : signedPercent(move),
