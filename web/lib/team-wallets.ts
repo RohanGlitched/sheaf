@@ -167,6 +167,7 @@ export const TEAM_WALLETS: TeamWallet[] = [
   { address: "0xDe0447367a821bC5591E66a595eae825C1Af9169", role: "test", label: "Tempo test plan account, QA round 7" },
   { address: "EeCoGUNPZAADMYvFwzTB4xXjoJfcU1MM64MhLcf53Y2P", role: "test", label: "Faucet probe key, judge round 7" },
   { address: "7Ph291EuKx1ZJUfGtvDDPQCVS3PKNNPgjNjrnQnqsSaQ", role: "test", label: "Faucet probe key, judge round 7" },
+  { address: "EYiUUNiynqrEpzMyyu5fd5QXNDTTS9XsMGv9P62T5knQ", role: "treasury", label: "Treasury MAG7 share account (protocol-fee claims)" },
 ];
 
 /** Base58 is case-sensitive; only hex EVM addresses are folded to one case. */
