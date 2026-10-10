@@ -11,6 +11,7 @@ import { LaunchMarket } from "@/components/launch-market";
 import { Anatomy } from "@/components/home-anatomy";
 import { Dividends, Premiums } from "@/components/home-market-facts";
 import { Keys, Revenue } from "@/components/home-ledgers";
+import { HomeNav } from "@/components/home-nav";
 
 /**
  * The hero basket: the Magnificent Seven, seven listed megacaps with dividends
@@ -127,7 +128,7 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------- lifecycle */}
-      <section className="border-t border-line py-20">
+      <section id="how" className="scroll-mt-24 border-t border-line py-20">
         <h2 className="display text-title max-w-[26ch] text-ink">
           One backed share: in with stocks or dollars, out the same ways, or a little every month.
         </h2>
@@ -187,7 +188,7 @@ export default function Home() {
       </section>
 
       {/* -------------------------------------------------------- baskets */}
-      <section className="border-t border-line py-20">
+      <section id="baskets" className="scroll-mt-24 border-t border-line py-20">
         <FeaturedBaskets />
       </section>
 
@@ -197,7 +198,7 @@ export default function Home() {
       </section>
 
       {/* --------------------------------------------------------- revenue */}
-      <section className="border-t border-line py-20">
+      <section id="revenue" className="scroll-mt-24 border-t border-line py-20">
         <Revenue />
         <p className="mt-10">
           <Link href="/business" className="text-sm text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
@@ -207,12 +208,12 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------------ keys */}
-      <section className="border-t border-line py-20">
+      <section id="keys" className="scroll-mt-24 border-t border-line py-20">
         <Keys />
       </section>
 
       {/* ------------------------------------------------ beside the share */}
-      <section className="border-t border-line pt-20">
+      <section id="beside" className="scroll-mt-24 border-t border-line pt-20">
         <div className="max-w-[56ch]">
           <h2 className="display text-title text-ink">Beside the share.</h2>
           <p className="mt-5 text-base leading-relaxed text-ink-2">
@@ -232,12 +233,12 @@ export default function Home() {
       </section>
 
       {/* ---------------------------------------------------------- chains */}
-      <section className="border-t border-line py-20">
+      <section id="chains" className="scroll-mt-24 border-t border-line py-20">
         <HomeChains />
       </section>
 
       {/* ------------------------------------------------ the evidence group */}
-      <section className="border-t border-line pt-20" aria-labelledby="evidence">
+      <section id="proof" className="scroll-mt-24 border-t border-line pt-20" aria-labelledby="evidence">
         <div className="max-w-[52ch]">
           <h2 id="evidence" className="display text-title text-ink">
             Why the numbers hold up.
@@ -316,6 +317,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <HomeNav />
     </div>
   );
 }
