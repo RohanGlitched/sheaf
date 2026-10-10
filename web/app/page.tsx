@@ -1,20 +1,13 @@
 import Link from "next/link";
-import { HomeStats, ComposeCta } from "@/components/home-mosaic";
+import { ComposeCta } from "@/components/home-mosaic";
 import { HomeSheaf } from "@/components/home-sheaf";
+import { HomeBeside } from "@/components/home-beside";
 import { HERO_BASKET } from "@/lib/hero";
 import { basketToJson, fetchBasketAt, type BasketJson } from "@/lib/sheaf";
 import { lastGood } from "@/lib/price-snapshot";
 import type { MarketSnapshot } from "@/lib/market";
-import { LiveTape } from "@/components/live-tape";
 import { HomePlans } from "@/components/home-plans";
-import { HomeChains } from "@/components/home-chains";
-import { HomePredict } from "@/components/home-predict";
-import { MarketClock } from "@/components/market-clock";
 import { FeaturedBaskets } from "@/components/featured-baskets";
-import { LaunchMarket } from "@/components/launch-market";
-import { Anatomy } from "@/components/home-anatomy";
-import { Dividends, Premiums } from "@/components/home-market-facts";
-import { Keys, Revenue } from "@/components/home-ledgers";
 import { HomeNav } from "@/components/home-nav";
 
 /**
@@ -26,9 +19,9 @@ import { HomeNav } from "@/components/home-nav";
 const HERO = HERO_BASKET;
 
 /**
- * The story in the order it happens to a basket. The first five are the share
- * itself: made in kind, bought or sold for dollars, bought every month. The last
- * two are markets that sit beside it. /method tells the same seven, in the same words.
+ * The share's life in four steps: make it, buy it, keep buying it, leave. The
+ * launch market and the weekly question that sit beside a basket, and each step
+ * beside the transaction that proves it, are on /method.
  */
 const LIFE = [
   {
@@ -36,54 +29,42 @@ const LIFE = [
     title: "Write the recipe",
     on: "One transaction",
     href: "/compose",
-    body: "Pick up to eight tokenized stocks, such as Apple, NVIDIA and Tesla as xStocks, and set the weights. The program stores the exact units behind one share and gives up the power to change them.",
+    body: "Pick up to eight tokenized stocks, such as Apple, NVIDIA and Tesla as xStocks, and set the weights. The program stores the exact units behind one share and can never change them.",
   },
   {
     n: "2",
-    title: "Create shares in kind",
+    title: "Buy in kind or with dollars",
     on: "Onchain vault",
-    href: "#anatomy",
-    body: "A share is created by depositing exactly what the recipe names and redeemed by taking exactly that back. The program reads no price: it checks backing itself, so there is no way to create an unbacked share.",
+    href: `/basket/${HERO}`,
+    body: "Deposit exactly what the recipe names, or escrow dollars and let fillers race to deliver the stocks within ninety seconds. Either way the vault receives the real stocks; no unbacked share can exist.",
   },
   {
     n: "3",
-    title: "Or buy with dollars",
-    on: "Dollar order",
-    href: `/basket/${HERO}`,
-    body: "Escrow dollars for a number of shares that falls over ninety seconds. The first filler to deliver the stocks gets paid. The auction caps the price, any filler can compete, and the vault still receives the real stocks.",
-  },
-  {
-    n: "4",
-    title: "Sell for dollars",
-    on: "Sell order",
-    href: "/method#sell",
-    body: "The way in, reversed: escrow shares for dollars that fall over ninety seconds to your floor, and a filler pays and takes them. No protocol fee on a sale, and redeeming for the stocks stays free.",
-  },
-  {
-    n: "5",
     title: "Then every month",
     on: "Monthly plan",
     href: "#plans",
-    body: "Set a monthly amount and the plan places that dollar order on schedule, as the same auction stretched to 30 minutes so any filler has time. Anyone can run it when due. The habit behind India's SIPs, onchain, for Indians abroad first.",
+    body: "Set a monthly amount and the plan places that order on schedule, inside limits you sign once. The habit behind India's SIPs, onchain, for Indians abroad first.",
   },
   {
-    n: "6",
-    title: "Open a launch market",
-    on: "Beside the share",
-    href: "#launch",
-    body: "A basket's creator can open a Meteora bonding curve beside it: a separate launch token, priced from the basket's value. It is a bet on the basket, not a share, and it cannot be redeemed for the stocks.",
-  },
-  {
-    n: "7",
-    title: "Bet on it",
-    on: "Beside the share",
-    href: "#predict",
-    body: "Ask whether a listed basket beats SPY this week. It settles from a published number at two week-ending closes, with every input listed so anyone can recompute it. Panta runs the market on Solana, in its sandbox today.",
+    n: "4",
+    title: "Redeem or sell, any time",
+    on: "Two ways out",
+    href: "/method#sell",
+    body: "Hand a share back for the stocks themselves, free, or sell it for dollars by the same auction reversed. No protocol fee to hold or to leave.",
   },
 ];
 
 /** Rebuilt at most every five minutes, so the hero sheaf starts from a recent read. */
 export const revalidate = 300;
+
+/** Everything that used to stand on this page, one click away on the page it belongs to. */
+const MORE = [
+  { href: "/method", title: "How it works", body: "Every step beside its transaction, what is inside a share, and who holds which key.", cta: "Read it" },
+  { href: "/business", title: "How Sheaf earns", body: "The 0.10% fee, where $1,000 goes, break-even and the comparison with other basket products.", cta: "See the numbers" },
+  { href: "/live", title: "Live market", body: "Tokenized-stock trades on Solana mainnet, premiums, dividends and the exchange clock.", cta: "Watch it" },
+  { href: "/explore", title: "Baskets and launches", body: "Every basket, and the launch markets that trade beside them on Meteora.", cta: "Explore" },
+  { href: "/chains", title: "Other chains", body: "The same vault on Robinhood Chain, Tempo, Ethereum, Arbitrum and Base.", cta: "Open the chains" },
+];
 
 /** The hero basket (one account read, given 4 s) and the last market snapshot (1.5 s), so the hero's first paint is the real sheaf. */
 async function heroData(): Promise<{ basket: BasketJson | null; snapshot: MarketSnapshot | null }> {
@@ -166,20 +147,6 @@ export default async function Home() {
               </Link>
             </li>
           ))}
-          {/* The eighth cell of the grid: where every step above can be checked. */}
-          <li>
-            <Link
-              href="/ledger"
-              className="lift flex h-full flex-col justify-between rounded-[var(--radius-panel)] border border-dashed border-line-strong bg-page p-7 hover:border-ink-3"
-            >
-              <span className="text-xs text-ink-3">Every step, on the chain</span>
-              <span className="mt-3 block text-sm leading-relaxed text-ink-2">
-                The first six have happened on devnet. The ledger lists every creation, order, fill, plan run and sale, each linked to
-                its transaction.
-              </span>
-              <span className="mt-4 text-sm text-bind">Open the ledger →</span>
-            </Link>
-          </li>
         </ol>
         <p className="mt-8 max-w-[62ch] text-sm leading-relaxed text-ink-3">
           <Link
@@ -188,8 +155,8 @@ export default async function Home() {
           >
             How it works
           </Link>{" "}
-          walks through each step beside the transaction that proves it, and every
-          creation and redemption the program has settled is on{" "}
+          walks through all seven steps, including the launch market and the weekly question that sit beside a basket,
+          each beside the transaction that proves it. Every creation, order, fill, plan run and sale is on{" "}
           <Link
             href="/ledger"
             className="text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink"
@@ -198,11 +165,6 @@ export default async function Home() {
           </Link>
           .
         </p>
-      </section>
-
-      {/* --------------------------------------------------------- anatomy */}
-      <section id="anatomy" className="scroll-mt-24 border-t border-line py-20">
-        <Anatomy />
       </section>
 
       {/* -------------------------------------------------------- baskets */}
@@ -215,125 +177,28 @@ export default async function Home() {
         <HomePlans />
       </section>
 
-      {/* --------------------------------------------------------- revenue */}
-      <section id="revenue" className="scroll-mt-24 border-t border-line py-20">
-        <Revenue />
-        <p className="mt-10">
-          <Link href="/business" className="text-sm text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
-            How Sheaf makes money →
-          </Link>
-        </p>
-      </section>
-
-      {/* ------------------------------------------------------------ keys */}
-      <section id="keys" className="scroll-mt-24 border-t border-line py-20">
-        <Keys />
-      </section>
-
       {/* ------------------------------------------------ beside the share */}
-      <section id="beside" className="scroll-mt-24 border-t border-line pt-20">
-        <div className="max-w-[56ch]">
-          <h2 className="display text-title text-ink">Beside the share.</h2>
-          <p className="mt-5 text-base leading-relaxed text-ink-2">
-            Two markets can sit next to a basket without touching its vault: a launch token to
-            bet on it, and a weekly question against SPY. Neither is a share, and neither can be
-            redeemed for the stocks.
-          </p>
-        </div>
+      <section id="beside" className="scroll-mt-24 border-t border-line py-20">
+        <HomeBeside />
       </section>
 
-      <section id="launch" className="scroll-mt-24 py-20">
-        <LaunchMarket />
-      </section>
-
-      <section id="predict" className="scroll-mt-24 border-t border-line py-20">
-        <HomePredict />
-      </section>
-
-      {/* ---------------------------------------------------------- chains */}
-      <section id="chains" className="scroll-mt-24 border-t border-line py-20">
-        <HomeChains />
-      </section>
-
-      {/* ------------------------------------------------ the evidence group */}
-      <section id="proof" className="scroll-mt-24 border-t border-line pt-20" aria-labelledby="evidence">
-        <div className="max-w-[52ch]">
-          <h2 id="evidence" className="display text-title text-ink">
-            Why the numbers hold up.
-          </h2>
-          <p className="mt-5 text-base leading-relaxed text-ink-2">
-            What a basket is made of, read live: the tokens trading on Solana right now, the gap
-            between a token and its listed share, dividends that arrive as a multiplier, and a
-            market that never closes.
-          </p>
-        </div>
-
-        <div className="mt-12 border-y border-line py-px">
-          <HomeStats />
-        </div>
-
-        <div className="py-16">
-          <LiveTape />
-          <p className="mt-6">
-            <Link href="/live" className="text-sm text-ink underline decoration-line-strong underline-offset-4 hover:text-bind">
-              Open the full tape →
-            </Link>
-          </p>
-        </div>
-
-        {/* premiums */}
-        <div className="border-t border-line py-16">
-          <div className="max-w-[46ch]">
-            <h3 className="display text-2xl text-ink sm:text-3xl">Two prices for one company.</h3>
-            <p className="mt-4 text-base leading-relaxed text-ink-2">
-              Every token here has the price it trades at on Solana and the price of the listed share
-              behind it. The gap between them is the premium. A basket cannot wish it away, so Sheaf
-              shows it on every component and values a share both ways.
-            </p>
-          </div>
-          <div className="mt-10">
-            <Premiums />
-          </div>
-        </div>
-
-        {/* dividends */}
-        <div className="border-t border-line py-16">
-          <div className="max-w-[46ch]">
-            <h3 className="display text-2xl text-ink sm:text-3xl">A dividend is a number going up.</h3>
-            <p className="mt-4 text-base leading-relaxed text-ink-2">
-              Tokenized stocks pay dividends by raising a multiplier on the mint, not by sending
-              anything. A recipe written in displayed balances would come up short by exactly the
-              dividends already paid. Sheaf stores recipes in raw units and applies the live
-              multiplier when it prices a share, so a share redeems for the same units before and after
-              a dividend, and is worth more after.
-            </p>
-          </div>
-          <div className="mt-10">
-            <Dividends />
-          </div>
-        </div>
-
-        {/* two clocks */}
-        <div className="grid gap-10 border-t border-line py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
-          <div className="max-w-[38ch] self-center">
-            <h3 className="display text-2xl text-ink sm:text-3xl">
-              The exchange keeps hours. Your basket does not.
-            </h3>
-            <p className="mt-4 text-base leading-relaxed text-ink-2">
-              A tokenized share trades every minute of every day, including the
-              hours when the listing behind it is dark. That is where the gap between
-              token and share opens up, and it is why Sheaf shows you both prices
-              rather than one.
-            </p>
-            <p className="mt-4 text-sm leading-relaxed text-ink-3">
-              The exchange calendar here is the one Pyth publishes for each listing,
-              holidays and shortened sessions included.
-            </p>
-          </div>
-          <div className="self-center">
-            <MarketClock />
-          </div>
-        </div>
+      {/* -------------------------------------------------------- go further */}
+      <section id="more" className="scroll-mt-24 border-t border-line py-20">
+        <h2 className="display text-title text-ink">Go further.</h2>
+        <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {MORE.map((m) => (
+            <li key={m.href}>
+              <Link
+                href={m.href}
+                className="lift flex h-full flex-col rounded-[var(--radius-panel)] border border-line bg-surface p-6 hover:border-line-strong"
+              >
+                <span className="display text-lg text-ink">{m.title}</span>
+                <span className="mt-2 block text-sm leading-relaxed text-ink-2">{m.body}</span>
+                <span className="mt-auto pt-4 text-sm text-bind">{m.cta} →</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <HomeNav />

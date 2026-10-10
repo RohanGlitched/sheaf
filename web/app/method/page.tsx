@@ -17,6 +17,8 @@ import { stockForWriteMint } from "@/lib/mirror";
 import { slotColor } from "@/lib/palette";
 import { quantity, shortAddress } from "@/lib/format";
 import { BasketLaunch } from "@/components/launch-market";
+import { Anatomy } from "@/components/home-anatomy";
+import { Keys } from "@/components/home-ledgers";
 import preset from "@/lib/meteora-preset.json";
 
 export const metadata: Metadata = {
@@ -837,6 +839,15 @@ export default async function MethodPage() {
         </Stage>
 
       </div>
+
+      {/* What is inside a share, read live, and who holds which key: moved here from the home page. */}
+      <section id="inside" className="scroll-mt-24 border-t border-line py-16">
+        <Anatomy />
+      </section>
+
+      <section id="keys" className="scroll-mt-24 border-t border-line py-16">
+        <Keys />
+      </section>
 
       <section className="border-t border-line py-16">
         <h2 className="display text-title max-w-[24ch] text-ink">

@@ -101,7 +101,7 @@ export function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-5">
-          <div className="hidden md:block">
+          <div className="hidden xl:block">
             <MarketClock compact />
           </div>
           {/* The chain pages run on EVM testnets, so they get an EVM wallet; everywhere else is Solana. */}

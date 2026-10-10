@@ -11,14 +11,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  */
 const CHAPTERS = [
   { id: "how", label: "How it works" },
-  { id: "anatomy", label: "Inside a share" },
   { id: "baskets", label: "Baskets" },
   { id: "plans", label: "Monthly plans" },
-  { id: "revenue", label: "How Sheaf earns" },
-  { id: "keys", label: "Who holds the keys" },
   { id: "beside", label: "Beside the share" },
-  { id: "chains", label: "Other chains" },
-  { id: "proof", label: "Why the numbers hold up" },
+  { id: "more", label: "Go further" },
 ] as const;
 
 /** A chapter counts as the one being read once its top passes this share of the screen. */

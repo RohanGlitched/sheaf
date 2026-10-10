@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { HomeStats } from "@/components/home-mosaic";
+import { MarketClock } from "@/components/market-clock";
+import { Dividends, Premiums } from "@/components/home-market-facts";
 import Link from "next/link";
 import { LiveTape } from "@/components/live-tape";
 
@@ -98,6 +101,80 @@ export default function LivePage() {
           </Link>
           .
         </p>
+      </section>
+
+      {/* ------------------------------------------------ the evidence group */}
+      <section id="numbers" className="mt-20 scroll-mt-24 border-t border-line pt-12" aria-labelledby="evidence">
+        <div className="max-w-[52ch]">
+          <h2 id="evidence" className="display text-title text-ink">
+            Why the numbers hold up.
+          </h2>
+          <p className="mt-5 text-base leading-relaxed text-ink-2">
+            What a basket is made of, read live: the tokens trading on Solana right now, the gap
+            between a token and its listed share, dividends that arrive as a multiplier, and a
+            market that never closes.
+          </p>
+        </div>
+
+        <div className="mt-12 border-y border-line py-px">
+          <HomeStats />
+        </div>
+
+        <div className="pb-4" />
+
+        {/* premiums */}
+        <div className="border-t border-line py-16">
+          <div className="max-w-[46ch]">
+            <h3 className="display text-2xl text-ink sm:text-3xl">Two prices for one company.</h3>
+            <p className="mt-4 text-base leading-relaxed text-ink-2">
+              Every token here has the price it trades at on Solana and the price of the listed share
+              behind it. The gap between them is the premium. A basket cannot wish it away, so Sheaf
+              shows it on every component and values a share both ways.
+            </p>
+          </div>
+          <div className="mt-10">
+            <Premiums />
+          </div>
+        </div>
+
+        {/* dividends */}
+        <div className="border-t border-line py-16">
+          <div className="max-w-[46ch]">
+            <h3 className="display text-2xl text-ink sm:text-3xl">A dividend is a number going up.</h3>
+            <p className="mt-4 text-base leading-relaxed text-ink-2">
+              Tokenized stocks pay dividends by raising a multiplier on the mint, not by sending
+              anything. A recipe written in displayed balances would come up short by exactly the
+              dividends already paid. Sheaf stores recipes in raw units and applies the live
+              multiplier when it prices a share, so a share redeems for the same units before and after
+              a dividend, and is worth more after.
+            </p>
+          </div>
+          <div className="mt-10">
+            <Dividends />
+          </div>
+        </div>
+
+        {/* two clocks */}
+        <div className="grid gap-10 border-t border-line py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
+          <div className="max-w-[38ch] self-center">
+            <h3 className="display text-2xl text-ink sm:text-3xl">
+              The exchange keeps hours. Your basket does not.
+            </h3>
+            <p className="mt-4 text-base leading-relaxed text-ink-2">
+              A tokenized share trades every minute of every day, including the
+              hours when the listing behind it is dark. That is where the gap between
+              token and share opens up, and it is why Sheaf shows you both prices
+              rather than one.
+            </p>
+            <p className="mt-4 text-sm leading-relaxed text-ink-3">
+              The exchange calendar here is the one Pyth publishes for each listing,
+              holidays and shortened sessions included.
+            </p>
+          </div>
+          <div className="self-center">
+            <MarketClock />
+          </div>
+        </div>
       </section>
     </div>
   );
